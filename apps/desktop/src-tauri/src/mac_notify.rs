@@ -46,7 +46,9 @@ pub fn show(title: &str, body: &str) {
     let id = NSString::from_str(&format!("rynuvo-{}", crate::core::now_ms()));
     let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&id, &content, None);
     let done = RcBlock::new(|err: *mut NSError| {
-        if !err.is_null() {
+        if err.is_null() {
+            tracing::info!("notification queued");
+        } else {
             tracing::warn!("notification was not delivered: {}", describe(err));
         }
     });
