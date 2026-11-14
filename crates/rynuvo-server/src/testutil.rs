@@ -79,6 +79,19 @@ impl TestApp {
         r.json().await.unwrap()
     }
 
+    pub async fn create_channel(&self, token: &str, kind: &str, name: &str) -> rynuvo_proto::Channel {
+        let r = self
+            .client
+            .post(self.url("/api/v1/channels"))
+            .bearer_auth(token)
+            .json(&serde_json::json!({"kind": kind, "name": name}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200, "create channel {name}");
+        r.json().await.unwrap()
+    }
+
     pub fn url(&self, path: &str) -> String {
         format!("http://{}{}", self.addr, path)
     }

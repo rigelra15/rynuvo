@@ -16,4 +16,5 @@ pub fn api() -> Router<AppState> {
         .route("/health", get(health))
         .merge(identity::router())
         .merge(admin::router())
+        .merge(channels::router())
 }
