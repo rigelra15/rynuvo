@@ -1,4 +1,8 @@
 <script lang="ts">
+  import ServerRail from './components/ServerRail.svelte'
+  import HomeSidebar from './components/HomeSidebar.svelte'
+  import HomeView from './components/HomeView.svelte'
+  import Splash from './components/Splash.svelte'
   import { onMount } from 'svelte'
   import ChannelMenu from './components/ChannelMenu.svelte'
   import ChannelView from './components/ChannelView.svelte'
@@ -71,14 +75,20 @@
   }
 </script>
 
+{#if !store.ready}<Splash />{/if}
+
 {#if store.phase === 'boot'}
-  <div class="boot">◆</div>
+  <!-- the splash covers boot -->
 {:else if store.phase === 'onboarding'}
   <Onboarding />
 {:else if store.me}
   <div class="app">
     <ConnBanner />
     <div class="shell">
+      <ServerRail />
+      {#if store.view === 'home'}
+        <HomeSidebar me={store.me} onSettings={() => (settingsOpen = true)} />
+      {:else}
       <Sidebar
         channels={store.sortedChannels()}
         selectedId={store.selectedId}
@@ -93,8 +103,11 @@
         onChannelMenu={(c, e) => (menu = { c, x: e.clientX, y: e.clientY })}
         onSettings={() => (settingsOpen = true)}
       />
+      {/if}
       <main class="main">
-        {#if store.selected}
+        {#if store.view === 'home'}
+          <HomeView onMemberMenu={(userId, e) => (memberMenu = { userId, x: e.clientX, y: e.clientY })} />
+        {:else if store.selected}
           {#key store.selected.id}
             <ChannelView channel={store.selected} onMemberMenu={(userId, e) => (memberMenu = { userId, x: e.clientX, y: e.clientY })} />
           {/key}
@@ -105,7 +118,7 @@
     </div>
   </div>
 {:else}
-  <div class="app"><ConnBanner /><div class="boot">◆</div></div>
+  <div class="app"><ConnBanner /></div>
 {/if}
 
 {#if creating}
@@ -141,8 +154,7 @@
 
 <style>
   .app { height: 100%; display: flex; flex-direction: column; }
-  .shell { flex: 1; display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
+  .shell { flex: 1; display: grid; grid-template-columns: 64px 240px 1fr; min-height: 0; }
   .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
   .none { flex: 1; display: grid; place-items: center; }
-  .boot { height: 100%; display: grid; place-items: center; color: var(--accent); font-size: 40px; }
 </style>

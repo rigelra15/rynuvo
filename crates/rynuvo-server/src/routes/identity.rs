@@ -1,5 +1,5 @@
 use axum::{Json, Router, extract::State, routing::{get, post}};
-use rynuvo_proto::{ClaimTransferReq, JoinReq, JoinResp, RenameReq, User, WsServerMsg};
+use rynuvo_proto::{AVATAR_COLORS, AVATAR_ICONS, ClaimTransferReq, JoinReq, JoinResp, ProfileReq, User, WsServerMsg};
 use sqlx::SqlitePool;
 
 use crate::{
@@ -13,7 +13,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/join", post(join))
         .route("/claim-transfer", post(claim_transfer))
-        .route("/me", get(me).patch(rename_me))
+        .route("/me", get(me).patch(update_me))
 }
 
 pub async fn get_setting(db: &SqlitePool, key: &str) -> AppResult<Option<String>> {
@@ -113,7 +113,7 @@ async fn join(State(st): State<AppState>, Json(req): Json<JoinReq>) -> AppResult
     tx.commit().await?;
 
     let token = issue_device(&st.db, id, &req.device_name).await?;
-    let user = User { id, nickname, is_admin };
+    let user = User { id, nickname, is_admin, avatar_icon: None, avatar_color: None };
     st.hub.broadcast(WsServerMsg::UserUpserted(user.clone()));
     Ok(Json(JoinResp { token, user }))
 }
@@ -122,16 +122,39 @@ async fn me(au: AuthUser) -> Json<User> {
     Json(au.user)
 }
 
-async fn rename_me(State(st): State<AppState>, au: AuthUser, Json(req): Json<RenameReq>) -> AppResult<Json<User>> {
-    let (nickname, key) = auth::nickname_key(&req.nickname)?;
-    sqlx::query("UPDATE users SET nickname = ?, nickname_key = ? WHERE id = ?")
-        .bind(&nickname)
-        .bind(&key)
-        .bind(au.user.id)
-        .execute(&st.db)
-        .await
-        .map_err(|e| if is_unique_violation(&e) { nickname_taken() } else { AppError::from(e) })?;
-    let user = User { nickname, ..au.user };
+async fn update_me(State(st): State<AppState>, au: AuthUser, Json(req): Json<ProfileReq>) -> AppResult<Json<User>> {
+    let (nickname, key) = match &req.nickname {
+        Some(n) => {
+            let (nickname, k) = auth::nickname_key(n)?;
+            (Some(nickname), Some(k))
+        }
+        None => (None, None),
+    };
+    let pick = |v: Option<Option<String>>, allowed: &[&str], what: &str| match v {
+        Some(Some(s)) if !allowed.contains(&s.as_str()) => Err(AppError::BadRequest(format!("Unknown avatar {what}"))),
+        v => Ok(v),
+    };
+    let icon = pick(req.avatar_icon, &AVATAR_ICONS, "icon")?;
+    let color = pick(req.avatar_color, &AVATAR_COLORS, "colour")?;
+    // Only the fields that were sent change, so two edits at once (or a rename on another device)
+    // never write back a stale copy of the others.
+    let row: (i64, String, bool, Option<String>, Option<String>) = sqlx::query_as(
+        "UPDATE users SET nickname = COALESCE(?1, nickname), nickname_key = COALESCE(?2, nickname_key), \
+         avatar_icon = CASE WHEN ?3 THEN ?4 ELSE avatar_icon END, avatar_color = CASE WHEN ?5 THEN ?6 ELSE avatar_color END \
+         WHERE id = ?7 RETURNING id, nickname, is_admin, avatar_icon, avatar_color",
+    )
+    .bind(&nickname)
+    .bind(&key)
+    .bind(icon.is_some())
+    .bind(icon.flatten())
+    .bind(color.is_some())
+    .bind(color.flatten())
+    .bind(au.user.id)
+    .fetch_one(&st.db)
+    .await
+    .map_err(|e| if is_unique_violation(&e) { nickname_taken() } else { AppError::from(e) })?;
+    let (id, nickname, is_admin, avatar_icon, avatar_color) = row;
+    let user = User { id, nickname, is_admin, avatar_icon, avatar_color };
     st.hub.broadcast(WsServerMsg::UserUpserted(user.clone()));
     Ok(Json(user))
 }
@@ -147,11 +170,11 @@ async fn claim_transfer(State(st): State<AppState>, Json(req): Json<ClaimTransfe
     .await?;
     let invalid = || AppError::Coded(axum::http::StatusCode::FORBIDDEN, "invalid_code", "Transfer code is wrong or expired".into());
     let user_id = user_id.ok_or_else(invalid)?;
-    let user: Option<(i64, String, bool)> = sqlx::query_as("SELECT id, nickname, is_admin FROM users WHERE id = ? AND removed_at IS NULL")
+    let user: Option<(i64, String, bool, Option<String>, Option<String>)> = sqlx::query_as("SELECT id, nickname, is_admin, avatar_icon, avatar_color FROM users WHERE id = ? AND removed_at IS NULL")
         .bind(user_id)
         .fetch_optional(&st.db)
         .await?;
-    let (id, nickname, is_admin) = user.ok_or_else(invalid)?;
+    let (id, nickname, is_admin, avatar_icon, avatar_color) = user.ok_or_else(invalid)?;
     let token = issue_device(&st.db, id, &req.device_name).await?;
-    Ok(Json(JoinResp { token, user: User { id, nickname, is_admin } }))
+    Ok(Json(JoinResp { token, user: User { id, nickname, is_admin, avatar_icon, avatar_color } }))
 }

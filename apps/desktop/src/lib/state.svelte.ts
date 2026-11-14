@@ -16,7 +16,13 @@ class Store {
   users = new SvelteMap<Id, User>()
   online = new SvelteSet<Id>()
   channels = $state<Channel[]>([])
+  /** The first `ready` of this sign-in has arrived (the channel list is real). */
+  gotReady = $state(false)
+  /** Boot took too long (server down): stop waiting and show the app with its reconnect bar. */
+  bootTimedOut = $state(false)
   selectedId = $state<Id | null>(null)
+  /** Which page the rail shows: the circle's channels, or Home (friends and activity). */
+  view = $state<'circle' | 'home'>('circle')
   messages = new SvelteMap<Id, Message[]>()
   hasMore = new SvelteMap<Id, boolean>()
   /** channel id -> why its history failed to load */
@@ -45,6 +51,16 @@ class Store {
   streamNotice = $state<string | null>(null)
   streamPreset = $state('1080p60')
 
+  /** The splash can go: onboarding is up, or the channel list and the open text channel's first page are in. */
+  get ready(): boolean {
+    if (this.phase === 'onboarding') return true
+    if (this.phase !== 'app') return false
+    if (this.bootTimedOut) return true
+    if (!this.gotReady) return false
+    const c = this.selected
+    return !c || c.kind !== 'text' || this.messages.has(c.id) || this.loadError.has(c.id)
+  }
+
   get selected(): Channel | null {
     return this.channels.find((c) => c.id === this.selectedId) ?? null
   }
@@ -56,6 +72,17 @@ class Store {
   }
 
   canManage = (c: Channel): boolean => !!this.me && (this.me.isAdmin || c.ownerId === this.me.id)
+
+  user(id: Id): User | undefined {
+    return this.users.get(id)
+  }
+
+  /** Save my avatar choice; everyone else hears it through `userUpserted`. */
+  async setAvatar(p: { avatarIcon?: string | null; avatarColor?: string | null }) {
+    const u = await api.setProfile(p)
+    this.me = u
+    this.users.set(u.id, u)
+  }
 
   nick(id: Id): string {
     return this.users.get(id)?.nickname ?? 'someone'
@@ -74,6 +101,7 @@ class Store {
 
   async boot() {
     void this.loadPrefs()
+    setTimeout(() => (this.bootTimedOut = true), 8000)
     try {
       const info = await api.bootstrap()
       if (!info) {
@@ -100,7 +128,9 @@ class Store {
     this.users.clear()
     this.online.clear()
     this.channels = []
+    this.gotReady = false
     this.selectedId = null
+    this.view = 'circle'
     this.messages.clear()
     this.hasMore.clear()
     this.loadError.clear()
@@ -325,6 +355,7 @@ class Store {
         this.online.clear()
         for (const id of m.d.online) this.online.add(id)
         this.channels = m.d.channels
+        this.gotReady = true
         this.alerts = m.d.alerts
         // drop caches of channels that disappeared while offline
         for (const id of [...this.messages.keys()]) if (!m.d.channels.some((c) => c.id === id)) this.messages.delete(id)

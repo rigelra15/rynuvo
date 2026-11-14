@@ -1,4 +1,9 @@
 <script lang="ts">
+  import Icon from './Icon.svelte'
+  import Avatar from './Avatar.svelte'
+  import { untrack } from 'svelte'
+  import { mentionsMe } from '../lib/mention'
+  import { avatarColor, nameColor } from '../lib/avatar'
   import { render } from '../lib/markdown'
   import { store } from '../lib/state.svelte'
   import { api, errText, mediaUrl } from '../lib/api'
@@ -13,21 +18,26 @@
   let error = $state<string | null>(null)
   let viewing = $state(false)
 
+  /** Same 400×300 fit as before; the bubble can still shrink it (max-width: 100%). */
   function fit(w: number, h: number) {
     const k = Math.min(1, 400 / w, 300 / h)
-    return `width:${Math.round(w * k)}px;height:${Math.round(h * k)}px`
+    return `width:${Math.round(w * k)}px;aspect-ratio:${w}/${h}`
   }
 
   const mine = $derived(store.me?.id === m.authorId)
   const canDelete = $derived(mine || (store.selected ? store.canManage(store.selected) : false))
-  const html = $derived(render(m.content))
+  const members = $derived([...store.users.values()])
+  const html = $derived(render(m.content, { users: members, me: store.me?.id }))
+  // Someone else @mentioned me (or @everyone): the bubble gets a gold edge.
+  const mentioned = $derived(!mine && !!store.me && mentionsMe(m.content, members, store.me.id))
 
-  function time(ms: number) {
-    const d = new Date(ms)
-    const today = new Date().toDateString() === d.toDateString()
-    const t = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-    return today ? t : `${d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })} ${t}`
-  }
+  // Just sent or received (not history): slides in.
+  const fresh = untrack(() => Date.now() - m.createdAt < 4000) // decided once, at mount
+  const author = $derived(store.user(m.authorId))
+  const whoColor = $derived(nameColor(avatarColor(author ?? { id: m.authorId })))
+
+  // The day is in the date chip above; the bubble shows the time only.
+  const time = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 
   function startEdit() {
     draft = m.content
@@ -61,59 +71,89 @@
   }
 </script>
 
-<div class="msg" class:head>
-  {#if head}
-    <div class="av">{store.nick(m.authorId).slice(0, 1).toUpperCase()}</div>
-    <div class="meta"><span class="who">{store.nick(m.authorId)}</span><span class="time">{time(m.createdAt)}</span></div>
+<div class="row" class:mine class:head class:fresh>
+  {#if !mine}
+    <div class="side">{#if head}<Avatar user={author} id={m.authorId} size={32} />{/if}</div>
   {/if}
-  <div class="body">
+  <div class="bubble" class:mentioned class:editing class:has-img={!!m.image}>
+    {#if head && !mine}<div class="who" style="color:{whoColor}">{store.nick(m.authorId)}</div>{/if}
     {#if editing}
       <!-- svelte-ignore a11y_autofocus -->
       <textarea bind:value={draft} onkeydown={editKey} rows="2" autofocus></textarea>
       <div class="hint">Enter to save · Esc to cancel</div>
     {:else}
-      {#if m.content}<div class="text selectable">{@html html}</div>{/if}
-      {#if m.editedAt}<span class="edited">(edited)</span>{/if}
       {#if m.image}
         <button class="img" style={fit(m.image.width, m.image.height)} onclick={() => (viewing = true)}>
           <img src={mediaUrl(m.image.id)} alt="" loading="lazy" />
         </button>
       {/if}
+      <div class="content">
+        {#if m.content}<div class="text selectable">{@html html}</div>{/if}
+        <span class="stamp">{#if m.editedAt}edited · {/if}{time(m.createdAt)}</span>
+      </div>
     {/if}
     {#if error}<div class="err">{error}</div>{/if}
   </div>
   {#if !editing && (mine || canDelete)}
     <div class="actions">
-      {#if mine}<button title="Edit" onclick={startEdit}>✎</button>{/if}
-      {#if canDelete}<button title="Delete" onclick={remove}>🗑</button>{/if}
+      {#if mine}<button title="Edit" onclick={startEdit}><Icon name="edit" size={15} /></button>{/if}
+      {#if canDelete}<button title="Delete" onclick={remove}><Icon name="trash" size={15} /></button>{/if}
     </div>
   {/if}
 </div>
 {#if viewing && m.image}<ImageViewer image={m.image} onclose={() => (viewing = false)} />{/if}
 
 <style>
-  .msg { position: relative; display: grid; grid-template-columns: 40px 1fr; column-gap: 12px; padding: 2px 18px; }
-  .msg.head { margin-top: 12px; }
-  .msg:hover { background: rgba(255, 255, 255, 0.025); }
-  .av { grid-row: span 2; width: 36px; height: 36px; border-radius: 50%; background: var(--elev); display: grid; place-items: center; font-weight: 700; color: var(--accent); }
-  .meta { display: flex; gap: 8px; align-items: baseline; }
-  .who { font-weight: 600; color: #fff; }
-  .time { font-size: 11px; color: var(--faint); }
-  .body { grid-column: 2; min-width: 0; }
-  .text { word-wrap: break-word; overflow-wrap: anywhere; }
+  .row { display: flex; align-items: flex-end; gap: 8px; padding: 1px 18px; }
+  .row.head { margin-top: 10px; align-items: flex-start; }
+  .row.mine { flex-direction: row-reverse; }
+  .side { width: 32px; flex-shrink: 0; }
+  .fresh { animation: msg-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+  @keyframes msg-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+  .fresh.mine { transform-origin: bottom right; }
+  .fresh:not(.mine) { transform-origin: bottom left; }
+  @media (prefers-reduced-motion: reduce) { .fresh { animation: none; } }
+
+  .bubble {
+    position: relative; min-width: 0; max-width: 70%; padding: 6px 10px 5px;
+    background: var(--elev); color: var(--text); border-radius: 14px;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+  }
+  .head:not(.mine) .bubble { border-top-left-radius: 4px; }
+  .mine .bubble { background: var(--bubble-mine); color: #fff; }
+  .mine.head .bubble { border-top-right-radius: 4px; }
+  .bubble.has-img { padding-top: 4px; }
+  .bubble.editing { width: min(70%, 420px); max-width: none; }
+
+  .bubble.mentioned { background: #3a3424; box-shadow: inset 3px 0 0 #f0b232, 0 1px 1px rgba(0, 0, 0, 0.18); }
+  .text :global(.mention) { padding: 0 3px; border-radius: 4px; font-weight: 600; background: rgba(139, 124, 246, 0.24); color: #d9d3ff; }
+  .text :global(.mention.me) { background: rgba(240, 178, 50, 0.22); color: #ffd98a; }
+  .mine .text :global(.mention), .mine .text :global(.mention.me) { background: rgba(255, 255, 255, 0.2); color: #fff; }
+  .who { font-size: 13px; font-weight: 600; margin-bottom: 1px; }
+
+  .content { display: flex; flex-wrap: wrap; align-items: flex-end; column-gap: 10px; }
+  .text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; word-break: break-word; line-height: 1.4; }
+  .stamp { margin-left: auto; font-size: 10.5px; line-height: 1; padding-bottom: 1px; white-space: nowrap; color: var(--muted); }
+  .mine .stamp { color: rgba(255, 255, 255, 0.86); }
+
   .text :global(p) { margin: 0; }
-  .text :global(code) { font-family: var(--mono); background: var(--panel-2); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
-  .text :global(pre) { background: var(--panel-2); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 4px 0; }
+  .text :global(code) { font-family: var(--mono); background: rgba(0, 0, 0, 0.25); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
+  .text :global(pre) { background: rgba(0, 0, 0, 0.28); padding: 8px 10px; border-radius: 8px; overflow-x: auto; margin: 4px 0; max-width: 100%; }
   .text :global(pre code) { background: none; padding: 0; }
-  .text :global(a) { color: #a99cf9; }
-  .img { display: block; margin-top: 4px; padding: 0; border-radius: 8px; overflow: hidden; background: var(--elev); cursor: zoom-in; }
+  .text :global(a) { color: #b4a9ff; }
+  .mine .text :global(a) { color: #fff; text-decoration: underline; }
+
+  .img { display: block; max-width: 100%; margin: 0 -6px 4px; padding: 0; border-radius: 10px; overflow: hidden; background: var(--panel-2); cursor: zoom-in; }
   .img img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .edited { font-size: 11px; color: var(--faint); }
+
   textarea { width: 100%; resize: none; }
   .hint { font-size: 11px; color: var(--faint); }
-  .err { color: var(--danger); font-size: 12px; }
-  .actions { position: absolute; right: 16px; top: -10px; display: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
-  .msg:hover .actions { display: flex; }
-  .actions button { padding: 3px 8px; color: var(--muted); }
+  .mine .hint { color: rgba(255, 255, 255, 0.86); }
+  .err { color: #fca5a5; font-size: 12px; }
+  .mine .err { color: #fff; font-weight: 600; }
+
+  .actions { display: flex; align-self: center; visibility: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+  .row:hover .actions { visibility: visible; }
+  .actions button { padding: 4px 6px; color: var(--muted); display: grid; place-items: center; }
   .actions button:hover { color: var(--text); background: var(--elev); }
 </style>

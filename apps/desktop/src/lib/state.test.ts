@@ -71,4 +71,35 @@ describe('voice ownership', () => {
     store.apply({ kind: 'server', data: { t: 'voiceMemberLeft', d: { userId: 1, channelId: 5 } } } as never)
     expect(store.myVoice.channelId).toBe(5)
   })
+
+  test('ready_after_channels_and_first_page', async () => {
+    store.phase = 'boot'
+    expect(store.ready).toBe(false)
+    store.phase = 'onboarding'
+    expect(store.ready).toBe(true)
+    store.phase = 'app'
+    expect(store.ready).toBe(false) // no channel list yet
+    let resolve!: (v: Message[]) => void
+    messages.mockReturnValueOnce(new Promise((r) => (resolve = r)))
+    store.apply(ready)
+    expect(store.ready).toBe(false) // channels in, selected channel's messages not yet
+    resolve([msg(1)])
+    await flush()
+    expect(store.ready).toBe(true)
+  })
+
+  test('ready when the first page fails, so the error shows instead of the splash', async () => {
+    store.phase = 'app'
+    messages.mockRejectedValueOnce('offline')
+    store.apply(ready)
+    await flush()
+    expect(store.ready).toBe(true)
+  })
+
+  test('ready after the boot timeout even with no connection', () => {
+    store.phase = 'app'
+    expect(store.ready).toBe(false)
+    store.bootTimedOut = true
+    expect(store.ready).toBe(true)
+  })
 })

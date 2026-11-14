@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { backdrop, pop } from '../lib/motion'
   import { api, errText, mediaUrl } from '../lib/api'
   import type { ImageRef } from '../lib/types'
 
@@ -17,8 +18,8 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && !e.defaultPrevented && onclose()} />
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="overlay" onclick={onclose}>
-  <img src={mediaUrl(image.id)} alt="" onclick={(e) => e.stopPropagation()} />
+<div class="overlay" transition:backdrop|global onclick={onclose}>
+  <img transition:pop|global src={mediaUrl(image.id)} alt="" onclick={(e) => e.stopPropagation()} />
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="bar" onclick={(e) => e.stopPropagation()}>
     <span>{image.width}×{image.height}</span>

@@ -114,9 +114,16 @@ impl Core {
     }
 }
 
+/// The server to resume a saved sign-in on: only the one this app talks to. A sign-in saved for any
+/// other server (an old address, a local test server) is ignored, so the user signs in again.
+fn boot_server(saved: Option<&str>, fixed: &str) -> Option<String> {
+    let norm = |s: &str| s.trim_end_matches('/').to_string();
+    saved.map(norm).filter(|s| *s == norm(fixed))
+}
+
 #[tauri::command]
 pub async fn bootstrap(app: AppHandle, core: State<'_, Core>) -> CmdResult<Option<BootInfo>> {
-    let Some(server) = core.load().server else { return Ok(None) };
+    let Some(server) = boot_server(core.load().server.as_deref(), &server()) else { return Ok(None) };
     let Some(token) = core.store.get(&server) else { return Ok(None) };
     let api = Api::new(&server, Some(token))?;
     let me = match api.me().await {
@@ -169,6 +176,11 @@ pub fn logout(core: State<'_, Core>) {
 #[tauri::command]
 pub async fn rename_me(core: State<'_, Core>, nickname: String) -> CmdResult<User> {
     core.api()?.rename_me(&nickname).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn set_profile(core: State<'_, Core>, profile: rynuvo_proto::ProfileReq) -> CmdResult<User> {
+    core.api()?.update_me(&profile).await.map_err(err)
 }
 
 #[tauri::command]
@@ -249,4 +261,18 @@ pub async fn admin_reports(core: State<'_, Core>) -> CmdResult<serde_json::Value
 pub async fn admin_report_body(core: State<'_, Core>, id: i64) -> CmdResult<String> {
     let v = core.api()?.report_body(id).await.map_err(err)?;
     Ok(v["body"].as_str().unwrap_or_default().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::boot_server;
+
+    #[test]
+    fn a_saved_server_other_than_the_apps_own_is_ignored() {
+        let fixed = "https://rynuvo.pokyvl.my.id";
+        assert_eq!(boot_server(Some("http://127.0.0.1:8110"), fixed), None, "old test server");
+        assert_eq!(boot_server(Some("https://rynuvo.pokyvl.my.id"), fixed).as_deref(), Some(fixed));
+        assert_eq!(boot_server(Some("https://rynuvo.pokyvl.my.id/"), fixed).as_deref(), Some(fixed), "trailing slash");
+        assert_eq!(boot_server(None, fixed), None, "never signed in");
+    }
 }

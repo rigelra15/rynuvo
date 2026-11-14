@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { backdrop, pop } from '../lib/motion'
   import { errText } from '../lib/api'
 
   let {
@@ -29,8 +30,8 @@
 </script>
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onClose()} />
-<div class="overlay" role="presentation" onclick={(e) => e.target === e.currentTarget && onClose()}>
-  <form class="dlg" onsubmit={submit}>
+<div class="overlay" transition:backdrop|global role="presentation" onclick={(e) => e.target === e.currentTarget && onClose()}>
+  <form class="dlg" transition:pop|global onsubmit={submit}>
     <h2>{title}</h2>
     <!-- svelte-ignore a11y_autofocus -->
     <input bind:value={name} maxlength="40" autofocus required />
