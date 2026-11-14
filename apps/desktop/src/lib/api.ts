@@ -21,6 +21,8 @@ export const api = {
   claimTransfer: (code: string) => invoke<User>('claim_transfer', { code }),
   logout: () => invoke<void>('logout'),
   renameMe: (nickname: string) => invoke<User>('rename_me', { nickname }),
+  /** `undefined` leaves a field, `null` clears it. */
+  setProfile: (profile: { avatarIcon?: string | null; avatarColor?: string | null }) => invoke<User>('set_profile', { profile }),
   createChannel: (kind: ChannelKind, name: string) => invoke<Channel>('create_channel', { kind, name }),
   updateChannel: (id: Id, req: { name?: string; topic?: string | null; position?: number }) =>
     invoke<Channel>('update_channel', { id, req }),

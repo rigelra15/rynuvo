@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Avatar from './Avatar.svelte'
   import { store } from '../lib/state.svelte'
   import { membersOf } from '../lib/voice'
   import type { Channel, Id } from '../lib/types'
@@ -41,7 +42,7 @@
           oncontextmenu={(e) => { e.preventDefault(); onMenu(m.userId, e) }}
         >
           {#if streaming}<span class="badge">LIVE</span>{/if}
-          <span class="av">{store.nick(m.userId).slice(0, 1).toUpperCase()}</span>
+          <Avatar user={store.user(m.userId)} id={m.userId} size={watching !== null && joined ? 36 : 72} speaking={store.speaking.has(m.userId)} />
           <span class="n">
             {store.nick(m.userId)}
             {#if m.deafened}<Icon name="headphonesOff" size={14} />{:else if m.muted}<Icon name="micOff" size={14} />{/if}
@@ -88,9 +89,6 @@
   .badge { position: absolute; top: 8px; left: 8px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
   .grid.strip { flex: 0 0 auto; grid-template-columns: repeat(auto-fill, minmax(120px, 160px)); justify-content: center; }
   .grid.strip .tile { aspect-ratio: 16 / 9; }
-  .grid.strip .av { width: 36px; height: 36px; font-size: 16px; }
-  .av { width: 64px; height: 64px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 26px; font-weight: 700; }
-  .tile.talk .av { box-shadow: 0 0 0 3px var(--speaking); }
   .n { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--faint); }
   .n { color: var(--text); }
   .empty { flex: 1; display: grid; place-items: center; }

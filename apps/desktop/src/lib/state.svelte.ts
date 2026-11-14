@@ -57,6 +57,17 @@ class Store {
 
   canManage = (c: Channel): boolean => !!this.me && (this.me.isAdmin || c.ownerId === this.me.id)
 
+  user(id: Id): User | undefined {
+    return this.users.get(id)
+  }
+
+  /** Save my avatar choice; everyone else hears it through `userUpserted`. */
+  async setAvatar(p: { avatarIcon?: string | null; avatarColor?: string | null }) {
+    const u = await api.setProfile(p)
+    this.me = u
+    this.users.set(u.id, u)
+  }
+
   nick(id: Id): string {
     return this.users.get(id)?.nickname ?? 'someone'
   }

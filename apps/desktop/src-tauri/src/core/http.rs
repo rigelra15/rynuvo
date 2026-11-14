@@ -137,6 +137,9 @@ impl Api {
     pub async fn rename_me(&self, nickname: &str) -> ClientResult<User> {
         self.json(Method::PATCH, "/me", Some(&ProfileReq { nickname: Some(nickname.into()), ..Default::default() })).await
     }
+    pub async fn update_me(&self, p: &ProfileReq) -> ClientResult<User> {
+        self.json(Method::PATCH, "/me", Some(p)).await
+    }
     pub async fn channels(&self) -> ClientResult<Vec<Channel>> {
         self.json(Method::GET, "/channels", Self::NONE).await
     }

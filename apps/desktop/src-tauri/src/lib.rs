@@ -96,6 +96,7 @@ pub fn run() {
             commands::claim_transfer,
             commands::logout,
             commands::rename_me,
+            commands::set_profile,
             commands::create_channel,
             commands::update_channel,
             commands::delete_channel,

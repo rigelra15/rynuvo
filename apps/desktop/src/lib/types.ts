@@ -3,7 +3,7 @@ import type { VoiceMember } from './voice'
 import type { StreamInfo } from './stream'
 export type Id = number
 export type ChannelKind = 'text' | 'voice'
-export interface User { id: Id; nickname: string; isAdmin: boolean }
+export interface User { id: Id; nickname: string; isAdmin: boolean; avatarIcon?: string | null; avatarColor?: string | null }
 export interface Channel { id: Id; kind: ChannelKind; name: string; topic: string | null; ownerId: Id; position: number }
 export interface ImageRef { id: string; width: number; height: number; mime: string }
 export interface Message { id: Id; channelId: Id; authorId: Id; content: string; image: ImageRef | null; createdAt: number; editedAt: number | null }

@@ -1,6 +1,9 @@
 <script lang="ts">
   import Icon from './Icon.svelte'
   import { PRESETS, selfCheckLines } from '../lib/stream'
+  import { AVATAR_ICONS, PALETTE, avatarColor } from '../lib/avatar'
+  import { AVATAR_SHAPES } from '../lib/avatarIcons'
+  import Avatar from './Avatar.svelte'
   import { onMount } from 'svelte'
   import { api, describeNet, errText, type TransferCode } from '../lib/api'
   import { store } from '../lib/state.svelte'
@@ -34,6 +37,16 @@
       error = errText(err)
     } finally {
       checking = false
+    }
+  }
+
+  let avatarErr = $state<string | null>(null)
+  async function pick(p: { avatarIcon?: string | null; avatarColor?: string | null }) {
+    try {
+      await store.setAvatar(p)
+      avatarErr = null
+    } catch (err) {
+      avatarErr = errText(err)
     }
   }
 
@@ -125,6 +138,42 @@
         <VoiceSettings />
       {:else}
         <section>
+          <h3>Profile</h3>
+          <div class="profile">
+            <Avatar user={store.me} size={56} />
+            <div class="pick">
+              <div class="icons">
+                <button class="opt" class:sel={!store.me?.avatarIcon} title="Letter" onclick={() => pick({ avatarIcon: null })}>
+                  <span class="letter">{store.me?.nickname.slice(0, 1).toUpperCase()}</span>
+                </button>
+                {#each AVATAR_ICONS as name (name)}
+                  <button class="opt" class:sel={store.me?.avatarIcon === name} title={name} onclick={() => pick({ avatarIcon: name })}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      {#each AVATAR_SHAPES[name] as sh, i (i)}
+                        {#if 'd' in sh}<path d={sh.d} />{:else if 'c' in sh}<circle cx={sh.c[0]} cy={sh.c[1]} r={sh.c[2]} />{:else}<ellipse cx={sh.e[0]} cy={sh.e[1]} rx={sh.e[2]} ry={sh.e[3]} />{/if}
+                      {/each}
+                    </svg>
+                  </button>
+                {/each}
+              </div>
+              <div class="swatches">
+                {#each Object.entries(PALETTE) as [key, hex] (key)}
+                  <button
+                    class="sw"
+                    class:sel={store.me && avatarColor(store.me) === hex}
+                    style="background:{hex}"
+                    title={key}
+                    aria-label="{key} colour"
+                    onclick={() => pick({ avatarColor: key })}
+                  ></button>
+                {/each}
+              </div>
+            </div>
+          </div>
+          {#if avatarErr}<p class="err">{avatarErr}</p>{/if}
+        </section>
+
+        <section>
           <h3>Nickname</h3>
           <form class="row" onsubmit={rename}>
             <input bind:value={nickname} />
@@ -215,6 +264,16 @@
   .check li { display: flex; justify-content: space-between; gap: 12px; color: #86efac; }
   .check li.bad { color: var(--danger); }
   .cl { display: inline-flex; gap: 6px; align-items: center; }
+  .profile { display: flex; gap: 16px; align-items: flex-start; }
+  .pick { display: grid; gap: 10px; flex: 1; }
+  .icons { display: grid; grid-template-columns: repeat(9, 32px); gap: 6px; }
+  .opt { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); background: var(--elev-2); }
+  .opt:hover { color: var(--text); background: var(--elev); }
+  .opt.sel { color: #fff; box-shadow: inset 0 0 0 2px var(--accent); }
+  .letter { font-weight: 700; font-size: 14px; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sw { width: 24px; height: 24px; border-radius: 50%; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.12); }
+  .sw.sel { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px #fff; }
   .chk { display: flex; gap: 8px; align-items: center; font-size: 13px; }
   footer { display: flex; justify-content: space-between; align-items: center; padding-top: 14px; }
 </style>

@@ -179,6 +179,11 @@ pub async fn rename_me(core: State<'_, Core>, nickname: String) -> CmdResult<Use
 }
 
 #[tauri::command]
+pub async fn set_profile(core: State<'_, Core>, profile: rynuvo_proto::ProfileReq) -> CmdResult<User> {
+    core.api()?.update_me(&profile).await.map_err(err)
+}
+
+#[tauri::command]
 pub async fn create_channel(core: State<'_, Core>, kind: ChannelKind, name: String) -> CmdResult<Channel> {
     core.api()?.create_channel(kind, &name).await.map_err(err)
 }
