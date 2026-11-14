@@ -389,9 +389,10 @@ impl Worker {
         if self.mic_test {
             self.mixer.play_local(self.frame.to_vec());
         }
-        if self.open && !self.muted {
-            if let (Some(link), Some(enc)) = (&self.link, self.enc.as_mut()) {
-                link.send_audio(enc.encode(&self.frame));
+        if let Some(link) = &self.link {
+            match self.enc.as_mut() {
+                Some(enc) if self.open && !self.muted => link.send_audio(enc.encode(&self.frame)),
+                _ => link.skip_audio(),
             }
         }
         self.filled = 0;

@@ -1,5 +1,8 @@
 //! Per-speaker jitter buffer for 20 ms frames, keyed by the relay's per-listener sequence numbers.
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 use super::codec::Frame;
 
@@ -7,6 +10,24 @@ use super::codec::Frame;
 pub const CAPACITY: u32 = 50;
 /// Consecutive empty slots after which the speaker is considered to have stopped talking.
 pub const IDLE_AFTER: u32 = 15;
+
+/// A speaker's audio frame counter: one number per 20 ms of time, sent or not. Listeners play by
+/// these numbers, so a pause has to show up as a gap; otherwise the speech after it lands behind
+/// the listener's playhead and is dropped as late.
+#[derive(Default)]
+pub struct AudioClock(AtomicU32);
+
+impl AudioClock {
+    /// The number for a frame that is being sent now.
+    pub fn send(&self) -> u32 {
+        self.0.fetch_add(1, Ordering::Relaxed).wrapping_add(1)
+    }
+
+    /// A 20 ms frame passed with nothing sent (voice gate closed, muted).
+    pub fn skip(&self) {
+        self.0.fetch_add(1, Ordering::Relaxed);
+    }
+}
 
 #[derive(Debug)]
 pub enum Pop {
@@ -72,7 +93,9 @@ impl JitterBuffer {
         }
         self.missing += 1;
         if self.missing >= IDLE_AFTER {
+            // The talk spurt is over; the next one starts from whatever number it brings.
             self.playing = false;
+            self.next = None;
             return Pop::Idle;
         }
         match self.frames.get(&n.wrapping_add(1)) {
@@ -178,6 +201,49 @@ mod tests {
         j.push(1, vec![1]);
         assert_eq!(data(j.pop()), [3]);
         assert_eq!(j.len(), 0);
+    }
+
+    /// Real time, one 20 ms tick per step: the sender talks, pauses briefly (voice gate closed),
+    /// talks again; the listener pops one frame per tick. Every spoken frame must be played.
+    fn heard_after_pause(pause: usize) -> (usize, usize) {
+        let clock = AudioClock::default();
+        let mut j = JitterBuffer::new(3);
+        let talk = |n: usize| std::iter::repeat_n(true, n);
+        let ticks: Vec<bool> = talk(20).chain(std::iter::repeat_n(false, pause)).chain(talk(20)).chain(std::iter::repeat_n(false, 40)).collect();
+        let (mut sent, mut played) = (0, 0);
+        for speak in ticks {
+            if speak {
+                let n = clock.send();
+                j.push(n, vec![1]);
+                sent += 1;
+            } else {
+                clock.skip();
+            }
+            if matches!(j.pop(), Pop::Frame(Frame::Data(_))) {
+                played += 1;
+            }
+        }
+        (sent, played)
+    }
+
+    #[test]
+    fn speech_after_a_short_pause_is_not_dropped() {
+        for pause in [1, 5, 10, 14, 15, 30, 60] {
+            let (sent, played) = heard_after_pause(pause);
+            assert_eq!(played, sent, "pause of {pause} frames: played {played} of {sent}");
+        }
+    }
+
+    #[test]
+    fn a_new_talk_spurt_after_idle_plays_even_if_numbered_behind_the_playhead() {
+        // An older client numbers only the frames it sends, so after a pause its next frame is
+        // behind where this listener's playhead ran to while waiting.
+        let mut j = filled(&[1, 2, 3]);
+        while !matches!(j.pop(), Pop::Idle) {}
+        for s in 4..=6 {
+            j.push(s, vec![s as u8]);
+        }
+        assert_eq!(data(j.pop()), [4]);
     }
 
     #[test]

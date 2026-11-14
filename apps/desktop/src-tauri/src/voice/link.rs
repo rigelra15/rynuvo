@@ -59,7 +59,7 @@ struct Inner {
     session: u32,
     key: VoiceKey,
     seq: AtomicU32,
-    audio_seq: AtomicU32,
+    audio_seq: super::jitter::AudioClock,
     /// 0 = UDP, 1 = WebSocket
     path: AtomicU8,
     udp: Mutex<Option<(Arc<UdpSocket>, SocketAddr)>>,
@@ -84,7 +84,7 @@ impl VoiceLink {
             session: cfg.session,
             key: cfg.key.clone(),
             seq: AtomicU32::new(0),
-            audio_seq: AtomicU32::new(0),
+            audio_seq: Default::default(),
             path: AtomicU8::new(0),
             udp: Mutex::new(None),
             ws,
@@ -106,11 +106,16 @@ impl VoiceLink {
     /// Send one Opus frame. The payload starts with this speaker's own audio frame counter, which
     /// listeners use for jitter ordering (the packet header seq is per listener and only feeds the nonce).
     pub fn send_audio(&self, opus: Vec<u8>) {
-        let n = self.inner.audio_seq.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+        let n = self.inner.audio_seq.send();
         let mut p = Vec::with_capacity(4 + opus.len());
         p.extend_from_slice(&n.to_be_bytes());
         p.extend_from_slice(&opus);
         self.inner.send(UP_AUDIO, &p, self.path());
+    }
+
+    /// A 20 ms frame passed without audio (voice gate closed or muted): keeps the frame counter on time.
+    pub fn skip_audio(&self) {
+        self.inner.audio_seq.skip();
     }
 
     /// Go Live data for `to` through the relay (the server forwards it only within a watch pair).
