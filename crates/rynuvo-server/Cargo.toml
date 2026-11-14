@@ -1,0 +1,26 @@
+[package]
+name = "rynuvo-server"
+edition.workspace = true
+version.workspace = true
+
+[features]
+test-util = ["dep:tempfile", "dep:reqwest"]
+
+[dependencies]
+rynuvo-proto = { path = "../rynuvo-proto" }
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+clap = { version = "4", features = ["derive"] }
+serde.workspace = true
+serde_json.workspace = true
+sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runtime-tokio", "migrate", "macros"] }
+tokio = { version = "1", features = ["full"] }
+toml = "0.9"
+tower-http = { version = "0.7", features = ["fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tempfile = { version = "3", optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
+
+[dev-dependencies]
+rynuvo-server = { path = ".", features = ["test-util"] }
