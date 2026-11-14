@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from './Icon.svelte'
   import { render } from '../lib/markdown'
   import { store } from '../lib/state.svelte'
   import { api, errText, mediaUrl } from '../lib/api'
@@ -84,8 +85,8 @@
   </div>
   {#if !editing && (mine || canDelete)}
     <div class="actions">
-      {#if mine}<button title="Edit" onclick={startEdit}>✎</button>{/if}
-      {#if canDelete}<button title="Delete" onclick={remove}>🗑</button>{/if}
+      {#if mine}<button title="Edit" onclick={startEdit}><Icon name="edit" size={15} /></button>{/if}
+      {#if canDelete}<button title="Delete" onclick={remove}><Icon name="trash" size={15} /></button>{/if}
     </div>
   {/if}
 </div>
@@ -114,6 +115,6 @@
   .err { color: var(--danger); font-size: 12px; }
   .actions { position: absolute; right: 16px; top: -10px; display: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
   .msg:hover .actions { display: flex; }
-  .actions button { padding: 3px 8px; color: var(--muted); }
+  .actions button { padding: 4px 6px; color: var(--muted); display: grid; place-items: center; }
   .actions button:hover { color: var(--text); background: var(--elev); }
 </style>

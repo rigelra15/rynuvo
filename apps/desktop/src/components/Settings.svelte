@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from './Icon.svelte'
   import { PRESETS, selfCheckLines } from '../lib/stream'
   import { onMount } from 'svelte'
   import { api, describeNet, errText, type TransferCode } from '../lib/api'
@@ -114,7 +115,7 @@
         <button class:on={tab === 'voice'} onclick={() => (tab = 'voice')}>Voice</button>
         {#if store.me?.isAdmin}<button class:on={tab === 'admin'} onclick={() => (tab = 'admin')}>Admin</button>{/if}
       </nav>
-      <button class="close" title="Close" onclick={onClose}>✕</button>
+      <button class="close" title="Close" onclick={onClose}><Icon name="close" size={18} /></button>
     </header>
 
     <div class="body">
@@ -161,7 +162,7 @@
           {#if check}
             <ul class="check">
               {#each check as l (l.label)}
-                <li class:bad={!l.ok}><span>{l.ok ? '✓' : '✕'} {l.label}</span><span class="note">{l.detail}</span></li>
+                <li class:bad={!l.ok}><span class="cl"><Icon name={l.ok ? 'check' : 'close'} size={14} /> {l.label}</span><span class="note">{l.detail}</span></li>
               {/each}
             </ul>
             {#if captureDenied}
@@ -199,7 +200,7 @@
   nav { display: flex; gap: 4px; }
   nav button { padding: 6px 12px; border-radius: 8px; color: var(--muted); }
   nav button.on { background: var(--elev); color: var(--text); }
-  .close { color: var(--muted); padding: 4px 8px; }
+  .close { color: var(--muted); padding: 4px; display: grid; place-items: center; border-radius: 6px; }
   .body { overflow-y: auto; padding: 6px 20px 18px; }
   section { padding: 14px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
   h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
@@ -213,6 +214,7 @@
   .check { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
   .check li { display: flex; justify-content: space-between; gap: 12px; color: #86efac; }
   .check li.bad { color: var(--danger); }
+  .cl { display: inline-flex; gap: 6px; align-items: center; }
   .chk { display: flex; gap: 8px; align-items: center; font-size: 13px; }
   footer { display: flex; justify-content: space-between; align-items: center; padding-top: 14px; }
 </style>

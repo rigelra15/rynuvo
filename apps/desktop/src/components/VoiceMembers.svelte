@@ -2,7 +2,7 @@
   import { store } from '../lib/state.svelte'
   import { membersOf } from '../lib/voice'
   import type { Id } from '../lib/types'
-  import VoiceIcon from './VoiceIcon.svelte'
+  import Icon from './Icon.svelte'
 
   let { channelId, onMenu }: { channelId: Id; onMenu: (userId: Id, e: MouseEvent) => void } = $props()
   const list = $derived(membersOf(store.voice, channelId))
@@ -14,8 +14,8 @@
       <li oncontextmenu={(e) => { e.preventDefault(); onMenu(m.userId, e) }}>
         <span class="av" class:talk={store.speaking.has(m.userId)}>{store.nick(m.userId).slice(0, 1).toUpperCase()}</span>
         <span class="n">{store.nick(m.userId)}</span>
-        {#if m.deafened}<span class="st" title="Deafened"><VoiceIcon name="headphonesOff" size={13} /></span>
-        {:else if m.muted}<span class="st" title="Muted"><VoiceIcon name="micOff" size={13} /></span>{/if}
+        {#if m.deafened}<span class="st" title="Deafened"><Icon name="headphonesOff" size={13} /></span>
+        {:else if m.muted}<span class="st" title="Muted"><Icon name="micOff" size={13} /></span>{/if}
       </li>
     {/each}
   </ul>

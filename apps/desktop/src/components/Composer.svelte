@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from './Icon.svelte'
   import { api, errText } from '../lib/api'
   import type { Channel } from '../lib/types'
 
@@ -93,7 +94,7 @@
     {#if preview}
       <div class="att">
         <img src={preview} alt="" />
-        {#if sending}<span class="busy">Compressing…</span>{:else}<button class="x" title="Cancel" onclick={clearAttach}>✕</button>{/if}
+        {#if sending}<span class="busy">Compressing…</span>{:else}<button class="x" title="Cancel" onclick={clearAttach}><Icon name="close" size={14} /></button>{/if}
       </div>
     {/if}
     <textarea
@@ -115,7 +116,7 @@
   .box.drag { outline: 2px dashed var(--accent); }
   .att { position: relative; display: inline-block; margin: 10px 12px 0; }
   .att img { max-height: 120px; max-width: 240px; border-radius: 6px; display: block; }
-  .x { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; border-radius: 50%; background: var(--danger); color: #fff; font-size: 11px; }
+  .x { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; border-radius: 50%; background: var(--danger); color: #fff; font-size: 11px; display: grid; place-items: center; }
   .busy { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.55); color: #fff; font-size: 12px; border-radius: 6px; }
   .count { position: absolute; right: 10px; bottom: 8px; font-size: 11px; color: var(--muted); }
   .count.over { color: var(--danger); }

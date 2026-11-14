@@ -3,6 +3,7 @@
   import ChannelMenu from './components/ChannelMenu.svelte'
   import ChannelView from './components/ChannelView.svelte'
   import ConnBanner from './components/ConnBanner.svelte'
+  import Icon from './components/Icon.svelte'
   import CreateChannelDialog from './components/CreateChannelDialog.svelte'
   import Onboarding from './components/Onboarding.svelte'
   import Settings from './components/Settings.svelte'
@@ -72,7 +73,7 @@
 </script>
 
 {#if store.phase === 'boot'}
-  <div class="boot">◆</div>
+  <div class="boot"><Icon name="logo" size={36} /></div>
 {:else if store.phase === 'onboarding'}
   <Onboarding />
 {:else if store.me}
@@ -105,7 +106,7 @@
     </div>
   </div>
 {:else}
-  <div class="app"><ConnBanner /><div class="boot">◆</div></div>
+  <div class="app"><ConnBanner /><div class="boot"><Icon name="logo" size={36} /></div></div>
 {/if}
 
 {#if creating}

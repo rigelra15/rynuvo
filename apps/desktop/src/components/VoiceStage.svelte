@@ -2,7 +2,7 @@
   import { store } from '../lib/state.svelte'
   import { membersOf } from '../lib/voice'
   import type { Channel, Id } from '../lib/types'
-  import VoiceIcon from './VoiceIcon.svelte'
+  import Icon from './Icon.svelte'
   import GoLiveDialog from './GoLiveDialog.svelte'
   import StreamView from './StreamView.svelte'
 
@@ -44,7 +44,7 @@
           <span class="av">{store.nick(m.userId).slice(0, 1).toUpperCase()}</span>
           <span class="n">
             {store.nick(m.userId)}
-            {#if m.deafened}<VoiceIcon name="headphonesOff" size={14} />{:else if m.muted}<VoiceIcon name="micOff" size={14} />{/if}
+            {#if m.deafened}<Icon name="headphonesOff" size={14} />{:else if m.muted}<Icon name="micOff" size={14} />{/if}
           </span>
         </div>
       {/each}
@@ -62,13 +62,13 @@
     {/if}
     <div class="bar">
       <button class="ctl" class:off={store.myVoice.muted} title={store.myVoice.muted ? 'Unmute' : 'Mute'} onclick={() => store.toggleMute()}>
-        <VoiceIcon name={store.myVoice.muted ? 'micOff' : 'mic'} />
+        <Icon name={store.myVoice.muted ? 'micOff' : 'mic'} />
       </button>
       <button class="ctl" class:off={store.myVoice.deafened} title={store.myVoice.deafened ? 'Undeafen' : 'Deafen'} onclick={() => store.toggleDeafen()}>
-        <VoiceIcon name={store.myVoice.deafened ? 'headphonesOff' : 'headphones'} />
+        <Icon name={store.myVoice.deafened ? 'headphonesOff' : 'headphones'} />
       </button>
-      <button class="ctl" class:on={!!store.live} title={store.live ? 'Stop streaming' : 'Share your screen'} onclick={share}><VoiceIcon name="screen" /></button>
-      <button class="ctl leave" title="Leave voice" onclick={() => store.leaveVoice()}><VoiceIcon name="leave" /></button>
+      <button class="ctl" class:on={!!store.live} title={store.live ? 'Stop streaming' : 'Share your screen'} onclick={share}><Icon name="screen" /></button>
+      <button class="ctl leave" title="Leave voice" onclick={() => store.leaveVoice()}><Icon name="leave" /></button>
     </div>
   {:else}
     <div class="bar"><button class="btn primary" onclick={() => store.joinVoice(channel.id)}>Join voice</button></div>

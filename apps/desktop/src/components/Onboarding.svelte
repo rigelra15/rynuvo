@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from './Icon.svelte'
   import { api, errText } from '../lib/api'
   import { store } from '../lib/state.svelte'
 
@@ -25,7 +26,7 @@
 
 <div class="wrap">
   <form class="card" onsubmit={submit}>
-    <div class="logo">◆</div>
+    <div class="logo"><Icon name="logo" size={40} /></div>
     <h1>Sign in to Rynuvo</h1>
     {#if store.notice}<p class="notice">{store.notice}</p>{/if}
 
@@ -48,7 +49,7 @@
 <style>
   .wrap { height: 100%; display: grid; place-items: center; background: radial-gradient(circle at 30% 20%, #2b2350, var(--bg) 60%); }
   .card { width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 28px; display: flex; flex-direction: column; gap: 14px; }
-  .logo { color: var(--accent); font-size: 28px; }
+  .logo { color: var(--accent); display: flex; justify-content: center; }
   h1 { margin: 0 0 4px; font-size: 20px; }
   label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
   label input { text-transform: none; letter-spacing: normal; font-weight: 400; font-size: 14px; }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from './Icon.svelte'
   import Composer from './Composer.svelte'
   import MessageList from './MessageList.svelte'
   import { store } from '../lib/state.svelte'
@@ -16,7 +17,7 @@
 </script>
 
 <header class="top">
-  <span class="ico">{channel.kind === 'text' ? '#' : '🔊'}</span>
+  <span class="ico"><Icon name={channel.kind === 'text' ? 'hash' : 'volume'} size={20} /></span>
   <span class="name">{channel.name}</span>
   {#if channel.topic}<span class="topic">{channel.topic}</span>{/if}
 </header>
@@ -33,7 +34,7 @@
 
 <style>
   .top { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line); min-height: 49px; }
-  .ico { color: var(--faint); }
+  .ico { color: var(--faint); display: inline-flex; }
   .name { font-weight: 600; }
   .topic { color: var(--muted); font-size: 13px; border-left: 1px solid var(--line); padding-left: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .typing { height: 20px; padding: 0 20px; font-size: 12px; }
