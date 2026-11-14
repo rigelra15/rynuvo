@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { backdrop, pop } from '../lib/motion'
   import Icon from './Icon.svelte'
   import { PRESETS, selfCheckLines } from '../lib/stream'
   import { AVATAR_ICONS, PALETTE, avatarColor } from '../lib/avatar'
@@ -119,9 +120,9 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && !e.defaultPrevented && onClose()} />
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="overlay" onclick={onClose}>
+<div class="overlay" transition:backdrop|global onclick={onClose}>
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="panel" onclick={(e) => e.stopPropagation()}>
+  <div class="panel" transition:pop|global onclick={(e) => e.stopPropagation()}>
     <header>
       <nav>
         <button class:on={tab === 'general'} onclick={() => (tab = 'general')}>Settings</button>

@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { menu } from '../lib/motion'
   let { x, y, onRename, onDelete, onClose }: { x: number; y: number; onRename: () => void; onDelete: () => void; onClose: () => void } = $props()
 </script>
 
 <svelte:window onclick={onClose} onkeydown={(e) => e.key === 'Escape' && onClose()} />
-<div class="menu" style="left:{x}px; top:{y}px">
+<div class="menu" transition:menu|global style="left:{x}px; top:{y}px">
   <button onclick={onRename}>Rename</button>
   <button class="danger" onclick={onDelete}>Delete channel</button>
 </div>

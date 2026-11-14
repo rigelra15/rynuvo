@@ -3,6 +3,7 @@
   import { store } from '../lib/state.svelte'
   import { membersOf } from '../lib/voice'
   import { avatarColor } from '../lib/avatar'
+  import { pop } from '../lib/motion'
   import type { Channel, Id } from '../lib/types'
   import Icon from './Icon.svelte'
   import GoLiveDialog from './GoLiveDialog.svelte'
@@ -45,6 +46,7 @@
         {@const streaming = store.isLive(m.userId)}
         <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
         <div
+          transition:pop
           class="tile"
           class:talk={store.speaking.has(m.userId)}
           class:watchable={streaming && joined && m.userId !== store.me?.id}

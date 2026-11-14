@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { backdrop, pop } from '../lib/motion'
   import { dialog } from '../lib/dialog.svelte'
 
   function key(e: KeyboardEvent) {
@@ -12,8 +13,8 @@
 
 {#if dialog.current}
   {@const d = dialog.current}
-  <div class="overlay">
-    <div class="box" role="alertdialog" aria-modal="true">
+  <div class="overlay" transition:backdrop|global>
+    <div class="box" transition:pop|global role="alertdialog" aria-modal="true">
       <p>{d.message}</p>
       <div class="actions">
         {#if d.cancel}<button class="btn" onclick={() => dialog.answer(false)}>{d.cancel}</button>{/if}

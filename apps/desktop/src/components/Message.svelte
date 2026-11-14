@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from './Icon.svelte'
   import Avatar from './Avatar.svelte'
+  import { untrack } from 'svelte'
   import { avatarColor } from '../lib/avatar'
   import { render } from '../lib/markdown'
   import { store } from '../lib/state.svelte'
@@ -26,6 +27,8 @@
   const canDelete = $derived(mine || (store.selected ? store.canManage(store.selected) : false))
   const html = $derived(render(m.content))
 
+  // Just sent or received (not history): slides in.
+  const fresh = untrack(() => Date.now() - m.createdAt < 4000) // decided once, at mount
   const author = $derived(store.user(m.authorId))
   const nameColor = $derived(avatarColor(author ?? { id: m.authorId }))
 
@@ -64,7 +67,7 @@
   }
 </script>
 
-<div class="row" class:mine class:head>
+<div class="row" class:mine class:head class:fresh>
   {#if !mine}
     <div class="side">{#if head}<Avatar user={author} id={m.authorId} size={32} />{/if}</div>
   {/if}
@@ -101,6 +104,11 @@
   .row.head { margin-top: 10px; align-items: flex-start; }
   .row.mine { flex-direction: row-reverse; }
   .side { width: 32px; flex-shrink: 0; }
+  .fresh { animation: msg-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+  @keyframes msg-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+  .fresh.mine { transform-origin: bottom right; }
+  .fresh:not(.mine) { transform-origin: bottom left; }
+  @media (prefers-reduced-motion: reduce) { .fresh { animation: none; } }
 
   .bubble {
     position: relative; min-width: 0; max-width: 70%; padding: 6px 10px 5px;

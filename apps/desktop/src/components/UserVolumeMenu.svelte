@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { menu } from '../lib/motion'
   import { api, errText } from '../lib/api'
   import { dialog } from '../lib/dialog.svelte'
   import { store } from '../lib/state.svelte'
@@ -28,7 +29,7 @@
 
 <svelte:window onclick={onClose} onkeydown={(e) => e.key === 'Escape' && onClose()} />
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="menu" style="left:{x}px; top:{y}px" onclick={(e) => e.stopPropagation()}>
+<div class="menu" transition:menu|global style="left:{x}px; top:{y}px" onclick={(e) => e.stopPropagation()}>
   <div class="who">{store.nick(userId)}</div>
   {#if !isMe}
     <label>

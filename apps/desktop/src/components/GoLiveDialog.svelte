@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { backdrop, pop } from '../lib/motion'
   import { onMount } from 'svelte'
   import { api, errText } from '../lib/api'
   import { PRESETS, type Source } from '../lib/stream'
@@ -38,8 +39,8 @@
 
 <svelte:window onkeydown={key} />
 
-<div class="overlay">
-  <div class="box" role="dialog" aria-modal="true" aria-label="Go Live">
+<div class="overlay" transition:backdrop|global>
+  <div class="box" transition:pop|global role="dialog" aria-modal="true" aria-label="Go Live">
     <h2>Go Live</h2>
     {#if error}
       <p class="err">{error}</p>
