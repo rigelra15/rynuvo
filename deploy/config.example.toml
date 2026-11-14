@@ -7,3 +7,5 @@ stun_ports = [3478, 3479]
 disk_warn_pct = 85
 disk_block_pct = 92
 max_upload_bytes = 5242880
+quota_gb = 400
+backups_keep = 7

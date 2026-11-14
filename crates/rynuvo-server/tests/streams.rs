@@ -265,3 +265,26 @@ async fn ready_lists_streams_and_signal_forwarded() {
     .await;
     assert_eq!((from, data), (b_id, json!({"x":2})));
 }
+
+#[tokio::test]
+async fn video_relay_stops_when_quota_used_up_but_voice_continues() {
+    let app = TestApp::spawn().await;
+    let a = app.user("Dimas").await;
+    let b = app.user("Ayu").await;
+    let v = app.create_channel(&a.token, "voice", "Mabar").await;
+    let mut pa = Peer::join(&app, &a.token, v.id).await;
+    let mut pb = Peer::join(&app, &b.token, v.id).await;
+    pa.ws.send_json(start()).await;
+    started(&mut pb.ws, a.user.id).await;
+    pb.ws.send_json(watch(a.user.id)).await;
+    viewer_msg(&mut pa.ws).await;
+    pa.video(&app, b.user.id, b"frame").await;
+    assert!(pb.recv_kind(DOWN_VIDEO, 1000).await.is_some());
+    let q = &app.state.relay.quota;
+    assert!(q.used() > 0, "relayed bytes are counted");
+    q.add(q.limit());
+    pa.video(&app, b.user.id, b"frame").await;
+    assert!(pb.recv_kind(DOWN_VIDEO, 300).await.is_none(), "budget used up: no relayed screen share");
+    pa.audio(&app, b"opus").await;
+    assert!(pb.recv_kind(DOWN_AUDIO, 1000).await.is_some(), "voice is never cut");
+}

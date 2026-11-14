@@ -58,7 +58,7 @@ async fn snapshot(st: &AppState, me: User) -> anyhow::Result<WsServerMsg> {
     let users: Vec<(i64, String, bool)> =
         sqlx::query_as("SELECT id, nickname, is_admin FROM users WHERE removed_at IS NULL ORDER BY id").fetch_all(&st.db).await?;
     let channels = list_channels(&st.db).await.map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    let alerts = if me.is_admin { st.disk.alert().into_iter().collect() } else { Vec::new() };
+    let alerts = if me.is_admin { st.disk.alert().into_iter().chain(st.relay.quota.alert()).collect() } else { Vec::new() };
     Ok(WsServerMsg::Ready {
         me,
         users: users.into_iter().map(|(id, nickname, is_admin)| User { id, nickname, is_admin }).collect(),

@@ -18,6 +18,19 @@ pub struct Config {
     pub disk_block_pct: u8,
     #[serde(default = "default_max_upload")]
     pub max_upload_bytes: u64,
+    /// Monthly data budget for the relay in GB (in + out); 0 = unlimited.
+    #[serde(default = "default_quota_gb")]
+    pub quota_gb: u64,
+    /// Daily SQLite snapshots kept in `<data_dir>/backups`; 0 turns backups off.
+    #[serde(default = "default_backups")]
+    pub backups_keep: usize,
+}
+
+fn default_quota_gb() -> u64 {
+    400
+}
+fn default_backups() -> usize {
+    7
 }
 
 fn default_stun_ports() -> [u16; 2] {
@@ -45,6 +58,10 @@ impl Config {
 
     pub fn media_dir(&self) -> PathBuf {
         self.data_dir.join("media")
+    }
+
+    pub fn backups_dir(&self) -> PathBuf {
+        self.data_dir.join("backups")
     }
 
     pub fn downloads_dir(&self) -> PathBuf {

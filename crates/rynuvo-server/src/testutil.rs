@@ -32,6 +32,8 @@ impl TestApp {
             disk_warn_pct: 85,
             disk_block_pct: 92,
             max_upload_bytes: 5_242_880,
+            quota_gb: 400,
+            backups_keep: 7,
         };
         std::fs::create_dir_all(cfg.media_dir()).unwrap();
         let pool = db::open_pool("sqlite::memory:").await.unwrap();

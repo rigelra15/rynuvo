@@ -73,6 +73,9 @@ async fn serve(cfg: Config) -> anyhow::Result<()> {
         voice: voice.clone(),
         relay: relay.clone(),
     };
+    relay.quota.set_limit(cfg.quota_gb.saturating_mul(1_000_000_000));
+    rynuvo_server::quota::spawn(state.db.clone(), relay.quota.clone(), state.hub.clone()).await;
+    rynuvo_server::backup::spawn(state.db.clone(), cfg.backups_dir(), cfg.backups_keep);
     rynuvo_server::stun::spawn(cfg.stun_ports, Some(relay))?;
     rynuvo_server::voice::relay::Relay::spawn_drop_logger();
     rynuvo_server::disk::spawn_watcher(cfg.data_dir.clone(), state.disk.clone(), state.hub.clone());

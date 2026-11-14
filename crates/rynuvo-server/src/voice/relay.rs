@@ -12,6 +12,10 @@ use rynuvo_proto::voice_wire::{DOWN_AUDIO, DOWN_KEEPALIVE_ACK, DOWN_VIDEO, UP_AU
 use tokio::net::UdpSocket;
 
 use super::{VoiceRooms, rooms::Route};
+use crate::quota::Quota;
+
+/// 400 GB a month unless the config says otherwise.
+pub const DEFAULT_QUOTA: u64 = 400_000_000_000;
 use crate::ws::{Hub, hub::Outgoing};
 
 /// Largest Opus payload relayed (a 20 ms frame at 64 kbps is ~160 bytes).
@@ -49,6 +53,11 @@ fn dest_of(route: Route, now: Instant) -> Option<Dest> {
 
 /// Process one packet from a client and return what to send where. Pure with respect to I/O.
 pub fn handle_packet(rooms: &VoiceRooms, pkt: &[u8], from: Source, now: Instant) -> Vec<(Dest, Vec<u8>)> {
+    handle_packet_with(rooms, pkt, from, now, true)
+}
+
+/// `video`: false while the data budget is used up (screen share through the server paused).
+pub fn handle_packet_with(rooms: &VoiceRooms, pkt: &[u8], from: Source, now: Instant, video: bool) -> Vec<(Dest, Vec<u8>)> {
     let Some((_, session)) = peek_up(pkt) else { return drop_packet() };
     rooms.with(|members| {
         let Some(i) = members.iter().position(|m| m.session == session) else { return drop_packet() };
@@ -96,7 +105,7 @@ pub fn handle_packet(rooms: &VoiceRooms, pkt: &[u8], from: Source, now: Instant)
                 }
             }
             UP_VIDEO => {
-                if up.payload.len() < 8 {
+                if !video || up.payload.len() < 8 {
                     return out;
                 }
                 let to = rynuvo_proto::Id::from_be_bytes(up.payload[..8].try_into().unwrap());
@@ -137,13 +146,15 @@ pub fn handle_packet(rooms: &VoiceRooms, pkt: &[u8], from: Source, now: Instant)
 #[derive(Clone)]
 pub struct Relay {
     pub rooms: VoiceRooms,
+    /// Monthly data budget; every relayed byte in and out counts.
+    pub quota: Quota,
     hub: Hub,
     udp: Arc<OnceLock<Arc<UdpSocket>>>,
 }
 
 impl Relay {
     pub fn new(rooms: VoiceRooms, hub: Hub) -> Self {
-        Relay { rooms, hub, udp: Arc::default() }
+        Relay { rooms, hub, udp: Arc::default(), quota: Quota::new(DEFAULT_QUOTA) }
     }
 
     pub fn set_udp(&self, sock: Arc<UdpSocket>) {
@@ -151,6 +162,7 @@ impl Relay {
     }
 
     pub async fn deliver(&self, out: Vec<(Dest, Vec<u8>)>) {
+        self.quota.add(out.iter().map(|(_, p)| p.len() as u64).sum());
         for (d, p) in out {
             match d {
                 Dest::Udp(a) => {
@@ -164,12 +176,14 @@ impl Relay {
     }
 
     pub async fn from_udp(&self, pkt: &[u8], from: SocketAddr) {
-        let out = handle_packet(&self.rooms, pkt, Source::Udp(from), Instant::now());
+        self.quota.add(pkt.len() as u64);
+        let out = handle_packet_with(&self.rooms, pkt, Source::Udp(from), Instant::now(), !self.quota.relay_blocked());
         self.deliver(out).await;
     }
 
     pub async fn from_ws(&self, conn_id: u64, pkt: &[u8]) {
-        let out = handle_packet(&self.rooms, pkt, Source::Ws(conn_id), Instant::now());
+        self.quota.add(pkt.len() as u64);
+        let out = handle_packet_with(&self.rooms, pkt, Source::Ws(conn_id), Instant::now(), !self.quota.relay_blocked());
         self.deliver(out).await;
     }
 
