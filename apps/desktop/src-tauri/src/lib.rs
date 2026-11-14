@@ -10,6 +10,7 @@ pub mod stream;
 mod tray;
 pub mod voice;
 mod voice_cmd;
+mod stream_cmd;
 
 use std::sync::Arc;
 
@@ -68,7 +69,19 @@ pub fn run() {
             let p = prefs.get();
             voice.set_prefs(p.audio());
             app.manage(prefs);
-            app.manage(commands::Core::new(store, dir.join(file), voice));
+            let h2 = app.handle().clone();
+            let stream = stream::ctl::StreamCtl::new(
+                voice.clone(),
+                Arc::new(|source: &str, opts, video, audio| {
+                    let c = stream::capture::start(source, opts, video, audio)?;
+                    Ok(Box::new(move || c.stop()) as Box<dyn FnOnce() + Send>)
+                }),
+                Arc::new(move |e| {
+                    let _ = h2.emit(stream_cmd::STREAM_EVENT, e);
+                }),
+                tauri::async_runtime::handle().inner().clone(),
+            );
+            app.manage(commands::Core::new(store, dir.join(file), voice, stream));
             tray::build(app.handle())?;
             if let Err(e) = tray::register_shortcuts(app.handle(), &p) {
                 tracing::warn!("shortcuts: {e}");
@@ -101,6 +114,14 @@ pub fn run() {
             diag::run_nettest,
             diag::send_log,
             diag::app_version,
+            stream_cmd::stream_sources,
+            stream_cmd::stream_encoders,
+            stream_cmd::stream_go_live,
+            stream_cmd::stream_stop,
+            stream_cmd::stream_is_live,
+            stream_cmd::stream_watch,
+            stream_cmd::stream_unwatch,
+            stream_cmd::stream_set_volume,
             voice_cmd::voice_state,
             voice_cmd::voice_join,
             voice_cmd::voice_leave,

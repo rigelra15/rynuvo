@@ -13,7 +13,7 @@ use crate::core::{
     identity::SecretStore,
     session::{Session, SessionEvent, SessionHandle},
 };
-use crate::voice::ctl::VoiceCtl;
+use crate::{stream::ctl::StreamCtl, voice::ctl::VoiceCtl};
 
 pub const EVENT: &str = "rynuvo://event";
 pub const VOICE_EVENT: &str = "rynuvo://voice";
@@ -28,6 +28,7 @@ pub struct Core {
     pub store: Arc<dyn SecretStore>,
     pub state_path: PathBuf,
     pub voice: VoiceCtl,
+    pub stream: StreamCtl,
     inner: Mutex<Inner>,
 }
 
@@ -59,8 +60,8 @@ pub fn device_name() -> String {
 }
 
 impl Core {
-    pub fn new(store: Arc<dyn SecretStore>, state_path: PathBuf, voice: VoiceCtl) -> Self {
-        Self { store, state_path, voice, inner: Mutex::default() }
+    pub fn new(store: Arc<dyn SecretStore>, state_path: PathBuf, voice: VoiceCtl, stream: StreamCtl) -> Self {
+        Self { store, state_path, voice, stream, inner: Mutex::default() }
     }
 
     fn load(&self) -> Persisted {
@@ -89,8 +90,10 @@ impl Core {
         }
         let app2 = app.clone();
         let voice = self.voice.clone();
+        let stream = self.stream.clone();
         let emit = Arc::new(move |e: SessionEvent| {
             voice.on_session(&e);
+            stream.on_session(&e);
             crate::notify::on_event(&app2, &e);
             let _ = app2.emit(EVENT, e);
         });
@@ -151,6 +154,7 @@ pub async fn claim_transfer(app: AppHandle, core: State<'_, Core>, code: String)
 
 #[tauri::command]
 pub fn logout(core: State<'_, Core>) {
+    core.stream.end_all("Signed out");
     core.voice.detach();
     let mut g = core.inner.lock().unwrap();
     if let Some(s) = g.session.take() {

@@ -17,10 +17,16 @@ struct Peer {
     quiet: u32,
 }
 
+/// Stream audio queued beyond this (200 ms) is dropped from the front: lower delay beats completeness.
+pub const STREAM_MAX_BACKLOG: usize = 10 * FRAME;
+
 pub struct Mixer {
     peers: HashMap<Id, Peer>,
     volumes: HashMap<Id, f32>,
     local: std::collections::VecDeque<f32>,
+    /// Decoded Go Live audio per streamer (mono, 48 kHz).
+    streams: HashMap<Id, std::collections::VecDeque<f32>>,
+    stream_volumes: HashMap<Id, f32>,
 }
 
 impl Default for Mixer {
@@ -31,7 +37,13 @@ impl Default for Mixer {
 
 impl Mixer {
     pub fn new() -> Self {
-        Mixer { peers: HashMap::new(), volumes: HashMap::new(), local: Default::default() }
+        Mixer {
+            peers: HashMap::new(),
+            volumes: HashMap::new(),
+            local: Default::default(),
+            streams: HashMap::new(),
+            stream_volumes: HashMap::new(),
+        }
     }
 
     pub fn push(&mut self, from: Id, seq: u32, payload: Vec<u8>) {
@@ -57,6 +69,27 @@ impl Mixer {
         self.peers.remove(&user);
     }
 
+    pub fn push_stream(&mut self, user: Id, samples: &[f32]) {
+        let q = self.streams.entry(user).or_default();
+        q.extend(samples);
+        if q.len() > STREAM_MAX_BACKLOG {
+            let extra = q.len() - STREAM_MAX_BACKLOG / 2;
+            q.drain(..extra);
+        }
+    }
+
+    pub fn set_stream_volume(&mut self, user: Id, v: f32) {
+        self.stream_volumes.insert(user, v.clamp(0.0, 2.0));
+    }
+
+    pub fn remove_stream(&mut self, user: Id) {
+        self.streams.remove(&user);
+    }
+
+    pub fn stream_backlog(&self, user: Id) -> usize {
+        self.streams.get(&user).map_or(0, |q| q.len())
+    }
+
     /// Queue a locally generated sound (join/leave tones, mic test).
     pub fn play_local(&mut self, samples: Vec<f32>) {
         self.local.extend(samples);
@@ -77,6 +110,15 @@ impl Mixer {
             let vol = self.volumes.get(id).copied().unwrap_or(1.0);
             for (o, s) in out.iter_mut().zip(pcm) {
                 *o += s * vol;
+            }
+        }
+        for (id, q) in self.streams.iter_mut() {
+            let vol = self.stream_volumes.get(id).copied().unwrap_or(1.0);
+            for o in out.iter_mut() {
+                match q.pop_front() {
+                    Some(s) => *o += s * vol,
+                    None => break,
+                }
             }
         }
         for o in out.iter_mut() {
@@ -148,6 +190,25 @@ mod tests {
             m.mix(&mut out);
         }
         assert!(m.speaking().is_empty(), "silent after 300 ms without audio");
+    }
+
+    #[test]
+    fn stream_audio_is_mixed_with_its_own_volume_and_bounded_backlog() {
+        let mut m = Mixer::new();
+        m.push_stream(9, &vec![0.25; FRAME]);
+        let mut out = [0f32; FRAME];
+        m.mix(&mut out);
+        assert!((out[10] - 0.25).abs() < 1e-6);
+        m.set_stream_volume(9, 0.0);
+        m.push_stream(9, &vec![0.25; FRAME]);
+        m.mix(&mut out);
+        assert_eq!(out[10], 0.0, "stream volume is separate from the voice volume");
+        m.set_stream_volume(9, 1.0);
+        m.push_stream(9, &vec![0.1; FRAME * 50]);
+        assert!(m.stream_backlog(9) <= STREAM_MAX_BACKLOG, "a late stream never builds up seconds of delay");
+        m.remove_stream(9);
+        m.mix(&mut out);
+        assert_eq!(out[10], 0.0);
     }
 
     #[test]

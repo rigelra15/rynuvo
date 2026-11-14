@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 
 struct Client {
     link: VoiceLink,
+    json: mpsc::UnboundedSender<serde_json::Value>,
     down: mpsc::UnboundedReceiver<DownAudio>,
     user: i64,
 }
@@ -43,8 +44,12 @@ async fn client(app: &TestApp, nick: &str, ch: Option<i64>, udp_port_override: O
     let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port: udp_port_override.unwrap_or(udp_port), session, key };
     let link = VoiceLink::start(cfg, sender, down_tx);
     let l2 = link.clone();
+    let (json_tx, mut json_rx) = mpsc::unbounded_channel::<serde_json::Value>();
     tokio::spawn(async move {
         loop {
+            while let Ok(j) = json_rx.try_recv() {
+                ws.send_json(j).await;
+            }
             while let Ok(b) = ws_rx.try_recv() {
                 ws.send_binary(b).await;
             }
@@ -53,7 +58,7 @@ async fn client(app: &TestApp, nick: &str, ch: Option<i64>, udp_port_override: O
             }
         }
     });
-    (Client { link, down, user: u.user.id }, ch)
+    (Client { link, json: json_tx, down, user: u.user.id }, ch)
 }
 
 async fn deliver(from: &Client, to: &mut Client, payload: &[u8]) {
@@ -159,4 +164,34 @@ async fn dead_link_rebinds_and_asks_for_reconnect() {
     assert!(dead.load(Ordering::Relaxed) >= 1, "no reconnect requested");
     assert!(ports.lock().unwrap().len() >= 2, "UDP socket was never rebound: {:?}", ports.lock().unwrap());
     link.stop();
+}
+
+/// Go Live data through the relay: the streamer's UP_VIDEO to a watching viewer arrives as video
+/// from the streamer, and nothing reaches someone who is not watching.
+#[tokio::test]
+async fn video_is_relayed_only_to_watchers() {
+    let app = TestApp::spawn().await;
+    let (mut a, ch) = client(&app, "Dimas", None, None).await;
+    let (mut b, _) = client(&app, "Ayu", Some(ch), None).await;
+    deliver(&a, &mut b, b"warm").await;
+    deliver(&b, &mut a, b"warm").await;
+    let (vtx, mut vrx) = mpsc::unbounded_channel::<(i64, Vec<u8>)>();
+    b.link.set_video_sink(Arc::new(move |from, data: &[u8]| {
+        let _ = vtx.send((from, data.to_vec()));
+    }));
+    a.link.send_video(b.user, b"too early");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(vrx.try_recv().is_err(), "not watching yet: nothing relayed");
+    a.json.send(json!({"t":"streamStart","d":{"codecs":["h264"],"preset":"1080p60"}})).unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    b.json.send(json!({"t":"streamWatch","d":{"userId":a.user,"codecs":["h264"]}})).unwrap();
+    for _ in 0..40 {
+        a.link.send_video(b.user, b"frame");
+        if let Ok(Some((from, data))) = tokio::time::timeout(Duration::from_millis(100), vrx.recv()).await {
+            assert_eq!(from, a.user);
+            assert_eq!(data, b"frame");
+            return;
+        }
+    }
+    panic!("video never arrived");
 }

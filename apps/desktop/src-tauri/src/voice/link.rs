@@ -10,7 +10,7 @@ use std::{
 
 use rynuvo_proto::{
     Id,
-    voice_wire::{DOWN_AUDIO, DOWN_KEEPALIVE_ACK, UP_AUDIO, UP_KEEPALIVE, VoiceKey, open_down, seal_up},
+    voice_wire::{DOWN_AUDIO, DOWN_KEEPALIVE_ACK, DOWN_VIDEO, UP_AUDIO, UP_KEEPALIVE, UP_VIDEO, VoiceKey, open_down, seal_up},
 };
 use serde::Serialize;
 use tokio::{
@@ -30,6 +30,8 @@ pub const LINK_DEAD: Duration = Duration::from_secs(5);
 pub type OnDead = Arc<dyn Fn() + Send + Sync>;
 
 pub type WsSender = Arc<dyn Fn(Vec<u8>) + Send + Sync>;
+/// Relayed Go Live data: (other user, payload).
+pub type VideoSink = Arc<dyn Fn(Id, &[u8]) + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub struct LinkCfg {
@@ -66,6 +68,7 @@ struct Inner {
     last_udp_ack: Mutex<Instant>,
     last_any_ack: Mutex<Instant>,
     on_dead: Mutex<Option<OnDead>>,
+    video: Mutex<Option<VideoSink>>,
     stop: watch::Sender<bool>,
 }
 
@@ -89,6 +92,7 @@ impl VoiceLink {
             last_udp_ack: Mutex::new(Instant::now()),
             last_any_ack: Mutex::new(Instant::now()),
             on_dead: Mutex::new(None),
+            video: Mutex::new(None),
             stop,
         });
         tokio::spawn(run(inner.clone(), cfg.host, cfg.udp_port, stop_rx));
@@ -107,6 +111,18 @@ impl VoiceLink {
         p.extend_from_slice(&n.to_be_bytes());
         p.extend_from_slice(&opus);
         self.inner.send(UP_AUDIO, &p, self.path());
+    }
+
+    /// Go Live data for `to` through the relay (the server forwards it only within a watch pair).
+    pub fn send_video(&self, to: Id, data: &[u8]) {
+        let mut p = Vec::with_capacity(8 + data.len());
+        p.extend_from_slice(&to.to_be_bytes());
+        p.extend_from_slice(data);
+        self.inner.send(UP_VIDEO, &p, self.path());
+    }
+
+    pub fn set_video_sink(&self, f: VideoSink) {
+        *self.inner.video.lock().unwrap() = Some(f);
     }
 
     /// Called when neither path has answered for `LINK_DEAD`.
@@ -163,6 +179,12 @@ impl Inner {
             DOWN_AUDIO if d.payload.len() >= 4 => {
                 let seq = u32::from_be_bytes(d.payload[..4].try_into().unwrap());
                 let _ = self.down.send(DownAudio { from: d.from_user, seq, payload: d.payload[4..].to_vec() });
+            }
+            DOWN_VIDEO => {
+                let sink = self.video.lock().unwrap().clone();
+                if let Some(f) = sink {
+                    f(d.from_user, &d.payload);
+                }
             }
             _ => {}
         }

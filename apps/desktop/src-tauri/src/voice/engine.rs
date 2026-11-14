@@ -71,6 +71,9 @@ enum Cmd {
     MicTest(bool),
     RemovePeer(Id),
     Tone(Tone),
+    StreamAudio(Id, Vec<f32>),
+    StreamVolume(Id, f32),
+    RemoveStream(Id),
     Stop,
 }
 
@@ -123,6 +126,20 @@ impl VoiceEngine {
     pub fn play_tone(&self, t: Tone) {
         self.send(Cmd::Tone(t));
     }
+    /// Decoded Go Live audio (mono 48 kHz) from `user`'s stream.
+    pub fn stream_audio(&self, user: Id, samples: Vec<f32>) {
+        self.send(Cmd::StreamAudio(user, samples));
+    }
+    pub fn set_stream_volume(&self, user: Id, v: f32) {
+        self.send(Cmd::StreamVolume(user, v));
+    }
+    pub fn remove_stream(&self, user: Id) {
+        self.send(Cmd::RemoveStream(user));
+    }
+    pub fn link(&self) -> Option<VoiceLink> {
+        self.link.clone()
+    }
+
     /// A binary WebSocket frame from the server.
     pub fn feed_ws(&self, pkt: &[u8]) {
         if let Some(l) = &self.link {
@@ -305,6 +322,9 @@ impl Worker {
             Cmd::MicTest(v) => self.mic_test = v,
             Cmd::RemovePeer(u) => self.mixer.remove(u),
             Cmd::Tone(t) => self.mixer.play_local(tones::samples(t)),
+            Cmd::StreamAudio(u, pcm) => self.mixer.push_stream(u, &pcm),
+            Cmd::StreamVolume(u, v) => self.mixer.set_stream_volume(u, v),
+            Cmd::RemoveStream(u) => self.mixer.remove_stream(u),
             Cmd::Stop => return false,
         }
         true

@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use super::{
     backend::AudioBackend,
     engine::{EngineOpts, EventSink, Tone, VoiceEngine, VoiceEvent},
-    link::LinkCfg,
+    link::{LinkCfg, VideoSink},
 };
 use crate::core::session::{SessionEvent, SessionHandle};
 
@@ -57,6 +57,8 @@ struct State {
     test_engine: Option<VoiceEngine>,
     members: Vec<VoiceMember>,
     prefs: AudioPrefs,
+    /// Where relayed Go Live data goes (the stream controller); survives engine restarts.
+    video_sink: Option<VideoSink>,
 }
 
 #[derive(Clone)]
@@ -119,6 +121,11 @@ impl VoiceCtl {
 
     pub fn channel(&self) -> Option<Id> {
         self.st.lock().unwrap().want
+    }
+
+    /// Any message on the current session (used by the stream controller).
+    pub fn send_ws(&self, m: WsClientMsg) {
+        self.send(m);
     }
 
     fn send(&self, m: WsClientMsg) {
@@ -186,6 +193,53 @@ impl VoiceCtl {
         self.push_state();
         self.notify();
         self.state()
+    }
+
+    pub fn set_video_sink(&self, f: VideoSink) {
+        let mut s = self.st.lock().unwrap();
+        if let Some(l) = s.engine.as_ref().and_then(|e| e.link()) {
+            l.set_video_sink(f.clone());
+        }
+        s.video_sink = Some(f);
+    }
+
+    /// Go Live data to `to` through the server. Dropped when I'm not in voice (no relay session).
+    pub fn relay_video(&self, to: Id, data: &[u8]) {
+        let l = self.st.lock().unwrap().engine.as_ref().and_then(|e| e.link());
+        if let Some(l) = l {
+            l.send_video(to, data);
+        }
+    }
+
+    pub fn stream_audio(&self, user: Id, samples: Vec<f32>) {
+        let e = self.st.lock().unwrap().engine.clone();
+        if let Some(e) = e {
+            e.stream_audio(user, samples);
+        }
+    }
+
+    pub fn set_stream_volume(&self, user: Id, v: f32) {
+        let e = self.st.lock().unwrap().engine.clone();
+        if let Some(e) = e {
+            e.set_stream_volume(user, v);
+        }
+    }
+
+    pub fn remove_stream(&self, user: Id) {
+        let e = self.st.lock().unwrap().engine.clone();
+        if let Some(e) = e {
+            e.remove_stream(user);
+        }
+    }
+
+    /// My user id once the session is ready.
+    pub fn me(&self) -> Option<Id> {
+        self.st.lock().unwrap().me
+    }
+
+    /// The server's host name (also its STUN host).
+    pub fn host(&self) -> String {
+        self.st.lock().unwrap().host.clone()
     }
 
     pub fn kick(&self, user_id: Id) {
@@ -293,6 +347,9 @@ impl VoiceCtl {
             Arc::new(move |b| ws_session.send_binary(b)),
             self.events.clone(),
         ));
+        if let (Some(f), Some(l)) = (s.video_sink.clone(), engine.link()) {
+            l.set_video_sink(f);
+        }
         let rs = session.clone();
         engine.set_on_dead(Arc::new(move || rs.reconnect()));
         engine.set_muted(s.muted);
