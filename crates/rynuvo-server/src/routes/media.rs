@@ -57,7 +57,7 @@ async fn upload(State(st): State<AppState>, au: AuthUser, headers: HeaderMap, bo
         return Err(AppError::TooLarge);
     }
     let mime = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-    let bad = || AppError::BadRequest("File bukan gambar yang didukung".into());
+    let bad = || AppError::BadRequest("File is not a supported image".into());
     let want = expected_type(&mime).ok_or_else(bad)?;
     let got = imagesize::image_type(&body).map_err(|_| bad())?;
     if got != want || !structure_ok(got, &body) {

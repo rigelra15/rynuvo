@@ -34,7 +34,7 @@ async fn rotate_invite(State(st): State<AppState>, au: AuthUser) -> AppResult<Js
 async fn kick(State(st): State<AppState>, au: AuthUser, Path(id): Path<i64>) -> AppResult<StatusCode> {
     au.require_admin()?;
     if id == au.user.id {
-        return Err(AppError::BadRequest("Tidak bisa mengeluarkan diri sendiri".into()));
+        return Err(AppError::BadRequest("You can't remove yourself".into()));
     }
     let mut tx = st.db.begin().await?;
     let n = sqlx::query("UPDATE users SET removed_at = ? WHERE id = ? AND removed_at IS NULL")

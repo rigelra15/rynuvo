@@ -23,13 +23,13 @@ impl AppError {
         match self {
             AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, "bad_request", m.clone()),
             AppError::Coded(s, c, m) => (*s, c, m.clone()),
-            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized", "Sesi tidak valid".into()),
-            AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden", "Kamu tidak punya izin".into()),
-            AppError::NotFound => (StatusCode::NOT_FOUND, "not_found", "Tidak ditemukan".into()),
+            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized", "Invalid session".into()),
+            AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden", "You don't have permission".into()),
+            AppError::NotFound => (StatusCode::NOT_FOUND, "not_found", "Not found".into()),
             AppError::Conflict(c, m) => (StatusCode::CONFLICT, c, m.clone()),
-            AppError::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "too_large", "File terlalu besar (maks 5 MB)".into()),
-            AppError::DiskFull => (StatusCode::INSUFFICIENT_STORAGE, "disk_full", "Penyimpanan server penuh".into()),
-            AppError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal", "Terjadi kesalahan di server".into()),
+            AppError::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "too_large", "File is too large (max 5 MB)".into()),
+            AppError::DiskFull => (StatusCode::INSUFFICIENT_STORAGE, "disk_full", "Server storage is full".into()),
+            AppError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal", "Server error".into()),
         }
     }
 }

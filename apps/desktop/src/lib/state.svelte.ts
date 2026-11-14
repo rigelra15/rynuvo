@@ -127,7 +127,7 @@ class Store {
         this.conn = e.data
         return
       case 'revoked':
-        this.reset('Kamu dikeluarkan dari circle')
+        this.reset('You were removed from the circle')
         return
       case 'updateRequired':
         this.updateRequired = true

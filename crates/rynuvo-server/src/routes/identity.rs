@@ -67,7 +67,7 @@ pub async fn issue_device(db: &SqlitePool, user_id: i64, device_name: &str) -> A
     sqlx::query("INSERT INTO devices(user_id, token_hash, name, created_at) VALUES(?, ?, ?, ?)")
         .bind(user_id)
         .bind(&auth::hash(&token)[..])
-        .bind(if name.is_empty() { "perangkat".to_string() } else { name })
+        .bind(if name.is_empty() { "device".to_string() } else { name })
         .bind(now_ms())
         .execute(db)
         .await?;
@@ -79,7 +79,7 @@ fn is_unique_violation(e: &sqlx::Error) -> bool {
 }
 
 fn nickname_taken() -> AppError {
-    AppError::Conflict("nickname_taken", "Nickname sudah dipakai".into())
+    AppError::Conflict("nickname_taken", "Nickname is already taken".into())
 }
 
 async fn join(State(st): State<AppState>, Json(req): Json<JoinReq>) -> AppResult<Json<JoinResp>> {
@@ -94,7 +94,7 @@ async fn join(State(st): State<AppState>, Json(req): Json<JoinReq>) -> AppResult
         return Err(AppError::Coded(
             axum::http::StatusCode::FORBIDDEN,
             "invalid_invite",
-            "Kode undangan salah atau sudah tidak berlaku".into(),
+            "Invite code is wrong or no longer valid".into(),
         ));
     };
     let (nickname, key) = auth::nickname_key(&req.nickname)?;
@@ -145,7 +145,7 @@ async fn claim_transfer(State(st): State<AppState>, Json(req): Json<ClaimTransfe
     .bind(now_ms())
     .fetch_optional(&st.db)
     .await?;
-    let invalid = || AppError::Coded(axum::http::StatusCode::FORBIDDEN, "invalid_code", "Kode transfer salah atau kedaluwarsa".into());
+    let invalid = || AppError::Coded(axum::http::StatusCode::FORBIDDEN, "invalid_code", "Transfer code is wrong or expired".into());
     let user_id = user_id.ok_or_else(invalid)?;
     let user: Option<(i64, String, bool)> = sqlx::query_as("SELECT id, nickname, is_admin FROM users WHERE id = ? AND removed_at IS NULL")
         .bind(user_id)

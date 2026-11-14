@@ -29,7 +29,7 @@
 
   async function del(c: Channel) {
     menu = null
-    if (!confirm(`Hapus channel "${c.name}" beserta semua pesannya?`)) return
+    if (!confirm(`Delete channel "${c.name}" and all of its messages?`)) return
     try {
       await api.deleteChannel(c.id)
     } catch (e) {
@@ -60,7 +60,7 @@
         {#if store.selected}
           <ChannelView channel={store.selected} />
         {:else}
-          <div class="none muted">Belum ada channel. Klik + di samping "Text" untuk membuat.</div>
+          <div class="none muted">No channels yet. Click + next to "Text" to create one.</div>
         {/if}
       </main>
     </div>
@@ -71,8 +71,8 @@
 
 {#if creating}
   <CreateChannelDialog
-    title={creating === 'text' ? 'Buat text channel' : 'Buat voice channel'}
-    confirm="Buat"
+    title={creating === 'text' ? 'Create text channel' : 'Create voice channel'}
+    confirm="Create"
     onSubmit={create}
     onClose={() => (creating = null)}
   />
@@ -80,7 +80,7 @@
 {#if renaming}
   {@const c = renaming}
   <CreateChannelDialog
-    title="Ganti nama channel"
+    title="Rename channel"
     initial={c.name}
     onSubmit={async (name) => void (await api.updateChannel(c.id, { name }))}
     onClose={() => (renaming = null)}
@@ -92,8 +92,8 @@
 {/if}
 {#if settingsOpen}
   <div class="tmp-settings">
-    <button class="btn" onclick={() => (settingsOpen = false)}>Tutup</button>
-    <button class="btn danger" onclick={() => store.logout()}>Keluar dari perangkat ini</button>
+    <button class="btn" onclick={() => (settingsOpen = false)}>Close</button>
+    <button class="btn danger" onclick={() => store.logout()}>Sign out of this device</button>
   </div>
 {/if}
 

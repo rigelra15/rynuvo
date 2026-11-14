@@ -37,9 +37,9 @@ impl DiskState {
     pub fn alert(&self) -> Option<String> {
         let used = self.used_pct();
         if self.blocked() {
-            Some(format!("Disk server {used}% penuh — upload gambar dihentikan sementara."))
+            Some(format!("Server disk is {used}% full — image uploads are paused."))
         } else if used >= self.warn_pct.load(Ordering::Relaxed) {
-            Some(format!("Disk server sudah {used}% terpakai."))
+            Some(format!("Server disk is {used}% used."))
         } else {
             None
         }

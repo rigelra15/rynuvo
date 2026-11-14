@@ -28,12 +28,12 @@
 <div class="wrap">
   <form class="card" onsubmit={submit}>
     <div class="logo">◆</div>
-    <h1>Masuk ke Rynuvo</h1>
+    <h1>Sign in to Rynuvo</h1>
     {#if store.notice}<p class="notice">{store.notice}</p>{/if}
 
-    <label>Alamat server<input bind:value={server} autocomplete="off" spellcheck="false" required /></label>
+    <label>Server address<input bind:value={server} autocomplete="off" spellcheck="false" required /></label>
     <label>
-      {transfer ? 'Kode transfer' : 'Kode undangan'}
+      {transfer ? 'Transfer code' : 'Invite code'}
       <input bind:value={code} placeholder="XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" required />
     </label>
     {#if !transfer}
@@ -41,9 +41,9 @@
     {/if}
 
     {#if error}<p class="err">{error}</p>{/if}
-    <button class="btn primary" disabled={busy}>{busy ? 'Menghubungkan…' : 'Masuk'}</button>
+    <button class="btn primary" disabled={busy}>{busy ? 'Connecting…' : 'Sign in'}</button>
     <button type="button" class="link" onclick={() => ((transfer = !transfer), (error = null))}>
-      {transfer ? 'Pakai kode undangan' : 'Punya kode transfer dari perangkat lain?'}
+      {transfer ? 'Use an invite code' : 'Have a transfer code from another device?'}
     </button>
   </form>
 </div>

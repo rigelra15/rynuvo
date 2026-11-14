@@ -72,7 +72,7 @@ impl Core {
     }
 
     pub fn api(&self) -> CmdResult<Api> {
-        self.inner.lock().unwrap().api.clone().ok_or_else(|| "Belum masuk".to_string())
+        self.inner.lock().unwrap().api.clone().ok_or_else(|| "Not signed in".to_string())
     }
 
     pub fn session(&self) -> Option<SessionHandle> {

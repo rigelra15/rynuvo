@@ -4,7 +4,7 @@
   let {
     title,
     initial = '',
-    confirm = 'Simpan',
+    confirm = 'Save',
     onSubmit,
     onClose,
   }: { title: string; initial?: string; confirm?: string; onSubmit: (name: string) => Promise<void>; onClose: () => void } = $props()
@@ -36,7 +36,7 @@
     <input bind:value={name} maxlength="40" autofocus required />
     {#if error}<p class="err">{error}</p>{/if}
     <div class="row">
-      <button type="button" class="btn" onclick={onClose}>Batal</button>
+      <button type="button" class="btn" onclick={onClose}>Cancel</button>
       <button class="btn primary" disabled={busy}>{confirm}</button>
     </div>
   </form>

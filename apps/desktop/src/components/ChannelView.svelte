@@ -28,7 +28,7 @@
 {:else}
   <MessageList channel={channel.id} />
   <div class="typing muted">
-    {#if typers.length === 1}{typers[0]} sedang mengetik…{:else if typers.length > 1}{typers.join(', ')} sedang mengetik…{/if}
+    {#if typers.length === 1}{typers[0]} is typing…{:else if typers.length > 1}{typers.join(', ')} are typing…{/if}
   </div>
   <Composer {channel} />
 {/if}

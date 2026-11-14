@@ -12,12 +12,12 @@ pub enum ClientError {
 }
 
 impl ClientError {
-    /// User-facing Indonesian message.
+    /// User-facing message.
     pub fn user_message(&self) -> String {
         match self {
             ClientError::Api(e) => e.message.clone(),
-            ClientError::Network(_) => "Tidak bisa terhubung ke server".into(),
-            ClientError::Unauthorized => "Sesi berakhir, silakan masuk lagi".into(),
+            ClientError::Network(_) => "Can't reach the server".into(),
+            ClientError::Unauthorized => "Session expired, please sign in again".into(),
         }
     }
 }
@@ -46,9 +46,9 @@ pub struct Api {
 pub fn normalize_server(s: &str) -> Result<Url, String> {
     let t = s.trim().trim_end_matches('/');
     let with_scheme = if t.starts_with("http://") || t.starts_with("https://") { t.to_string() } else { format!("https://{t}") };
-    let mut u = Url::parse(&with_scheme).map_err(|_| "Alamat server tidak valid".to_string())?;
+    let mut u = Url::parse(&with_scheme).map_err(|_| "Invalid server address".to_string())?;
     if u.host_str().is_none() {
-        return Err("Alamat server tidak valid".into());
+        return Err("Invalid server address".into());
     }
     u.set_path("");
     u.set_query(None);

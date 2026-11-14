@@ -46,10 +46,10 @@ pub fn nickname_key(n: &str) -> Result<(String, String), AppError> {
     let t = n.trim();
     let len = t.chars().count();
     if !(2..=32).contains(&len) {
-        return Err(AppError::BadRequest("Nickname harus 2–32 karakter".into()));
+        return Err(AppError::BadRequest("Nickname must be 2–32 characters".into()));
     }
     if t.chars().any(|c| c.is_control()) {
-        return Err(AppError::BadRequest("Nickname mengandung karakter tidak valid".into()));
+        return Err(AppError::BadRequest("Nickname contains invalid characters".into()));
     }
     Ok((t.to_string(), t.to_lowercase()))
 }

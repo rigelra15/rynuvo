@@ -3,9 +3,9 @@
 </script>
 
 {#if store.updateRequired}
-  <div class="bar warn">Versi Rynuvo terlalu lama, silakan update.</div>
+  <div class="bar warn">This version of Rynuvo is outdated. Please update.</div>
 {:else if store.conn.state !== 'online'}
-  <div class="bar">Menyambung ulang…</div>
+  <div class="bar">Reconnecting…</div>
 {/if}
 
 <style>

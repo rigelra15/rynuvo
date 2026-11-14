@@ -82,7 +82,7 @@ async fn list(State(st): State<AppState>, _au: AuthUser, Path(ch): Path<i64>, Qu
 fn clean_content(raw: &str) -> AppResult<String> {
     let c = raw.trim().to_string();
     if c.chars().count() > MAX_CHARS {
-        return Err(AppError::Coded(StatusCode::BAD_REQUEST, "too_long", "Pesan terlalu panjang (maks 4000 karakter)".into()));
+        return Err(AppError::Coded(StatusCode::BAD_REQUEST, "too_long", "Message is too long (max 4000 characters)".into()));
     }
     Ok(c)
 }
@@ -90,14 +90,14 @@ fn clean_content(raw: &str) -> AppResult<String> {
 async fn create(State(st): State<AppState>, au: AuthUser, Path(ch): Path<i64>, Json(req): Json<PostMessageReq>) -> AppResult<Json<Message>> {
     let channel = load_channel(&st.db, ch).await?.ok_or(AppError::NotFound)?;
     if channel.kind != ChannelKind::Text {
-        return Err(AppError::BadRequest("Tidak bisa mengirim pesan ke voice channel".into()));
+        return Err(AppError::BadRequest("Can't send messages to a voice channel".into()));
     }
     let content = clean_content(&req.content)?;
     if let Some(img) = &req.image_id {
         let ok: Option<String> = sqlx::query_scalar("SELECT id FROM images WHERE id = ?").bind(img).fetch_optional(&st.db).await?;
-        ok.ok_or_else(|| AppError::BadRequest("Gambar tidak ditemukan".into()))?;
+        ok.ok_or_else(|| AppError::BadRequest("Image not found".into()))?;
     } else if content.is_empty() {
-        return Err(AppError::BadRequest("Pesan kosong".into()));
+        return Err(AppError::BadRequest("Message is empty".into()));
     }
     let id: i64 = sqlx::query_scalar("INSERT INTO messages(channel_id, author_id, content, image_id, created_at) VALUES(?, ?, ?, ?, ?) RETURNING id")
         .bind(ch)
@@ -119,7 +119,7 @@ async fn edit(State(st): State<AppState>, au: AuthUser, Path(id): Path<i64>, Jso
     }
     let content = clean_content(&req.content)?;
     if content.is_empty() && m.image.is_none() {
-        return Err(AppError::BadRequest("Pesan kosong".into()));
+        return Err(AppError::BadRequest("Message is empty".into()));
     }
     sqlx::query("UPDATE messages SET content = ?, edited_at = ? WHERE id = ?")
         .bind(&content)

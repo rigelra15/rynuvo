@@ -43,7 +43,7 @@ fn valid_kind(k: &str) -> bool {
 
 async fn report(State(st): State<AppState>, au: AuthUser, Json(req): Json<ReportReq>) -> AppResult<StatusCode> {
     if !valid_kind(&req.kind) || req.body.len() > REPORT_MAX {
-        return Err(AppError::BadRequest("Laporan tidak valid".into()));
+        return Err(AppError::BadRequest("Invalid report".into()));
     }
     sqlx::query("INSERT INTO diag_reports(user_id, kind, body, created_at) VALUES(?, ?, ?, ?)")
         .bind(au.user.id)

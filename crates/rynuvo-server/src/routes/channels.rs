@@ -58,7 +58,7 @@ pub fn normalize_name(kind: ChannelKind, raw: &str) -> AppResult<String> {
     };
     let len = name.chars().count();
     if !(1..=40).contains(&len) || name.chars().any(|c| c.is_control()) {
-        return Err(AppError::BadRequest("Nama channel harus 1–40 karakter".into()));
+        return Err(AppError::BadRequest("Channel name must be 1–40 characters".into()));
     }
     Ok(name)
 }

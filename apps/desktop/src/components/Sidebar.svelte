@@ -40,7 +40,7 @@
     {#each [{ label: 'Text', kind: 'text' as const, list: text }, { label: 'Voice', kind: 'voice' as const, list: voice }] as g}
       <div class="grp">
         <span>{g.label}</span>
-        <button class="add" title="Buat channel {g.label.toLowerCase()}" onclick={() => onCreate(g.kind)}>+</button>
+        <button class="add" title="Create {g.label.toLowerCase()} channel" onclick={() => onCreate(g.kind)}>+</button>
       </div>
       {#each g.list as c (c.id)}
         <button

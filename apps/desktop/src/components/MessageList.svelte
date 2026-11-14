@@ -67,9 +67,9 @@
   {#if list === undefined}
     <div class="empty muted">Memuat…</div>
   {:else if list.length === 0}
-    <div class="empty muted">Belum ada pesan. Sapa teman-temanmu!</div>
+    <div class="empty muted">No messages yet. Say hi to your friends!</div>
   {:else}
-    {#if store.hasMore.get(channel) === false}<div class="start muted">Awal channel ini</div>{/if}
+    {#if store.hasMore.get(channel) === false}<div class="start muted">This is the start of the channel</div>{/if}
     {#each list as m, i (m.id)}
       <MessageView {m} head={isHead(i)} />
     {/each}
