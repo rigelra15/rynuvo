@@ -5,6 +5,7 @@ use crate::app::AppState;
 
 pub mod admin;
 pub mod channels;
+pub mod diag;
 pub mod identity;
 pub mod media;
 pub mod messages;
@@ -20,5 +21,6 @@ pub fn api(cfg: &crate::config::Config) -> Router<AppState> {
         .merge(admin::router())
         .merge(channels::router())
         .merge(messages::router())
+        .merge(diag::router())
         .merge(media::router(cfg.max_upload_bytes))
 }

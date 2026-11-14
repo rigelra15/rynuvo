@@ -5,6 +5,7 @@ pub mod db;
 pub mod disk;
 pub mod error;
 pub mod routes;
+pub mod stun;
 pub mod ws;
 
 #[cfg(feature = "test-util")]

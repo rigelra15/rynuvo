@@ -13,5 +13,9 @@ pub struct AppState {
 }
 
 pub fn build_router(state: AppState) -> Router {
-    Router::new().nest("/api/v1", routes::api(&state.cfg).merge(ws::router())).with_state(state)
+    let downloads = tower_http::services::ServeDir::new(state.cfg.downloads_dir());
+    Router::new()
+        .nest("/api/v1", routes::api(&state.cfg).merge(ws::router()))
+        .nest_service("/downloads", downloads)
+        .with_state(state)
 }

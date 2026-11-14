@@ -68,6 +68,7 @@ async fn serve(cfg: Config) -> anyhow::Result<()> {
         cfg: Arc::new(cfg.clone()),
         hub: Hub::default(),
     };
+    rynuvo_server::stun::spawn(cfg.stun_ports)?;
     rynuvo_server::disk::spawn_watcher(cfg.data_dir.clone(), state.disk.clone(), state.hub.clone());
     let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
     tracing::info!("rynuvo-server listening on {}", cfg.bind);
