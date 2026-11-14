@@ -2,6 +2,7 @@
   import Icon from './Icon.svelte'
   import Avatar from './Avatar.svelte'
   import { untrack } from 'svelte'
+  import { mentionsMe } from '../lib/mention'
   import { avatarColor, nameColor } from '../lib/avatar'
   import { render } from '../lib/markdown'
   import { store } from '../lib/state.svelte'
@@ -25,7 +26,10 @@
 
   const mine = $derived(store.me?.id === m.authorId)
   const canDelete = $derived(mine || (store.selected ? store.canManage(store.selected) : false))
-  const html = $derived(render(m.content))
+  const members = $derived([...store.users.values()])
+  const html = $derived(render(m.content, { users: members, me: store.me?.id }))
+  // Someone else @mentioned me (or @everyone): the bubble gets a gold edge.
+  const mentioned = $derived(!mine && !!store.me && mentionsMe(m.content, members, store.me.id))
 
   // Just sent or received (not history): slides in.
   const fresh = untrack(() => Date.now() - m.createdAt < 4000) // decided once, at mount
@@ -71,7 +75,7 @@
   {#if !mine}
     <div class="side">{#if head}<Avatar user={author} id={m.authorId} size={32} />{/if}</div>
   {/if}
-  <div class="bubble" class:editing class:has-img={!!m.image}>
+  <div class="bubble" class:mentioned class:editing class:has-img={!!m.image}>
     {#if head && !mine}<div class="who" style="color:{whoColor}">{store.nick(m.authorId)}</div>{/if}
     {#if editing}
       <!-- svelte-ignore a11y_autofocus -->
@@ -121,6 +125,10 @@
   .bubble.has-img { padding-top: 4px; }
   .bubble.editing { width: min(70%, 420px); max-width: none; }
 
+  .bubble.mentioned { background: #3a3424; box-shadow: inset 3px 0 0 #f0b232, 0 1px 1px rgba(0, 0, 0, 0.18); }
+  .text :global(.mention) { padding: 0 3px; border-radius: 4px; font-weight: 600; background: rgba(139, 124, 246, 0.24); color: #d9d3ff; }
+  .text :global(.mention.me) { background: rgba(240, 178, 50, 0.22); color: #ffd98a; }
+  .mine .text :global(.mention), .mine .text :global(.mention.me) { background: rgba(255, 255, 255, 0.2); color: #fff; }
   .who { font-size: 13px; font-weight: 600; margin-bottom: 1px; }
 
   .content { display: flex; flex-wrap: wrap; align-items: flex-end; column-gap: 10px; }

@@ -29,3 +29,20 @@ describe('markdown', () => {
     expect(render('```\nfn main() {}\n```')).toContain('<pre><code>fn main() {}')
   })
 })
+
+describe('mentions in rendered messages', () => {
+  const env = { users: [{ id: 1, nickname: 'Rigel' }, { id: 2, nickname: 'Budi' }], me: 1 }
+  test('a mention becomes a pill, mine is marked, the text is kept as typed', () => {
+    const html = render('yo @budi and @RIGEL', env)
+    expect(html).toContain('<span class="mention">@budi</span>')
+    expect(html).toContain('<span class="mention me">@RIGEL</span>')
+  })
+  test('not inside code, and names are escaped', () => {
+    expect(render('`@budi`', env)).not.toContain('class="mention')
+    const html = render('hi @<b>', { users: [{ id: 3, nickname: '<b>' }], me: 1 })
+    expect(html).toContain('<span class="mention">@&lt;b&gt;</span>')
+  })
+  test('without env it renders as before', () => {
+    expect(render('yo @budi')).not.toContain('mention')
+  })
+})
