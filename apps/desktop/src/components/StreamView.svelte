@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, errText } from '../lib/api'
-  import { CODEC_STRING, decodableCodecs, parseAu, statsLine, type CodecName } from '../lib/stream'
+  import { CODEC_STRING, decodableCodecs, KeyGate, parseAu, statsLine, type CodecName } from '../lib/stream'
   import { store } from '../lib/state.svelte'
   import type { Id } from '../lib/types'
 
@@ -21,7 +21,7 @@
     const ctx = canvas.getContext('2d')!
     let decoder: VideoDecoder | null = null
     let codec: CodecName | null = null
-    let needKey = true
+    const gate = new KeyGate(() => void api.streamRequestKey(userId))
     let n = 0
     let closed = false
 
@@ -44,8 +44,8 @@
       decoder = new VideoDecoder({
         output: draw,
         error: () => {
-          needKey = true // the next key frame starts a new decoder
-          decoder = null
+          decoder = null // the next key frame starts a new decoder
+          gate.broken()
         },
       })
       decoder.configure({ codec: CODEC_STRING[c], optimizeForLatency: true })
@@ -56,14 +56,13 @@
       const au = parseAu(buf)
       if (!au) return
       if (au.codec !== codec || !decoder || decoder.state === 'closed') {
-        if (!au.key) return
+        if (!au.key) {
+          gate.broken()
+          return
+        }
         fresh(au.codec)
-        needKey = false
       }
-      if (needKey && !au.key) return
-      needKey = false
-      // Drop frames instead of queueing when the decoder falls behind: latency over completeness.
-      if (decoder!.decodeQueueSize > 3 && !au.key) return
+      if (!gate.accept(au, decoder!.decodeQueueSize)) return
       decoder!.decode(new EncodedVideoChunk({ type: au.key ? 'key' : 'delta', timestamp: n++ * 16_667, data: au.data }))
     }
 

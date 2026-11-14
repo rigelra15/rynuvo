@@ -33,8 +33,16 @@ pub async fn stream_go_live(core: State<'_, Core>, source_id: String, preset: St
 }
 
 #[tauri::command]
-pub fn stream_stop(core: State<'_, Core>) {
-    core.stream.stop_live();
+pub async fn stream_stop(core: State<'_, Core>) -> Result<(), String> {
+    // Stopping capture waits on the OS; keep it off the UI thread.
+    let ctl = core.stream.clone();
+    tauri::async_runtime::spawn_blocking(move || ctl.stop_live()).await.map_err(|e| e.to_string())
+}
+
+/// The webview decoder lost its reference chain: ask the streamer for a key frame.
+#[tauri::command]
+pub fn stream_request_key(core: State<'_, Core>, user_id: Id) {
+    core.stream.request_key(user_id);
 }
 
 #[tauri::command]

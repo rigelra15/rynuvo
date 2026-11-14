@@ -1,7 +1,7 @@
 //! ScreenCaptureKit: displays and windows, with system audio minus Rynuvo's own sound.
 use screencapturekit::prelude::*;
 
-use super::{AudioSink, CaptureOpts, PERMISSION, Source, SourceKind, VideoSink, fit};
+use super::{AudioSink, CaptureOpts, EndedSink, PERMISSION, Source, SourceKind, VideoSink, fit};
 use crate::stream::encode::Frame;
 
 pub struct Capture {
@@ -89,7 +89,7 @@ impl SCStreamOutputTrait for Handler {
     }
 }
 
-pub fn start(source_id: &str, opts: CaptureOpts, video: VideoSink, audio: AudioSink) -> Result<Capture, String> {
+pub fn start(source_id: &str, opts: CaptureOpts, video: VideoSink, audio: AudioSink, ended: EndedSink) -> Result<Capture, String> {
     let c = content()?;
     let (kind, id) = source_id.split_once(':').ok_or("Unknown source")?;
     let id: u32 = id.parse().map_err(|_| "Unknown source")?;
@@ -123,7 +123,12 @@ pub fn start(source_id: &str, opts: CaptureOpts, video: VideoSink, audio: AudioS
         .with_excludes_current_process_audio(true)
         .with_sample_rate(48_000)
         .with_channel_count(2);
-    let mut stream = SCStream::new(&filter, &config).map_err(|e| format!("{e:?}"))?;
+    let is_window = kind == "window";
+    let on_error = screencapturekit::stream::ErrorHandler::new(move |e| {
+        tracing::warn!("capture stopped: {e}");
+        ended(if is_window { "The shared window was closed".into() } else { format!("Screen capture stopped ({e})") });
+    });
+    let mut stream = SCStream::new_with_delegate(&filter, &config, on_error).map_err(|e| format!("{e:?}"))?;
     let h1 = Handler { video: video.clone(), audio: audio.clone() };
     let h2 = Handler { video, audio };
     stream.add_output_handler(h1, SCStreamOutputType::Screen).map_err(|e| format!("{e:?}"))?;

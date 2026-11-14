@@ -72,8 +72,8 @@ pub fn run() {
             let h2 = app.handle().clone();
             let stream = stream::ctl::StreamCtl::new(
                 voice.clone(),
-                Arc::new(|source: &str, opts, video, audio| {
-                    let c = stream::capture::start(source, opts, video, audio)?;
+                Arc::new(|source: &str, opts, video, audio, ended| {
+                    let c = stream::capture::start(source, opts, video, audio, ended)?;
                     Ok(Box::new(move || c.stop()) as Box<dyn FnOnce() + Send>)
                 }),
                 Arc::new(move |e| {
@@ -122,6 +122,7 @@ pub fn run() {
             stream_cmd::stream_watch,
             stream_cmd::stream_unwatch,
             stream_cmd::stream_set_volume,
+            stream_cmd::stream_request_key,
             voice_cmd::voice_state,
             voice_cmd::voice_join,
             voice_cmd::voice_leave,

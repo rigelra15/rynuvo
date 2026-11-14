@@ -34,6 +34,8 @@ pub enum SourceKind {
 pub type VideoSink = Arc<dyn Fn(Frame) + Send + Sync>;
 /// Interleaved stereo f32 at 48 kHz.
 pub type AudioSink = Arc<dyn Fn(&[f32]) + Send + Sync>;
+/// The source went away on its own (window closed, display unplugged, capture error).
+pub type EndedSink = Arc<dyn Fn(String) + Send + Sync>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct CaptureOpts {
@@ -109,12 +111,12 @@ pub fn sources() -> Result<Vec<Source>, String> {
     Err("Screen share is not supported on this system".into())
 }
 
-pub fn start(source_id: &str, opts: CaptureOpts, video: VideoSink, audio: AudioSink) -> Result<Capture, String> {
+pub fn start(source_id: &str, opts: CaptureOpts, video: VideoSink, audio: AudioSink, ended: EndedSink) -> Result<Capture, String> {
     #[cfg(any(target_os = "macos", windows))]
-    return os::start(source_id, opts, video, audio).map(|inner| Capture { inner });
+    return os::start(source_id, opts, video, audio, ended).map(|inner| Capture { inner });
     #[cfg(not(any(target_os = "macos", windows)))]
     {
-        let _ = (source_id, opts, video, audio);
+        let _ = (source_id, opts, video, audio, ended);
         Err("Screen share is not supported on this system".into())
     }
 }

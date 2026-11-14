@@ -66,6 +66,7 @@ export const api = {
     return invoke<void>('stream_watch', { userId, codecs, channel })
   },
   streamUnwatch: (userId: Id) => invoke<void>('stream_unwatch', { userId }),
+  streamRequestKey: (userId: Id) => invoke<void>('stream_request_key', { userId }),
   streamSetVolume: (userId: Id, volume: number) => invoke<void>('stream_set_volume', { userId, volume }),
   prefsGet: () => invoke<Prefs>('prefs_get'),
   prefsSet: (next: Prefs) => invoke<Prefs>('prefs_set', { next }),

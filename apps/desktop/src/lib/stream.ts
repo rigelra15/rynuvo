@@ -87,3 +87,53 @@ export function statsLine(s: Stats): string {
   const via = s.path === 'direct' ? 'P2P' : 'via server'
   return `${s.width}×${s.height} · ${Math.round(s.fps)} fps · ${LABEL[s.codec] ?? s.codec} · ${via}`
 }
+
+/** Most frames queued in the decoder before deltas are dropped (latency over completeness). */
+export const MAX_DECODE_QUEUE = 3
+const KEY_ASK_EVERY_MS = 500
+
+/**
+ * Decides which access units reach the decoder. A delta is only decodable when every frame since
+ * the last key frame was decoded, so any drop or decoder error skips to the next key frame and asks
+ * the streamer for one.
+ */
+export class KeyGate {
+  private needKey = true
+  private lastAsk = -Infinity
+
+  constructor(
+    private ask: () => void,
+    private now: () => number = () => performance.now(),
+  ) {}
+
+  private request() {
+    this.needKey = true
+    const t = this.now()
+    if (t - this.lastAsk >= KEY_ASK_EVERY_MS) {
+      this.lastAsk = t
+      this.ask()
+    }
+  }
+
+  /** True when `au` should be decoded; `queued` is the decoder's current queue size. */
+  accept(au: Au, queued: number): boolean {
+    if (au.key) {
+      this.needKey = false
+      return true
+    }
+    if (this.needKey) {
+      if (this.lastAsk !== -Infinity) this.request()
+      return false
+    }
+    if (queued > MAX_DECODE_QUEUE) {
+      this.request()
+      return false
+    }
+    return true
+  }
+
+  /** The decoder failed: start again from a key frame. */
+  broken() {
+    this.request()
+  }
+}

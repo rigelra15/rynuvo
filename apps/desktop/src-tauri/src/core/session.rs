@@ -97,12 +97,39 @@ impl Shared {
     }
 }
 
+/// Bytes of video allowed to wait for the WebSocket. Past this the stream is dropped (the viewer
+/// asks for a key frame) so voice behind it is never delayed by seconds of queued video.
+pub const MEDIA_BACKLOG_MAX: usize = 256 * 1024;
+
+/// Bytes queued for the WebSocket and not yet written.
+#[derive(Default, Clone)]
+struct Backlog(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Backlog {
+    /// Account for `b` and say whether to queue it.
+    fn offer(&self, b: &[u8]) -> bool {
+        use std::sync::atomic::Ordering;
+        let now = self.0.load(Ordering::Relaxed);
+        if b.first() == Some(&rynuvo_proto::voice_wire::UP_VIDEO) && now + b.len() > MEDIA_BACKLOG_MAX {
+            return false;
+        }
+        self.0.fetch_add(b.len(), Ordering::Relaxed);
+        true
+    }
+
+    fn taken(&self, n: usize) {
+        use std::sync::atomic::Ordering;
+        let _ = self.0.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v.saturating_sub(n)));
+    }
+}
+
 /// Handle to a running session.
 #[derive(Clone)]
 pub struct SessionHandle {
     shared: Arc<Mutex<Shared>>,
     out: mpsc::UnboundedSender<WsClientMsg>,
     out_bin: mpsc::UnboundedSender<Vec<u8>>,
+    backlog: Backlog,
     kick: mpsc::UnboundedSender<()>,
     stop: watch::Sender<bool>,
 }
@@ -120,7 +147,12 @@ impl SessionHandle {
 
     /// Send a binary frame (voice packets on the WebSocket path). Dropped while disconnected.
     pub fn send_binary(&self, b: Vec<u8>) {
-        let _ = self.out_bin.send(b);
+        if self.backlog.offer(&b) {
+            let n = b.len();
+            if self.out_bin.send(b).is_err() {
+                self.backlog.taken(n);
+            }
+        }
     }
 
     pub fn set_binary_sink(&self, sink: Option<mpsc::UnboundedSender<Vec<u8>>>) {
@@ -161,8 +193,9 @@ impl Session {
         let (bin_tx, bin_rx) = mpsc::unbounded_channel();
         let (stop_tx, stop_rx) = watch::channel(false);
         let (kick_tx, kick_rx) = mpsc::unbounded_channel();
-        let h = SessionHandle { shared: shared.clone(), out: out_tx, out_bin: bin_tx, kick: kick_tx, stop: stop_tx };
-        tokio::spawn(run(api, store, server, emit, shared, (out_rx, bin_rx, kick_rx), stop_rx, timing));
+        let backlog = Backlog::default();
+        let h = SessionHandle { shared: shared.clone(), out: out_tx, out_bin: bin_tx, backlog: backlog.clone(), kick: kick_tx, stop: stop_tx };
+        tokio::spawn(run(api, store, server, emit, shared, (out_rx, bin_rx, kick_rx), backlog, stop_rx, timing));
         h
     }
 }
@@ -174,6 +207,7 @@ async fn run(
     emit: Emit,
     shared: Arc<Mutex<Shared>>,
     (mut out_rx, mut bin_rx, mut kick_rx): (mpsc::UnboundedReceiver<WsClientMsg>, mpsc::UnboundedReceiver<Vec<u8>>, mpsc::UnboundedReceiver<()>),
+    backlog: Backlog,
     mut stop: watch::Receiver<bool>,
     timing: Timing,
 ) {
@@ -184,7 +218,7 @@ async fn run(
         }
         emit(SessionEvent::Conn(ConnState::Connecting));
         while kick_rx.try_recv().is_ok() {} // requests made before this attempt are already served
-        let end = connect_once(&api, &emit, &shared, (&mut out_rx, &mut bin_rx, &mut kick_rx), &mut stop, &mut attempt, timing)
+        let end = connect_once(&api, &emit, &shared, (&mut out_rx, &mut bin_rx, &mut kick_rx), &backlog, &mut stop, &mut attempt, timing)
             .await
             .unwrap_or_else(|e| {
                 tracing::debug!("ws connect failed: {e}");
@@ -228,6 +262,7 @@ async fn connect_once(
     emit: &Emit,
     shared: &Arc<Mutex<Shared>>,
     (out_rx, bin_rx, kick_rx): (&mut mpsc::UnboundedReceiver<WsClientMsg>, &mut mpsc::UnboundedReceiver<Vec<u8>>, &mut mpsc::UnboundedReceiver<()>),
+    backlog: &Backlog,
     stop: &mut watch::Receiver<bool>,
     attempt: &mut u32,
     timing: Timing,
@@ -261,6 +296,7 @@ async fn connect_once(
             }
             bin = bin_rx.recv() => {
                 if let Some(b) = bin {
+                    backlog.taken(b.len());
                     if ready_seen && !send_in_time(&mut ws, WsMsg::binary(b)).await {
                         return Ok(End::Retry);
                     }
@@ -354,6 +390,22 @@ async fn catch_up(api: &Api, emit: &Emit, shared: &Arc<Mutex<Shared>>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn video_is_dropped_when_the_socket_falls_behind_but_voice_is_not() {
+        use rynuvo_proto::voice_wire::{UP_AUDIO, UP_VIDEO};
+        let q = super::Backlog::default();
+        let video = vec![UP_VIDEO; 1000];
+        let mut sent = 0;
+        for _ in 0..1000 {
+            if q.offer(&video) {
+                sent += 1;
+            }
+        }
+        assert!(sent < 1000 && sent * 1000 <= super::MEDIA_BACKLOG_MAX + 1000, "video stops at the cap ({sent})");
+        assert!(q.offer(&[UP_AUDIO; 100]), "voice always goes");
+        q.taken(500_000);
+        assert!(q.offer(&video), "video resumes once the socket drains");
+    }
     use super::*;
 
     #[test]

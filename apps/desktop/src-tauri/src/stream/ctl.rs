@@ -8,12 +8,12 @@ use std::{
 use rynuvo_proto::{Id, WsClientMsg, WsServerMsg, voice_wire::VoiceKey};
 
 use super::{
-    capture::{AudioSink, CaptureOpts, VideoSink},
+    capture::{AudioSink, CaptureOpts, EndedSink, VideoSink},
     engine::{self, Broadcast, EventSink, FrameOut, Net, Stopper, StreamEvent, Watch},
 };
 
 /// Starts capturing `source_id` (from `capture::sources`) into the sinks.
-pub type StartCapture = Arc<dyn Fn(&str, CaptureOpts, VideoSink, AudioSink) -> Result<Stopper, String> + Send + Sync>;
+pub type StartCapture = Arc<dyn Fn(&str, CaptureOpts, VideoSink, AudioSink, EndedSink) -> Result<Stopper, String> + Send + Sync>;
 use crate::{core::session::SessionEvent, voice::ctl::VoiceCtl};
 
 /// The server's STUN ports (both answer, which also tells us the NAT type).
@@ -83,8 +83,18 @@ impl StreamCtl {
         let p = engine::preset(preset);
         let source = source_id.to_string();
         let capture = self.capture.clone();
-        let start: engine::CaptureFn = Arc::new(move |opts, video, audio| capture(&source, opts, video, audio));
-        let b = Broadcast::start(start, p, self.net(), self.events.clone())?;
+        let start: engine::CaptureFn = Arc::new(move |opts, video, audio, ended| capture(&source, opts, video, audio, ended));
+        let ctl = self.clone();
+        let events: EventSink = Arc::new(move |e| {
+            if let StreamEvent::Error { .. } = &e {
+                // The source or the encoder died: end the stream for everyone. Off this thread, which
+                // may be the capture's own callback.
+                let c = ctl.clone();
+                ctl.rt.spawn_blocking(move || c.stop_live());
+            }
+            ctl.emit(e);
+        });
+        let b = Broadcast::start(start, p, self.net(), events)?;
         self.st.lock().unwrap().live = Some(b);
         let codecs = super::encode::available().iter().map(|c| c.name().to_string()).collect();
         self.voice.send_ws(WsClientMsg::StreamStart { codecs, preset: preset.to_string() });
@@ -128,15 +138,25 @@ impl StreamCtl {
         }
     }
 
+    pub fn request_key(&self, user_id: Id) {
+        if let Some((w, _)) = self.st.lock().unwrap().watches.get(&user_id) {
+            w.request_key();
+        }
+    }
+
     pub fn set_stream_volume(&self, user_id: Id, v: f32) {
         self.voice.set_stream_volume(user_id, v);
     }
 
-    fn end_watch(&self, user_id: Id, reason: &str) {
+    /// `local`: I gave up (no data), so the server and the streamer must be told.
+    fn end_watch(&self, user_id: Id, reason: &str, local: bool) {
         let w = self.st.lock().unwrap().watches.remove(&user_id);
         if let Some((w, _)) = w {
             w.stop();
             self.voice.remove_stream(user_id);
+            if local {
+                self.voice.send_ws(WsClientMsg::StreamUnwatch { user_id });
+            }
             self.emit(StreamEvent::Ended { user_id, reason: reason.into() });
         }
     }
@@ -151,7 +171,7 @@ impl StreamCtl {
         }
         let ids: Vec<Id> = self.st.lock().unwrap().watches.keys().copied().collect();
         for id in ids {
-            self.end_watch(id, reason);
+            self.end_watch(id, reason, false);
         }
     }
 
@@ -204,7 +224,7 @@ impl StreamCtl {
                     }
                 } else if Some(*viewer) == me {
                     if !*joined {
-                        self.end_watch(*streamer, "The stream ended");
+                        self.end_watch(*streamer, "The stream ended", false);
                         return;
                     }
                     let Some(k) = VoiceKey::from_b64(key) else { return };
@@ -215,7 +235,7 @@ impl StreamCtl {
                     let voice = self.voice.clone();
                     let ctl = self.clone();
                     let events: EventSink = Arc::new(move |e| match e {
-                        StreamEvent::Ended { user_id, reason } => ctl.end_watch(user_id, &reason),
+                        StreamEvent::Ended { user_id, reason } => ctl.end_watch(user_id, &reason, true),
                         e => ctl.emit(e),
                     });
                     w.connect(k, &net, out, Arc::new(move |u, pcm| voice.stream_audio(u, pcm)), events);
@@ -235,7 +255,7 @@ impl StreamCtl {
                         self.emit(StreamEvent::Ended { user_id: *user_id, reason: "Your stream ended".into() });
                     }
                 } else {
-                    self.end_watch(*user_id, "The stream ended");
+                    self.end_watch(*user_id, "The stream ended", false);
                 }
             }
             WsServerMsg::VoiceEnded { .. } => self.end_all("You left voice"),

@@ -50,13 +50,29 @@ async fn eventually(what: &str, secs: u64, f: impl Fn() -> bool) {
 
 /// A moving gradient at 30 fps, as tightly packed BGRA.
 fn synthetic() -> StartCapture {
-    Arc::new(|_source: &str, opts: CaptureOpts, video, _audio| {
+    synthetic_with(None, false)
+}
+
+/// `end_after`: the source goes away (window closed) after that long. `broken`: 0×0 frames no
+/// encoder accepts.
+fn synthetic_with(end_after: Option<Duration>, broken: bool) -> StartCapture {
+    Arc::new(move |_source: &str, opts: CaptureOpts, video, _audio, ended| {
         let stop = Arc::new(AtomicBool::new(false));
         let s2 = stop.clone();
         let (w, h) = (320u32.min(opts.max_width), 240u32.min(opts.max_height));
         std::thread::spawn(move || {
             let mut t = 0u8;
+            let started = std::time::Instant::now();
             while !s2.load(Ordering::Relaxed) {
+                if end_after.is_some_and(|d| started.elapsed() >= d) {
+                    ended("The shared window was closed".into());
+                    return;
+                }
+                if broken {
+                    video(Frame::Bgra { width: 0, height: 0, data: Vec::new() });
+                    std::thread::sleep(Duration::from_millis(33));
+                    continue;
+                }
                 let mut data = vec![0u8; (w * h * 4) as usize];
                 for (i, px) in data.chunks_exact_mut(4).enumerate() {
                     let (x, y) = (i as u32 % w, i as u32 / w);
@@ -79,12 +95,16 @@ struct Peer {
 }
 
 async fn peer(app: &TestApp, nick: &str, ch: i64) -> Peer {
+    peer_with(app, nick, ch, synthetic()).await
+}
+
+async fn peer_with(app: &TestApp, nick: &str, ch: i64, capture: StartCapture) -> Peer {
     let u = app.user(nick).await;
     let base = format!("http://{}", app.addr);
     let voice = VoiceCtl::new(Arc::new(|| Box::new(NullBackend(None)) as Box<dyn AudioBackend>), Arc::new(|_| {}));
     let events = Arc::new(Mutex::new(Vec::new()));
     let ev2 = events.clone();
-    let stream = StreamCtl::new(voice.clone(), synthetic(), Arc::new(move |e| ev2.lock().unwrap().push(e)), tokio::runtime::Handle::current());
+    let stream = StreamCtl::new(voice.clone(), capture, Arc::new(move |e| ev2.lock().unwrap().push(e)), tokio::runtime::Handle::current());
     let (v2, s2) = (voice.clone(), stream.clone());
     let emit = Arc::new(move |e: SessionEvent| {
         v2.on_session(&e);
@@ -189,4 +209,68 @@ async fn go_live_needs_voice() {
     a.voice.leave();
     let err = a.stream.go_live("synthetic:0", "1080p60").unwrap_err();
     assert_eq!(err, "Join a voice channel first");
+}
+
+fn ended_for(p: &Peer, user: i64) -> bool {
+    p.events.lock().unwrap().iter().any(|e| matches!(e, StreamEvent::Ended { user_id, .. } if *user_id == user))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn closed_source_ends_the_stream_for_everyone() {
+    let app = TestApp::spawn().await;
+    let u = app.user("Owner").await;
+    let ch = app.create_channel(&u.token, "voice", "Mabar").await.id;
+    let a = peer_with(&app, "Dimas", ch, synthetic_with(Some(Duration::from_secs(2)), false)).await;
+    let b = peer(&app, "Ayu", ch).await;
+    a.stream.go_live("synthetic:0", "720p30").unwrap();
+    eventually("stream registered", 5, || app.state.voice.streams().iter().any(|s| s.user_id == a.user)).await;
+    let (aus, out) = collector();
+    b.stream.watch(a.user, vec!["h264".into()], out).unwrap();
+    eventually("frames", 10, || !aus.lock().unwrap().is_empty()).await;
+    eventually("server forgets the stream", 5, || app.state.voice.streams().is_empty()).await;
+    eventually("viewer told", 5, || ended_for(&b, a.user)).await;
+    eventually("streamer told", 5, || a.events.lock().unwrap().iter().any(|e| matches!(e, StreamEvent::Error { message } if message.contains("closed")))).await;
+    assert!(!a.stream.is_live());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn encoder_failure_ends_the_stream() {
+    let app = TestApp::spawn().await;
+    let u = app.user("Owner").await;
+    let ch = app.create_channel(&u.token, "voice", "Mabar").await.id;
+    let a = peer_with(&app, "Dimas", ch, synthetic_with(None, true)).await;
+    let b = peer(&app, "Ayu", ch).await;
+    a.stream.go_live("synthetic:0", "720p30").unwrap();
+    eventually("stream registered", 5, || app.state.voice.streams().iter().any(|s| s.user_id == a.user)).await;
+    let (_aus, out) = collector();
+    b.stream.watch(a.user, vec!["h264".into()], out).unwrap();
+    eventually("server forgets the stream", 10, || app.state.voice.streams().is_empty()).await;
+    assert!(!a.stream.is_live());
+    eventually("viewer told", 5, || ended_for(&b, a.user)).await;
+}
+
+/// The viewer gives up on its own (nothing arrives): the server must free the viewer slot and the
+/// streamer must stop sending to it.
+#[tokio::test(flavor = "multi_thread")]
+async fn viewer_timeout_releases_the_watch() {
+    let app = TestApp::spawn().await;
+    let u = app.user("Owner").await;
+    let ch = app.create_channel(&u.token, "voice", "Mabar").await.id;
+    let a = peer(&app, "Dimas", ch).await;
+    let b = peer(&app, "Ayu", ch).await;
+    a.stream.go_live("synthetic:0", "720p30").unwrap();
+    eventually("stream registered", 5, || app.state.voice.streams().iter().any(|s| s.user_id == a.user)).await;
+    let (aus, out) = collector();
+    b.stream.watch(a.user, vec!["h264".into()], out).unwrap();
+    eventually("frames", 10, || !aus.lock().unwrap().is_empty()).await;
+    let q = &app.state.relay.quota;
+    q.add(q.limit()); // relay stops carrying video
+    eventually("viewer times out", 15, || ended_for(&b, a.user)).await;
+    eventually("streamer drops the viewer", 5, || {
+        a.events.lock().unwrap().iter().rev().find_map(|e| match e {
+            StreamEvent::Live { viewers, .. } => Some(viewers.is_empty()),
+            _ => None,
+        }) == Some(true)
+    })
+    .await;
 }

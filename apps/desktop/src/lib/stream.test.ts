@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { applyStreams, codecOrder, parseAu, statsLine, type StreamInfo } from './stream'
+import { applyStreams, codecOrder, KeyGate, parseAu, statsLine, type Au, type StreamInfo } from './stream'
 
 const s = (userId: number, channelId = 10): StreamInfo => ({ userId, channelId, codecs: ['h264'], preset: '1080p60' })
 
@@ -50,4 +50,42 @@ test('statsLine', () => {
   expect(statsLine({ width: 1920, height: 1080, fps: 59.6, codec: 'h264', path: 'direct' })).toBe('1920×1080 · 60 fps · H.264 · P2P')
   expect(statsLine({ width: 1280, height: 720, fps: 30, codec: 'hevc', path: 'relay' })).toBe('1280×720 · 30 fps · HEVC · via server')
   expect(statsLine({ width: 0, height: 0, fps: 0, codec: '', path: 'connecting' })).toBe('Connecting…')
+})
+
+describe('KeyGate', () => {
+  const au = (key: boolean): Au => ({ codec: 'h264', key, ts: 0, data: new Uint8Array([0, 0, 0, 1]) })
+
+  test('waits for a key frame, then decodes deltas in order', () => {
+    const asks: number[] = []
+    const g = new KeyGate(() => asks.push(1), () => 0)
+    expect(g.accept(au(false), 0)).toBe(false)
+    expect(g.accept(au(true), 0)).toBe(true)
+    expect(g.accept(au(false), 0)).toBe(true)
+  })
+
+  test('a dropped delta breaks the chain: skip until the next key frame and ask for one', () => {
+    let now = 0
+    const asks: number[] = []
+    const g = new KeyGate(() => asks.push(now), () => now)
+    g.accept(au(true), 0)
+    expect(g.accept(au(false), 10)).toBe(false) // decoder backed up
+    expect(asks).toEqual([0])
+    now = 100
+    expect(g.accept(au(false), 0)).toBe(false) // not decodable without its reference
+    expect(asks).toEqual([0]) // asked recently
+    now = 600
+    g.accept(au(false), 0)
+    expect(asks).toEqual([0, 600])
+    expect(g.accept(au(true), 0)).toBe(true)
+    expect(g.accept(au(false), 0)).toBe(true)
+  })
+
+  test('a decoder error asks for a key frame', () => {
+    const asks: number[] = []
+    const g = new KeyGate(() => asks.push(1), () => 0)
+    g.accept(au(true), 0)
+    g.broken()
+    expect(asks).toHaveLength(1)
+    expect(g.accept(au(false), 0)).toBe(false)
+  })
 })

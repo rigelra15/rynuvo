@@ -23,7 +23,7 @@ use windows_capture::{
     window::Window,
 };
 
-use super::{AudioSink, CaptureOpts, Source, SourceKind, VideoSink, fit, scale_bgra};
+use super::{AudioSink, CaptureOpts, EndedSink, Source, SourceKind, VideoSink, fit, scale_bgra};
 use crate::stream::encode::Frame;
 
 pub struct Capture {
@@ -71,11 +71,13 @@ pub fn sources() -> Result<Vec<Source>, String> {
 struct Flags {
     video: VideoSink,
     opts: CaptureOpts,
+    ended: EndedSink,
 }
 
 struct Handler {
     video: VideoSink,
     opts: CaptureOpts,
+    ended: EndedSink,
 }
 
 impl GraphicsCaptureApiHandler for Handler {
@@ -83,7 +85,7 @@ impl GraphicsCaptureApiHandler for Handler {
     type Error = String;
 
     fn new(ctx: Context<Flags>) -> Result<Self, String> {
-        Ok(Handler { video: ctx.flags.video, opts: ctx.flags.opts })
+        Ok(Handler { video: ctx.flags.video, opts: ctx.flags.opts, ended: ctx.flags.ended })
     }
 
     fn on_frame_arrived(&mut self, frame: &mut WgcFrame, _c: InternalCaptureControl) -> Result<(), String> {
@@ -100,12 +102,17 @@ impl GraphicsCaptureApiHandler for Handler {
         (self.video)(Frame::Bgra { width: dw, height: dh, data });
         Ok(())
     }
+
+    fn on_closed(&mut self) -> Result<(), String> {
+        (self.ended)("The shared window was closed".into());
+        Ok(())
+    }
 }
 
-pub fn start(source_id: &str, opts: CaptureOpts, video: VideoSink, audio: AudioSink) -> Result<Capture, String> {
+pub fn start(source_id: &str, opts: CaptureOpts, video: VideoSink, audio: AudioSink, ended: EndedSink) -> Result<Capture, String> {
     let (kind, id) = source_id.split_once(':').ok_or("Unknown source")?;
     let interval = MinimumUpdateIntervalSettings::Custom(Duration::from_micros(1_000_000 / opts.fps.max(1) as u64));
-    let flags = Flags { video, opts };
+    let flags = Flags { video, opts, ended };
     let gone = |e: String| format!("Could not start the capture: {e}");
     let (control, loopback) = match kind {
         "screen" => {
