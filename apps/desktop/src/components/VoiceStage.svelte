@@ -4,6 +4,8 @@
   import { membersOf } from '../lib/voice'
   import { avatarColor } from '../lib/avatar'
   import { pop } from '../lib/motion'
+  import { bento } from '../lib/bento'
+  import { groupTitle } from '../lib/home'
   import type { Channel, Id } from '../lib/types'
   import Icon from './Icon.svelte'
   import GoLiveDialog from './GoLiveDialog.svelte'
@@ -20,9 +22,16 @@
   const glow = $derived(
     list.slice(0, 2).map((m) => avatarColor(store.user(m.userId) ?? { id: m.userId })),
   )
-  // Columns by head count: 1 · 2×2 · 3×2 · 4×2 fit the minimum window (900×560) without scrolling.
-  const cols = $derived(list.length <= 1 ? 1 : list.length <= 4 ? 2 : list.length <= 6 ? 3 : Math.min(5, Math.ceil(list.length / 2)))
-  const avatarSize = $derived(strip ? 36 : list.length > 4 ? 56 : 72)
+  const colorOf = (id: Id) => avatarColor(store.user(id) ?? { id })
+
+  // Bento grid: tiles as big as the stage allows (16:9), re-laid out when the window resizes.
+  const GAP = 10
+  let gw = $state(0)
+  let gh = $state(0)
+  const layout = $derived(bento(list.length, gw, gh, GAP))
+  const avatarSize = $derived(strip ? 36 : Math.round(Math.min(112, Math.max(40, layout.h * 0.34))))
+
+  const who = $derived(groupTitle(list.map((m) => store.nick(m.userId))))
 
   function share() {
     if (store.live) store.stopLive()
@@ -37,37 +46,52 @@
 
 <section class="stage" class:anyone-speaking={anyoneSpeaking} style="--g2:{glow[0] ?? 'var(--accent)'};--g3:{glow[1] ?? glow[0] ?? 'var(--accent)'}">
   <div class="glow" aria-hidden="true"></div>
-  {#if watching !== null && joined}
-    {#key watching}<StreamView userId={watching} />{/key}
-  {/if}
-  {#if list.length}
-    <div class="grid" class:strip style="--cols:{cols}">
-      {#each list as m (m.userId)}
-        {@const streaming = store.isLive(m.userId)}
-        <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-        <div
-          transition:pop
-          class="tile"
-          class:talk={store.speaking.has(m.userId)}
-          class:watchable={streaming && joined && m.userId !== store.me?.id}
-          title={streaming && joined && m.userId !== store.me?.id ? `Watch ${store.nick(m.userId)}'s stream` : undefined}
-          onclick={() => open(m.userId)}
-          oncontextmenu={(e) => { e.preventDefault(); onMenu(m.userId, e) }}
-        >
-          {#if streaming}<span class="badge">LIVE</span>{/if}
-          <Avatar user={store.user(m.userId)} id={m.userId} size={avatarSize} speaking={store.speaking.has(m.userId)} />
-          <span class="n">
-            {store.nick(m.userId)}
-            {#if m.deafened}<Icon name="headphonesOff" size={14} />{:else if m.muted}<Icon name="micOff" size={14} />{/if}
-          </span>
+  {#if !joined}
+    <!-- Before joining: who's in here, and one big button. -->
+    <div class="prejoin">
+      {#if list.length}
+        <div class="peek">
+          {#each list.slice(0, 4) as m (m.userId)}
+            <span class="pt" style="--c:{colorOf(m.userId)}" transition:pop><Avatar user={store.user(m.userId)} id={m.userId} size={40} speaking={store.speaking.has(m.userId)} /></span>
+          {/each}
+          {#if list.length > 4}<span class="pt more">+{list.length - 4}</span>{/if}
         </div>
-      {/each}
+      {/if}
+      <h2>{channel.name}</h2>
+      <p>{list.length ? `${who} ${list.length === 1 ? 'is' : 'are'} currently in voice` : 'No one is here yet. Be the first!'}</p>
+      <button class="joinbtn" onclick={() => store.joinVoice(channel.id)}>Join Voice</button>
     </div>
   {:else}
-    <p class="empty muted">Nobody is here yet.</p>
-  {/if}
+    {#if watching !== null}
+      {#key watching}<StreamView userId={watching} />{/key}
+    {/if}
+    <div class="area" class:strip bind:clientWidth={gw} bind:clientHeight={gh}>
+      <div class="grid" class:strip style={strip ? '' : `width:${layout.cols * layout.w + (layout.cols - 1) * GAP}px`}>
+        {#each list as m (m.userId)}
+          {@const streaming = store.isLive(m.userId)}
+          {@const talking = store.speaking.has(m.userId)}
+          <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+          <div
+            transition:pop
+            class="tile"
+            class:talk={talking}
+            class:watchable={streaming && m.userId !== store.me?.id}
+            style="--c:{colorOf(m.userId)};{strip ? '' : `width:${layout.w}px;height:${layout.h}px`}"
+            title={streaming && m.userId !== store.me?.id ? `Watch ${store.nick(m.userId)}'s stream` : undefined}
+            onclick={() => open(m.userId)}
+            oncontextmenu={(e) => { e.preventDefault(); onMenu(m.userId, e) }}
+          >
+            {#if streaming}<span class="badge">LIVE</span>{/if}
+            <Avatar user={store.user(m.userId)} id={m.userId} size={avatarSize} speaking={talking} />
+            <span class="n">
+              {#if m.deafened}<Icon name="headphonesOff" size={13} />{:else if m.muted}<Icon name="micOff" size={13} />{/if}
+              {store.nick(m.userId)}
+            </span>
+          </div>
+        {/each}
+      </div>
+    </div>
 
-  {#if joined}
     {#if store.voicePath === 'ws'}<p class="path muted">via server (WebSocket)</p>{/if}
     {#if store.live}
       <p class="path muted">
@@ -84,15 +108,16 @@
       <button class="ctl" class:on={!!store.live} title={store.live ? 'Stop streaming' : 'Share your screen'} onclick={share}><Icon name="screen" /></button>
       <button class="ctl leave" title="Leave voice" onclick={() => store.leaveVoice()}><Icon name="leave" /></button>
     </div>
-  {:else}
-    <div class="bar"><button class="btn primary" onclick={() => store.joinVoice(channel.id)}>Join voice</button></div>
   {/if}
 </section>
 
 {#if picking}<GoLiveDialog onClose={() => (picking = false)} />{/if}
 
 <style>
-  .stage { position: relative; isolation: isolate; overflow: hidden; flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 18px; gap: 14px; }
+  .stage {
+    position: relative; isolation: isolate; overflow: hidden; flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 16px; gap: 12px;
+    background: radial-gradient(120% 80% at 50% 115%, color-mix(in srgb, var(--accent) 55%, #2b2fb0) 0%, #20205a 45%, #101018 100%);
+  }
   /* Slow drifting glow behind the tiles. Moved with transform only (compositor), so it costs no repaints. */
   .glow {
     position: absolute; inset: -30%; z-index: -1; pointer-events: none; opacity: 0.55; transition: opacity 600ms;
@@ -107,27 +132,40 @@
     from { transform: translate(-6%, -4%) rotate(0deg); }
     to { transform: translate(6%, 5%) rotate(12deg); }
   }
-  /* Tiles have a size cap and the grid is centred, so the circle's member counts never scroll. */
-  .grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 240px)); gap: 12px; align-content: center; justify-content: center; }
+  .prejoin { margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 20px; }
+  .peek { display: flex; gap: 8px; margin-bottom: 18px; }
+  .pt { width: 132px; height: 74px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in srgb, var(--c) 45%, #d9d6e8); }
+  .pt.more { background: rgba(255, 255, 255, 0.12); color: #fff; font-weight: 700; width: 74px; }
+  .prejoin h2 { margin: 0; font-size: 28px; font-weight: 800; color: #fff; }
+  .prejoin p { margin: 0 0 14px; color: rgba(255, 255, 255, 0.78); font-size: 14px; }
+  .joinbtn { background: #fff; color: #16171c; font-weight: 600; padding: 9px 18px; border-radius: 8px; transition: transform 120ms, box-shadow 120ms; }
+  .joinbtn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
+
+  .area { flex: 1; min-height: 0; display: grid; place-items: center; }
+  .grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
   .tile {
-    position: relative; aspect-ratio: 16 / 10; background: rgba(29, 30, 37, 0.72); border-radius: 12px;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
-    box-shadow: inset 0 0 0 1px var(--line); transition: box-shadow 120ms;
+    position: relative; border-radius: 12px; overflow: hidden; display: grid; place-items: center;
+    background: color-mix(in srgb, var(--c) 30%, #1a1b22);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); transition: box-shadow 140ms;
   }
-  .tile.talk { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
+  .tile.talk { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--c) 70%, #fff); }
   .tile.watchable { cursor: pointer; }
-  .tile.watchable:hover { background: var(--elev); }
+  .tile.watchable:hover { filter: brightness(1.1); }
   .badge { position: absolute; top: 8px; left: 8px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; z-index: 2; }
-  .grid.strip { flex: 0 0 auto; grid-template-columns: repeat(auto-fill, minmax(120px, 160px)); justify-content: center; }
-  .grid.strip .tile { aspect-ratio: 16 / 9; }
+  .area.strip { flex: 0 0 auto; display: block; }
+  .grid.strip { flex-wrap: wrap; }
+  .grid.strip .tile { width: 150px; height: 84px; }
+  .n {
+    position: absolute; left: 8px; bottom: 8px; z-index: 2; max-width: calc(100% - 16px); display: flex; align-items: center; gap: 5px;
+    padding: 3px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.45); color: #fff; font-size: 13px; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   @media (prefers-reduced-motion: reduce) {
     .glow { animation: none; }
   }
-  .n { position: relative; z-index: 2; display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .empty { flex: 1; display: grid; place-items: center; }
-  .path { text-align: center; font-size: 12px; margin: 0; }
+  .path { text-align: center; font-size: 12px; margin: 0; color: rgba(255, 255, 255, 0.7); }
   .bar { display: flex; justify-content: center; gap: 10px; }
-  .ctl { width: 46px; height: 46px; border-radius: 50%; background: var(--elev); display: grid; place-items: center; color: var(--text); }
+  .ctl { width: 46px; height: 46px; border-radius: 50%; background: rgba(20, 21, 28, 0.8); display: grid; place-items: center; color: var(--text); }
   .ctl:hover:not(:disabled) { background: var(--elev-2); }
   .ctl.off { background: rgba(239, 68, 68, 0.16); }
   .ctl.on { background: var(--accent); color: #fff; }
