@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PRESETS } from '../lib/stream'
   import { onMount } from 'svelte'
   import { api, describeNet, errText, type TransferCode } from '../lib/api'
   import { store } from '../lib/state.svelte'
@@ -23,6 +24,15 @@
     void api.appVersion().then((v) => (version = v))
     void api.prefsGet().then((p) => (autostart = p.autostart))
   })
+
+  async function setPreset() {
+    try {
+      const p = await api.prefsGet()
+      store.streamPreset = (await api.prefsSet({ ...p, streamPreset: store.streamPreset })).streamPreset
+    } catch (err) {
+      error = errText(err)
+    }
+  }
 
   async function setAutostart() {
     try {
@@ -120,6 +130,16 @@
           <p class="muted">Checks whether calls and screen share can connect directly to your friends.</p>
           {#if net}<ul>{#each net as line}<li>{line}</li>{/each}</ul>{/if}
           <button class="btn" disabled={netBusy} onclick={testNet}>{netBusy ? 'Testing…' : 'Test connection'}</button>
+        </section>
+
+        <section>
+          <h3>Screen share</h3>
+          <label class="chk">
+            Default quality
+            <select bind:value={store.streamPreset} onchange={setPreset}>
+              {#each PRESETS as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
+            </select>
+          </label>
         </section>
 
         <section>

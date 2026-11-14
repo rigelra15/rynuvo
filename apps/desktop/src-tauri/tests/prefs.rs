@@ -33,6 +33,7 @@ fn prefs_roundtrip() {
         shortcut_mute: "Alt+M".into(),
         shortcut_deafen: "Alt+D".into(),
         autostart: true,
+        stream_preset: "1440p60".into(),
     };
     prefs::save(&f, &p).unwrap();
     assert_eq!(prefs::load(&f), p);
@@ -56,4 +57,13 @@ fn shortcut_strings_parse() {
     for s in [p.shortcut_mute.as_str(), p.shortcut_deafen.as_str(), "CmdOrCtrl+Alt+Space", "Ctrl+Shift+F5", "Alt+Shift+0"] {
         assert!(s.parse::<Shortcut>().is_ok(), "{s}");
     }
+}
+
+#[test]
+fn stream_preset_defaults_to_1080p60_for_old_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("prefs.json");
+    std::fs::write(&path, br#"{"vadThreshold":0.3}"#).unwrap();
+    let p = rynuvo_desktop_lib::prefs::load(&path);
+    assert_eq!(p.stream_preset, "1080p60");
 }

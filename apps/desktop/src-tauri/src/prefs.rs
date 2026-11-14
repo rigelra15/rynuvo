@@ -14,6 +14,8 @@ pub struct Prefs {
     pub shortcut_mute: String,
     pub shortcut_deafen: String,
     pub autostart: bool,
+    /// Default Go Live quality: 720p30, 1080p60, 1440p60 or native.
+    pub stream_preset: String,
 }
 
 impl Default for Prefs {
@@ -26,6 +28,7 @@ impl Default for Prefs {
             shortcut_mute: "CmdOrCtrl+Shift+M".into(),
             shortcut_deafen: "CmdOrCtrl+Shift+D".into(),
             autostart: false,
+            stream_preset: "1080p60".into(),
         }
     }
 }

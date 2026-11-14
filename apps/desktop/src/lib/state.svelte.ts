@@ -4,6 +4,7 @@ import { next } from './selection'
 import { dialog } from './dialog.svelte'
 import type { Channel, Id, Message, User } from './types'
 import { applyVoice, type MyVoice, type VoiceEvent, type VoiceMember } from './voice'
+import { applyStreams, type StreamEvent, type StreamInfo } from './stream'
 
 export const TYPING_TTL_MS = 6000
 
@@ -33,6 +34,16 @@ class Store {
   micLevel = $state<{ db: number; open: boolean }>({ db: -100, open: false })
   /** user id -> volume 0–2 (1 = unchanged) */
   volumes = new SvelteMap<Id, number>()
+  /** Live streams (Go Live) in every voice channel. */
+  streams = $state<StreamInfo[]>([])
+  /** My own stream while I'm live. */
+  live = $state<{ viewers: Id[]; codec: string; kbps: number; hardware: boolean; relay: boolean } | null>(null)
+  goingLive = $state(false)
+  /** The streamer whose stream is open in the stream view. */
+  watching = $state<Id | null>(null)
+  streamStats = new SvelteMap<Id, { fps: number; codec: string; kbps: number; path: string }>()
+  streamNotice = $state<string | null>(null)
+  streamPreset = $state('1080p60')
 
   get selected(): Channel | null {
     return this.channels.find((c) => c.id === this.selectedId) ?? null
@@ -55,6 +66,7 @@ class Store {
       const p = await api.prefsGet()
       this.volumes.clear()
       for (const [id, v] of Object.entries(p.volumes)) this.volumes.set(Number(id), v)
+      if (p.streamPreset) this.streamPreset = p.streamPreset
     } catch {
       // defaults are fine
     }
@@ -99,6 +111,10 @@ class Store {
     this.myVoice = { channelId: null, muted: false, deafened: false }
     this.speaking.clear()
     this.voicePath = null
+    this.streams = []
+    this.live = null
+    this.watching = null
+    this.streamStats.clear()
     this.notice = notice
     this.phase = 'onboarding'
   }
@@ -180,7 +196,66 @@ class Store {
     this.voicePath = null
     void this.voiceCall(() => api.voiceJoin(channel))
   }
+  isLive(user: Id): boolean {
+    return this.streams.some((s) => s.userId === user)
+  }
+
+  async goLive(sourceId: string, preset: string): Promise<boolean> {
+    this.goingLive = true
+    try {
+      await api.streamGoLive(sourceId, preset)
+      this.live = { viewers: [], codec: '', kbps: 0, hardware: false, relay: false }
+      return true
+    } catch (e) {
+      void dialog.notice(errText(e))
+      return false
+    } finally {
+      this.goingLive = false
+    }
+  }
+
+  stopLive() {
+    this.live = null
+    void api.streamStop()
+  }
+
+  watch(user: Id) {
+    if (this.me && user === this.me.id) return
+    this.streamNotice = null
+    this.watching = user
+  }
+
+  closeStream() {
+    this.watching = null
+  }
+
+  applyStreamEvent(e: StreamEvent) {
+    switch (e.kind) {
+      case 'live':
+        if (this.live) this.live = { viewers: e.viewers, codec: e.codec, kbps: e.kbps, hardware: e.hardware, relay: e.relay }
+        return
+      case 'stats':
+        this.streamStats.set(e.userId, { fps: e.fps, codec: e.codec, kbps: e.kbps, path: e.path })
+        return
+      case 'ended':
+        this.streamStats.delete(e.userId)
+        if (this.me && e.userId === this.me.id) {
+          this.live = null
+        } else if (this.watching === e.userId) {
+          this.watching = null
+          this.streamNotice = `${this.nick(e.userId)}'s stream ended`
+        }
+        return
+      case 'error':
+        this.live = null
+        this.streamNotice = e.message
+        return
+    }
+  }
+
   private voiceGone() {
+    this.live = null
+    this.watching = null
     this.speaking.clear()
     this.micLevel = { db: -100, open: false }
     this.voicePath = null
@@ -241,6 +316,7 @@ class Store {
     }
     const m = e.data
     this.voice = applyVoice(this.voice, m)
+    this.streams = applyStreams(this.streams, m)
     switch (m.t) {
       case 'ready': {
         this.me = m.d.me
@@ -309,6 +385,11 @@ class Store {
       case 'voiceMemberLeft':
         return
       case 'voiceMemberUpdated':
+        return
+      case 'streamStarted':
+      case 'streamStopped':
+      case 'streamViewer':
+      case 'streamSignal':
         return
       case 'pong':
         return

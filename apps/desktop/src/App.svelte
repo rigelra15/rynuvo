@@ -10,7 +10,7 @@
   import { dialog } from './lib/dialog.svelte'
   import Sidebar from './components/Sidebar.svelte'
   import UserVolumeMenu from './components/UserVolumeMenu.svelte'
-  import { api, errText, onSessionEvent, onVoiceEvent } from './lib/api'
+  import { api, errText, onSessionEvent, onStreamEvent, onVoiceEvent } from './lib/api'
   import { store } from './lib/state.svelte'
   import type { Channel, ChannelKind, Id } from './lib/types'
 
@@ -19,6 +19,14 @@
   let menu = $state<{ c: Channel; x: number; y: number } | null>(null)
   let settingsOpen = $state(false)
   let memberMenu = $state<{ userId: Id; x: number; y: number } | null>(null)
+
+  $effect(() => {
+    const n = store.streamNotice
+    if (n) {
+      store.streamNotice = null
+      void dialog.notice(n)
+    }
+  })
 
   $effect(() => {
     const n = store.voiceNotice
@@ -35,10 +43,12 @@
   onMount(() => {
     const un = onSessionEvent((e) => store.apply(e))
     const unv = onVoiceEvent((e) => store.applyVoiceEvent(e))
+    const uns = onStreamEvent((e) => store.applyStreamEvent(e))
     void store.boot()
     return () => {
       void un.then((f) => f())
       void unv.then((f) => f())
+      void uns.then((f) => f())
     }
   })
 

@@ -1,0 +1,131 @@
+<script lang="ts">
+  import { onMount } from 'svelte'
+  import { api, errText } from '../lib/api'
+  import { CODEC_STRING, decodableCodecs, parseAu, statsLine, type CodecName } from '../lib/stream'
+  import { store } from '../lib/state.svelte'
+  import type { Id } from '../lib/types'
+
+  let { userId }: { userId: Id } = $props()
+
+  let canvas: HTMLCanvasElement
+  let wrap: HTMLDivElement
+  let size = $state({ width: 0, height: 0 })
+  let volume = $state(1)
+  let waiting = $state(true)
+  const stats = $derived(store.streamStats.get(userId))
+  const line = $derived(
+    statsLine({ width: size.width, height: size.height, fps: stats?.fps ?? 0, codec: stats?.codec ?? '', path: stats?.path ?? 'connecting' }),
+  )
+
+  onMount(() => {
+    const ctx = canvas.getContext('2d')!
+    let decoder: VideoDecoder | null = null
+    let codec: CodecName | null = null
+    let needKey = true
+    let n = 0
+    let closed = false
+
+    const draw = (f: VideoFrame) => {
+      if (canvas.width !== f.displayWidth || canvas.height !== f.displayHeight) {
+        canvas.width = f.displayWidth
+        canvas.height = f.displayHeight
+        size = { width: f.displayWidth, height: f.displayHeight }
+      }
+      ctx.drawImage(f, 0, 0)
+      f.close()
+      waiting = false
+    }
+    const fresh = (c: CodecName) => {
+      try {
+        decoder?.close()
+      } catch {
+        // already closed
+      }
+      decoder = new VideoDecoder({
+        output: draw,
+        error: () => {
+          needKey = true // the next key frame starts a new decoder
+          decoder = null
+        },
+      })
+      decoder.configure({ codec: CODEC_STRING[c], optimizeForLatency: true })
+      codec = c
+    }
+    const onAu = (buf: ArrayBuffer) => {
+      if (closed) return
+      const au = parseAu(buf)
+      if (!au) return
+      if (au.codec !== codec || !decoder || decoder.state === 'closed') {
+        if (!au.key) return
+        fresh(au.codec)
+        needKey = false
+      }
+      if (needKey && !au.key) return
+      needKey = false
+      // Drop frames instead of queueing when the decoder falls behind: latency over completeness.
+      if (decoder!.decodeQueueSize > 3 && !au.key) return
+      decoder!.decode(new EncodedVideoChunk({ type: au.key ? 'key' : 'delta', timestamp: n++ * 16_667, data: au.data }))
+    }
+
+    void (async () => {
+      try {
+        const codecs = await decodableCodecs()
+        if (!closed) await api.streamWatch(userId, codecs, onAu)
+      } catch (e) {
+        store.streamNotice = errText(e)
+        store.closeStream()
+      }
+    })()
+
+    return () => {
+      closed = true
+      void api.streamUnwatch(userId)
+      try {
+        decoder?.close()
+      } catch {
+        // already closed
+      }
+    }
+  })
+
+  function setVolume() {
+    void api.streamSetVolume(userId, volume)
+  }
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) void document.exitFullscreen()
+    else void wrap.requestFullscreen()
+  }
+</script>
+
+<div class="view" bind:this={wrap}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="screen" ondblclick={toggleFullscreen}>
+    <canvas bind:this={canvas}></canvas>
+    {#if waiting}<p class="wait muted">Connecting to {store.nick(userId)}'s stream…</p>{/if}
+  </div>
+  <div class="bar">
+    <span class="who"><span class="live">LIVE</span> {store.nick(userId)}</span>
+    <span class="stats muted">{line}</span>
+    <label class="vol" title="Stream volume">
+      <span class="muted">Volume</span>
+      <input type="range" min="0" max="2" step="0.05" bind:value={volume} oninput={setVolume} />
+    </label>
+    <button class="btn" onclick={toggleFullscreen}>Fullscreen</button>
+    <button class="btn" onclick={() => store.closeStream()}>Stop watching</button>
+  </div>
+</div>
+
+<style>
+  .view { flex: 1; display: flex; flex-direction: column; min-height: 0; background: #000; border-radius: 12px; overflow: hidden; }
+  .view:fullscreen { border-radius: 0; }
+  .screen { flex: 1; min-height: 0; display: grid; place-items: center; position: relative; }
+  canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; }
+  .wait { position: absolute; }
+  .bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--panel); }
+  .who { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .live { background: var(--danger); color: #fff; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
+  .stats { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vol { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .vol input { width: 90px; }
+</style>

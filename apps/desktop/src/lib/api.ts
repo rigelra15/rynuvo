@@ -1,7 +1,8 @@
-import { invoke, convertFileSrc } from '@tauri-apps/api/core'
+import { invoke, convertFileSrc, Channel as IpcChannel } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { Channel, ChannelKind, Id, ImageRef, Message, User, WsServerMsg } from './types'
 import type { MyVoice, Prefs, VoiceEvent } from './voice'
+import type { Source, StreamEvent } from './stream'
 
 export type ConnState = { state: 'connecting' } | { state: 'online' } | { state: 'reconnecting'; inMs: number }
 
@@ -53,12 +54,29 @@ export const api = {
   voiceSetThreshold: (threshold: number) => invoke<void>('voice_set_threshold', { threshold }),
   voiceMicTest: (on: boolean) => invoke<void>('voice_mic_test', { on }),
   voiceKick: (userId: Id) => invoke<void>('voice_kick', { userId }),
+  streamSources: () => invoke<Source[]>('stream_sources'),
+  streamEncoders: () => invoke<string[]>('stream_encoders'),
+  streamGoLive: (sourceId: string, preset: string) => invoke<void>('stream_go_live', { sourceId, preset }),
+  streamStop: () => invoke<void>('stream_stop'),
+  streamIsLive: () => invoke<boolean>('stream_is_live'),
+  /** Access units arrive on `onAu` as raw bytes (see `parseAu`). */
+  streamWatch: (userId: Id, codecs: string[], onAu: (b: ArrayBuffer) => void) => {
+    const channel = new IpcChannel<ArrayBuffer>()
+    channel.onmessage = onAu
+    return invoke<void>('stream_watch', { userId, codecs, channel })
+  },
+  streamUnwatch: (userId: Id) => invoke<void>('stream_unwatch', { userId }),
+  streamSetVolume: (userId: Id, volume: number) => invoke<void>('stream_set_volume', { userId, volume }),
   prefsGet: () => invoke<Prefs>('prefs_get'),
   prefsSet: (next: Prefs) => invoke<Prefs>('prefs_set', { next }),
 }
 
 export function onVoiceEvent(cb: (e: VoiceEvent) => void): Promise<UnlistenFn> {
   return listen<VoiceEvent>('rynuvo://voice', (e) => cb(e.payload))
+}
+
+export function onStreamEvent(cb: (e: StreamEvent) => void): Promise<UnlistenFn> {
+  return listen<StreamEvent>('rynuvo://stream', (e) => cb(e.payload))
 }
 
 export type Mapping = 'endpointIndependent' | 'dependent' | 'unknown'
