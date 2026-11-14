@@ -2,9 +2,10 @@
   import Composer from './Composer.svelte'
   import MessageList from './MessageList.svelte'
   import { store } from '../lib/state.svelte'
-  import type { Channel } from '../lib/types'
+  import type { Channel, Id } from '../lib/types'
+  import VoiceStage from './VoiceStage.svelte'
 
-  let { channel }: { channel: Channel } = $props()
+  let { channel, onMemberMenu }: { channel: Channel; onMemberMenu: (userId: Id, e: MouseEvent) => void } = $props()
 
   let now = $state(Date.now())
   $effect(() => {
@@ -21,10 +22,7 @@
 </header>
 
 {#if channel.kind === 'voice'}
-  <section class="soon muted">
-    <div class="big">🔊</div>
-    <p>Voice is coming in the next update.</p>
-  </section>
+  <VoiceStage {channel} onMenu={onMemberMenu} />
 {:else}
   <MessageList channel={channel.id} />
   <div class="typing muted">
@@ -38,7 +36,5 @@
   .ico { color: var(--faint); }
   .name { font-weight: 600; }
   .topic { color: var(--muted); font-size: 13px; border-left: 1px solid var(--line); padding-left: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .soon { flex: 1; display: grid; place-content: center; text-align: center; }
-  .big { font-size: 40px; }
   .typing { height: 20px; padding: 0 20px; font-size: 12px; }
 </style>

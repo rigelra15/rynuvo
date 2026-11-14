@@ -4,10 +4,11 @@
   import { store } from '../lib/state.svelte'
   import AdminPanel from './AdminPanel.svelte'
   import Countdown from './Countdown.svelte'
+  import VoiceSettings from './VoiceSettings.svelte'
 
   let { onClose }: { onClose: () => void } = $props()
 
-  let tab = $state<'general' | 'admin'>('general')
+  let tab = $state<'general' | 'voice' | 'admin'>('general')
   let nickname = $state(store.me?.nickname ?? '')
   let nickMsg = $state<string | null>(null)
   let transfer = $state<TransferCode | null>(null)
@@ -69,6 +70,7 @@
     <header>
       <nav>
         <button class:on={tab === 'general'} onclick={() => (tab = 'general')}>Settings</button>
+        <button class:on={tab === 'voice'} onclick={() => (tab = 'voice')}>Voice</button>
         {#if store.me?.isAdmin}<button class:on={tab === 'admin'} onclick={() => (tab = 'admin')}>Admin</button>{/if}
       </nav>
       <button class="close" title="Close" onclick={onClose}>✕</button>
@@ -77,6 +79,8 @@
     <div class="body">
       {#if tab === 'admin' && store.me?.isAdmin}
         <AdminPanel />
+      {:else if tab === 'voice'}
+        <VoiceSettings />
       {:else}
         <section>
           <h3>Nickname</h3>

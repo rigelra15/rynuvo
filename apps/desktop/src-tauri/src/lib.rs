@@ -6,10 +6,11 @@ mod mac_notify;
 mod media;
 mod notify;
 pub mod voice;
+mod voice_cmd;
 
 use std::sync::Arc;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::core::identity::KeyringStore;
 
@@ -32,7 +33,14 @@ pub fn run() {
                 None => "state.json".into(),
             };
             let store = Arc::new(KeyringStore::new(profile.as_deref()));
-            app.manage(commands::Core::new(store, dir.join(file)));
+            let handle = app.handle().clone();
+            let voice = voice::ctl::VoiceCtl::new(
+                Arc::new(|| Box::new(voice::devices::CpalBackend::default()) as Box<dyn voice::backend::AudioBackend>),
+                Arc::new(move |e| {
+                    let _ = handle.emit(commands::VOICE_EVENT, e);
+                }),
+            );
+            app.manage(commands::Core::new(store, dir.join(file), voice));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -61,6 +69,17 @@ pub fn run() {
             diag::run_nettest,
             diag::send_log,
             diag::app_version,
+            voice_cmd::voice_state,
+            voice_cmd::voice_join,
+            voice_cmd::voice_leave,
+            voice_cmd::voice_set_muted,
+            voice_cmd::voice_set_deafened,
+            voice_cmd::voice_set_volume,
+            voice_cmd::voice_devices,
+            voice_cmd::voice_set_devices,
+            voice_cmd::voice_set_threshold,
+            voice_cmd::voice_mic_test,
+            voice_cmd::voice_kick,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Rynuvo");

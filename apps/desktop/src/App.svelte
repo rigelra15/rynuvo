@@ -9,14 +9,24 @@
   import DialogHost from './components/DialogHost.svelte'
   import { dialog } from './lib/dialog.svelte'
   import Sidebar from './components/Sidebar.svelte'
-  import { api, errText, onSessionEvent } from './lib/api'
+  import UserVolumeMenu from './components/UserVolumeMenu.svelte'
+  import { api, errText, onSessionEvent, onVoiceEvent } from './lib/api'
   import { store } from './lib/state.svelte'
-  import type { Channel, ChannelKind } from './lib/types'
+  import type { Channel, ChannelKind, Id } from './lib/types'
 
   let creating = $state<ChannelKind | null>(null)
   let renaming = $state<Channel | null>(null)
   let menu = $state<{ c: Channel; x: number; y: number } | null>(null)
   let settingsOpen = $state(false)
+  let memberMenu = $state<{ userId: Id; x: number; y: number } | null>(null)
+
+  $effect(() => {
+    const n = store.voiceNotice
+    if (n) {
+      store.voiceNotice = null
+      void dialog.notice(n)
+    }
+  })
 
   $effect(() => {
     if (store.phase === 'onboarding') settingsOpen = false
@@ -24,8 +34,12 @@
 
   onMount(() => {
     const un = onSessionEvent((e) => store.apply(e))
+    const unv = onVoiceEvent((e) => store.applyVoiceEvent(e))
     void store.boot()
-    return () => void un.then((f) => f())
+    return () => {
+      void un.then((f) => f())
+      void unv.then((f) => f())
+    }
   })
 
   async function create(name: string) {
@@ -58,7 +72,11 @@
         selectedId={store.selectedId}
         me={store.me}
         canManage={store.canManage}
-        onSelect={(c) => store.select(c.id)}
+        onSelect={(c) => {
+          store.select(c.id)
+          if (c.kind === 'voice') store.joinVoice(c.id)
+        }}
+        onMemberMenu={(userId, e) => (memberMenu = { userId, x: e.clientX, y: e.clientY })}
         onCreate={(k) => (creating = k)}
         onChannelMenu={(c, e) => (menu = { c, x: e.clientX, y: e.clientY })}
         onSettings={() => (settingsOpen = true)}
@@ -66,7 +84,7 @@
       <main class="main">
         {#if store.selected}
           {#key store.selected.id}
-            <ChannelView channel={store.selected} />
+            <ChannelView channel={store.selected} onMemberMenu={(userId, e) => (memberMenu = { userId, x: e.clientX, y: e.clientY })} />
           {/key}
         {:else}
           <div class="none muted">No channels yet. Click + next to "Text" to create one.</div>
@@ -98,6 +116,10 @@
 {#if menu}
   {@const m = menu}
   <ChannelMenu x={m.x} y={m.y} onRename={() => ((renaming = m.c), (menu = null))} onDelete={() => del(m.c)} onClose={() => (menu = null)} />
+{/if}
+{#if memberMenu}
+  {@const mm = memberMenu}
+  {#key mm.userId}<UserVolumeMenu userId={mm.userId} x={mm.x} y={mm.y} onClose={() => (memberMenu = null)} />{/key}
 {/if}
 {#if settingsOpen && store.me}
   <Settings onClose={() => (settingsOpen = false)} />

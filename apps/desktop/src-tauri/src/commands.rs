@@ -13,8 +13,10 @@ use crate::core::{
     identity::SecretStore,
     session::{Session, SessionEvent, SessionHandle},
 };
+use crate::voice::ctl::VoiceCtl;
 
 pub const EVENT: &str = "rynuvo://event";
+pub const VOICE_EVENT: &str = "rynuvo://voice";
 
 #[derive(Default)]
 struct Inner {
@@ -25,6 +27,7 @@ struct Inner {
 pub struct Core {
     pub store: Arc<dyn SecretStore>,
     pub state_path: PathBuf,
+    pub voice: VoiceCtl,
     inner: Mutex<Inner>,
 }
 
@@ -56,8 +59,8 @@ pub fn device_name() -> String {
 }
 
 impl Core {
-    pub fn new(store: Arc<dyn SecretStore>, state_path: PathBuf) -> Self {
-        Self { store, state_path, inner: Mutex::default() }
+    pub fn new(store: Arc<dyn SecretStore>, state_path: PathBuf, voice: VoiceCtl) -> Self {
+        Self { store, state_path, voice, inner: Mutex::default() }
     }
 
     fn load(&self) -> Persisted {
@@ -85,12 +88,19 @@ impl Core {
             s.stop();
         }
         let app2 = app.clone();
+        let voice = self.voice.clone();
         let emit = Arc::new(move |e: SessionEvent| {
+            if let SessionEvent::Server(m) = &e {
+                voice.on_server(m);
+            }
             crate::notify::on_event(&app2, &e);
             let _ = app2.emit(EVENT, e);
         });
         let server = api.base();
-        g.session = Some(Session::start(api.clone(), self.store.clone(), server, emit));
+        let host = url::Url::parse(&server).ok().and_then(|u| u.host_str().map(|h| h.trim_matches(['[', ']']).to_string())).unwrap_or_default();
+        let s = Session::start(api.clone(), self.store.clone(), server, emit);
+        self.voice.attach(s.clone(), host);
+        g.session = Some(s);
         g.api = Some(api);
     }
 
@@ -143,6 +153,7 @@ pub async fn claim_transfer(app: AppHandle, core: State<'_, Core>, code: String)
 
 #[tauri::command]
 pub fn logout(core: State<'_, Core>) {
+    core.voice.detach();
     let mut g = core.inner.lock().unwrap();
     if let Some(s) = g.session.take() {
         s.stop();

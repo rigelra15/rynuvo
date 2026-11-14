@@ -35,6 +35,9 @@ const RETRY_EVERY: Duration = Duration::from_secs(3);
 const PLAYBACK_AHEAD: usize = 2 * FRAME;
 /// Mic backlog beyond which old audio is dropped to keep latency low (200 ms).
 const CAPTURE_MAX_BACKLOG: usize = 10 * FRAME;
+/// DSP frames processed per tick at most (60 ms of audio per 10 ms tick), so commands are
+/// always handled even when the machine can't keep up with the mic.
+const CAPTURE_PER_TICK: usize = 6;
 
 #[derive(Debug, Clone)]
 pub struct EngineOpts {
@@ -311,6 +314,7 @@ impl Worker {
             }
         }
         self.close_audio();
+        tracing::info!("voice engine stopped");
     }
 
     fn pump_capture(&mut self) {
@@ -320,7 +324,9 @@ impl Worker {
             cap.skip(backlog - CAPTURE_MAX_BACKLOG / 2);
         }
         let mut chunk = [0f32; DSP_FRAME];
-        while cap.occupied_len() >= DSP_FRAME {
+        let mut done = 0;
+        while done < CAPTURE_PER_TICK && cap.occupied_len() >= DSP_FRAME {
+            done += 1;
             cap.pop_slice(&mut chunk);
             let vad = self.dsp.capture(&mut chunk);
             self.level_sum += chunk.iter().map(|x| (*x as f64) * (*x as f64)).sum::<f64>();

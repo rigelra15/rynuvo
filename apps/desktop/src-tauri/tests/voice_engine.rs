@@ -179,3 +179,32 @@ async fn engine_reports_level() {
     assert!(ev.iter().filter(|e| matches!(e, VoiceEvent::Level { .. })).count() >= 3, "level every 100 ms");
     r.engine.stop();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stop_returns_while_mic_floods() {
+    let r = rig(0.5, false).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let shared = r.shared.clone();
+    let flood = std::thread::spawn(move || {
+        let chunk = speech_like(48_000);
+        let end = Instant::now() + Duration::from_secs(4);
+        while Instant::now() < end {
+            // Keep the 1 s mic buffer full: far faster than any DSP.
+            match shared.lock().unwrap().io.as_mut() {
+                Some(io) => {
+                    io.capture.push_slice(&chunk);
+                }
+                None => return,
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        r.engine.stop();
+        let _ = tx.send(());
+    });
+    assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok(), "stop() must return while the mic outpaces the DSP");
+    flood.join().unwrap();
+}

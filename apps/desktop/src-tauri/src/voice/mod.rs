@@ -12,3 +12,4 @@ pub mod devices;
 pub mod dsp;
 pub mod engine;
 pub mod tones;
+pub mod ctl;

@@ -1,6 +1,7 @@
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { Channel, ChannelKind, Id, ImageRef, Message, User, WsServerMsg } from './types'
+import type { MyVoice, VoiceEvent } from './voice'
 
 export type ConnState = { state: 'connecting' } | { state: 'online' } | { state: 'reconnecting'; inMs: number }
 
@@ -41,6 +42,21 @@ export const api = {
   runNettest: () => invoke<NetReport>('run_nettest'),
   sendLog: () => invoke<void>('send_log'),
   appVersion: () => invoke<string>('app_version'),
+  voiceState: () => invoke<MyVoice>('voice_state'),
+  voiceJoin: (channelId: Id) => invoke<MyVoice>('voice_join', { channelId }),
+  voiceLeave: () => invoke<MyVoice>('voice_leave'),
+  voiceSetMuted: (muted: boolean) => invoke<MyVoice>('voice_set_muted', { muted }),
+  voiceSetDeafened: (deafened: boolean) => invoke<MyVoice>('voice_set_deafened', { deafened }),
+  voiceSetVolume: (userId: Id, volume: number) => invoke<void>('voice_set_volume', { userId, volume }),
+  voiceDevices: () => invoke<{ inputs: string[]; outputs: string[] }>('voice_devices'),
+  voiceSetDevices: (input: string | null, output: string | null) => invoke<void>('voice_set_devices', { input, output }),
+  voiceSetThreshold: (threshold: number) => invoke<void>('voice_set_threshold', { threshold }),
+  voiceMicTest: (on: boolean) => invoke<void>('voice_mic_test', { on }),
+  voiceKick: (userId: Id) => invoke<void>('voice_kick', { userId }),
+}
+
+export function onVoiceEvent(cb: (e: VoiceEvent) => void): Promise<UnlistenFn> {
+  return listen<VoiceEvent>('rynuvo://voice', (e) => cb(e.payload))
 }
 
 export type Mapping = 'endpointIndependent' | 'dependent' | 'unknown'

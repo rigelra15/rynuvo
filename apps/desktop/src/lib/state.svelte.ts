@@ -1,7 +1,9 @@
 import { SvelteMap, SvelteSet } from 'svelte/reactivity'
 import { api, errText, type ConnState, type SessionEvent } from './api'
 import { next } from './selection'
+import { dialog } from './dialog.svelte'
 import type { Channel, Id, Message, User } from './types'
+import { applyVoice, type MyVoice, type VoiceEvent, type VoiceMember } from './voice'
 
 export const TYPING_TTL_MS = 6000
 
@@ -24,6 +26,13 @@ class Store {
   conn = $state<ConnState>({ state: 'connecting' })
   alerts = $state<string[]>([])
   updateRequired = $state(false)
+  voice = $state<VoiceMember[]>([])
+  myVoice = $state<MyVoice>({ channelId: null, muted: false, deafened: false })
+  speaking = new SvelteSet<Id>()
+  voicePath = $state<'udp' | 'ws' | null>(null)
+  micLevel = $state<{ db: number; open: boolean }>({ db: -100, open: false })
+  /** user id -> volume 0–2 (1 = unchanged) */
+  volumes = new SvelteMap<Id, number>()
 
   get selected(): Channel | null {
     return this.channels.find((c) => c.id === this.selectedId) ?? null
@@ -75,6 +84,10 @@ class Store {
     this.pending.clear()
     this.typing.clear()
     this.alerts = []
+    this.voice = []
+    this.myVoice = { channelId: null, muted: false, deafened: false }
+    this.speaking.clear()
+    this.voicePath = null
     this.notice = notice
     this.phase = 'onboarding'
   }
@@ -139,6 +152,64 @@ class Store {
     if (this.selectedId === id || this.selectedId === null) this.select(newSel)
   }
 
+  inVoice(channel: Id): boolean {
+    return this.myVoice.channelId === channel
+  }
+
+  private async voiceCall(f: () => Promise<MyVoice>) {
+    try {
+      this.myVoice = await f()
+    } catch (e) {
+      void dialog.notice(errText(e))
+    }
+  }
+
+  joinVoice(channel: Id) {
+    if (this.inVoice(channel)) return
+    this.voicePath = null
+    void this.voiceCall(() => api.voiceJoin(channel))
+  }
+  private voiceGone() {
+    this.speaking.clear()
+    this.micLevel = { db: -100, open: false }
+    this.voicePath = null
+  }
+
+  leaveVoice() {
+    this.voiceGone()
+    void this.voiceCall(() => api.voiceLeave())
+  }
+  toggleMute() {
+    void this.voiceCall(() => api.voiceSetMuted(!this.myVoice.muted))
+  }
+  toggleDeafen() {
+    void this.voiceCall(() => api.voiceSetDeafened(!this.myVoice.deafened))
+  }
+  setVolume(user: Id, v: number) {
+    this.volumes.set(user, v)
+    void api.voiceSetVolume(user, v)
+  }
+
+  applyVoiceEvent(e: VoiceEvent) {
+    switch (e.kind) {
+      case 'speaking':
+        this.speaking.clear()
+        for (const id of e.userIds) this.speaking.add(id)
+        return
+      case 'level':
+        this.micLevel = { db: e.db, open: e.open }
+        return
+      case 'path':
+        this.voicePath = e.via
+        return
+      case 'deviceError':
+        this.voiceNotice = e.message
+        return
+    }
+  }
+
+  voiceNotice = $state<string | null>(null)
+
   apply(e: SessionEvent) {
     switch (e.kind) {
       case 'conn':
@@ -154,6 +225,7 @@ class Store {
         break
     }
     const m = e.data
+    this.voice = applyVoice(this.voice, m)
     switch (m.t) {
       case 'ready': {
         this.me = m.d.me
@@ -212,6 +284,22 @@ class Store {
       }
       case 'adminAlert':
         this.alerts = [...this.alerts, m.d.message]
+        return
+      case 'voiceJoined':
+        this.myVoice = { ...this.myVoice, channelId: m.d.channelId }
+        return
+      case 'voiceEnded':
+        this.myVoice = { ...this.myVoice, channelId: null }
+        this.voiceGone()
+        this.voiceNotice = m.d.reason
+        return
+      case 'voiceMemberLeft':
+        if (m.d.userId === this.me?.id && this.myVoice.channelId === m.d.channelId) {
+          this.myVoice = { ...this.myVoice, channelId: null }
+          this.voiceGone()
+        }
+        return
+      case 'voiceMemberUpdated':
         return
       case 'pong':
         return
