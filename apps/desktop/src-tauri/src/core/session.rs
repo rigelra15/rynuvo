@@ -42,13 +42,57 @@ pub fn backoff_ms(attempt: u32) -> u64 {
     (base as f64 * (0.8 + 0.4 * unit)) as u64
 }
 
-const PING_EVERY: Duration = Duration::from_secs(20);
-const READ_TIMEOUT: Duration = Duration::from_secs(45);
+/// Keepalive cadence and how long silence from the server is tolerated before reconnecting.
+#[derive(Debug, Clone, Copy)]
+pub struct Timing {
+    pub ping_every: Duration,
+    pub read_timeout: Duration,
+}
+
+impl Default for Timing {
+    fn default() -> Self {
+        Timing { ping_every: Duration::from_secs(20), read_timeout: Duration::from_secs(45) }
+    }
+}
+
+/// Recent ids remembered per channel for de-duplication.
+const RECENT_IDS: usize = 512;
 
 #[derive(Default)]
 struct Shared {
-    /// channel id -> highest message id the UI has seen
+    /// channel id -> highest message id seen (the `after=` cursor for catch-up)
     last_seen: HashMap<Id, Id>,
+    /// channel id -> every id at or below this was in a page the UI loaded
+    floor: HashMap<Id, Id>,
+    /// channel id -> recently delivered ids, so out-of-order broadcasts are not mistaken for duplicates
+    recent: HashMap<Id, std::collections::VecDeque<Id>>,
+}
+
+impl Shared {
+    fn track(&mut self, channel: Id, loaded_up_to: Id) {
+        let f = self.floor.entry(channel).or_insert(loaded_up_to);
+        *f = (*f).max(loaded_up_to);
+        let l = self.last_seen.entry(channel).or_insert(loaded_up_to);
+        *l = (*l).max(loaded_up_to);
+    }
+
+    fn advance(&mut self, channel: Id, id: Id) -> bool {
+        let Some(&floor) = self.floor.get(&channel) else { return true };
+        if id <= floor {
+            return false;
+        }
+        let recent = self.recent.entry(channel).or_default();
+        if recent.contains(&id) {
+            return false;
+        }
+        recent.push_back(id);
+        if recent.len() > RECENT_IDS {
+            recent.pop_front();
+        }
+        let l = self.last_seen.entry(channel).or_insert(id);
+        *l = (*l).max(id);
+        true
+    }
 }
 
 /// Handle to a running session.
@@ -62,9 +106,7 @@ pub struct SessionHandle {
 impl SessionHandle {
     /// The UI loaded `channel` up to `last_id`; future gaps in it are caught up on reconnect.
     pub fn mark_loaded(&self, channel: Id, last_id: Id) {
-        let mut g = self.shared.lock().unwrap();
-        let e = g.last_seen.entry(channel).or_insert(last_id);
-        *e = (*e).max(last_id);
+        self.shared.lock().unwrap().track(channel, last_id);
     }
 
     pub fn send_typing(&self, channel_id: Id) {
@@ -87,11 +129,15 @@ enum End {
 
 impl Session {
     pub fn start(api: Api, store: Arc<dyn SecretStore>, server: String, emit: Emit) -> SessionHandle {
+        Self::start_with(api, store, server, emit, Timing::default())
+    }
+
+    pub fn start_with(api: Api, store: Arc<dyn SecretStore>, server: String, emit: Emit, timing: Timing) -> SessionHandle {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let (out_tx, out_rx) = mpsc::unbounded_channel();
         let (stop_tx, stop_rx) = watch::channel(false);
         let h = SessionHandle { shared: shared.clone(), out: out_tx, stop: stop_tx };
-        tokio::spawn(run(api, store, server, emit, shared, out_rx, stop_rx));
+        tokio::spawn(run(api, store, server, emit, shared, out_rx, stop_rx, timing));
         h
     }
 }
@@ -104,6 +150,7 @@ async fn run(
     shared: Arc<Mutex<Shared>>,
     mut out_rx: mpsc::UnboundedReceiver<WsClientMsg>,
     mut stop: watch::Receiver<bool>,
+    timing: Timing,
 ) {
     let mut attempt = 0u32;
     loop {
@@ -111,7 +158,7 @@ async fn run(
             return;
         }
         emit(SessionEvent::Conn(ConnState::Connecting));
-        let end = connect_once(&api, &emit, &shared, &mut out_rx, &mut stop, &mut attempt)
+        let end = connect_once(&api, &emit, &shared, &mut out_rx, &mut stop, &mut attempt, timing)
             .await
             .unwrap_or_else(|e| {
                 tracing::debug!("ws connect failed: {e}");
@@ -147,6 +194,7 @@ async fn connect_once(
     out_rx: &mut mpsc::UnboundedReceiver<WsClientMsg>,
     stop: &mut watch::Receiver<bool>,
     attempt: &mut u32,
+    timing: Timing,
 ) -> Result<End, String> {
     let token = api.token().ok_or("no token")?.to_string();
     let (mut ws, _) = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(api.ws_url()))
@@ -157,8 +205,11 @@ async fn connect_once(
     ws.send(WsMsg::text(hello)).await.map_err(|e| e.to_string())?;
 
     let mut ready_seen = false;
-    let mut ping = tokio::time::interval(PING_EVERY);
+    let mut ping = tokio::time::interval(timing.ping_every);
     ping.tick().await;
+    // Deadline is pushed forward only by frames from the server, so a half-open socket is detected.
+    let deadline = tokio::time::sleep(timing.read_timeout);
+    tokio::pin!(deadline);
     loop {
         tokio::select! {
             _ = stop.changed() => {
@@ -177,13 +228,16 @@ async fn connect_once(
                     return Ok(End::Retry);
                 }
             }
-            msg = tokio::time::timeout(READ_TIMEOUT, ws.next()) => {
+            _ = &mut deadline => {
+                tracing::info!("no data from server for {:?}, reconnecting", timing.read_timeout);
+                return Ok(End::Retry);
+            }
+            msg = ws.next() => {
                 let msg = match msg {
-                    Err(_) => return Ok(End::Retry),
-                    Ok(None) => return Ok(End::Retry),
-                    Ok(Some(Err(_))) => return Ok(End::Retry),
-                    Ok(Some(Ok(m))) => m,
+                    None | Some(Err(_)) => return Ok(End::Retry),
+                    Some(Ok(m)) => m,
                 };
+                deadline.as_mut().reset(tokio::time::Instant::now() + timing.read_timeout);
                 match msg {
                     WsMsg::Text(t) => {
                         let Ok(m) = serde_json::from_str::<WsServerMsg>(t.as_str()) else { continue };
@@ -219,17 +273,9 @@ async fn connect_once(
     }
 }
 
-/// Record `id` as seen in `channel`; true if it is new (or channel not tracked).
+/// Record `id` as delivered in `channel`; true if the UI has not seen it yet (or channel not tracked).
 fn advance(shared: &Arc<Mutex<Shared>>, channel: Id, id: Id) -> bool {
-    let mut g = shared.lock().unwrap();
-    match g.last_seen.get_mut(&channel) {
-        Some(last) if id <= *last => false,
-        Some(last) => {
-            *last = id;
-            true
-        }
-        None => true,
-    }
+    shared.lock().unwrap().advance(channel, id)
 }
 
 async fn catch_up(api: &Api, emit: &Emit, shared: &Arc<Mutex<Shared>>) {
@@ -251,5 +297,21 @@ async fn catch_up(api: &Api, emit: &Emit, shared: &Arc<Mutex<Shared>>) {
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn out_of_order_messages_are_not_dropped() {
+        let s = Arc::new(Mutex::new(Shared::default()));
+        s.lock().unwrap().track(1, 0);
+        assert!(advance(&s, 1, 11));
+        assert!(advance(&s, 1, 10), "older id that was never seen must still be delivered");
+        assert!(!advance(&s, 1, 10), "duplicate");
+        assert!(!advance(&s, 1, 11), "duplicate");
+        assert_eq!(s.lock().unwrap().last_seen[&1], 11, "cursor is the max id");
     }
 }

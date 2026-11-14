@@ -209,4 +209,7 @@ impl Api {
         };
         self.json(Method::GET, &path, Self::NONE).await
     }
+    pub async fn report_body(&self, id: i64) -> ClientResult<serde_json::Value> {
+        self.json(Method::GET, &format!("/diag/reports/{id}"), Self::NONE).await
+    }
 }

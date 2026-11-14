@@ -118,3 +118,45 @@ async fn downloads_served_without_auth() {
     assert_eq!(r.status(), 200);
     assert_eq!(r.text().await.unwrap(), "hi");
 }
+
+#[tokio::test]
+async fn reports_list_truncates_large_bodies() {
+    let app = TestApp::spawn().await;
+    let admin = app.admin().await;
+    let u = app.user("Dimas").await;
+    let big = "L".repeat(1_000_000);
+    let r = app.client.post(app.url("/api/v1/diag/report")).bearer_auth(&u.token).json(&json!({"kind":"log","body":big})).send().await.unwrap();
+    assert_eq!(r.status(), 204);
+    let v: serde_json::Value = app.client.get(app.url("/api/v1/diag/reports")).bearer_auth(&admin.token).send().await.unwrap().json().await.unwrap();
+    assert!(v[0]["body"].as_str().unwrap().len() <= 4096);
+    assert_eq!(v[0]["size"], 1_000_000);
+    let id = v[0]["id"].as_i64().unwrap();
+    let full: serde_json::Value = app.client.get(app.url(&format!("/api/v1/diag/reports/{id}"))).bearer_auth(&admin.token).send().await.unwrap().json().await.unwrap();
+    assert_eq!(full["body"].as_str().unwrap().len(), 1_000_000);
+    let r = app.client.get(app.url(&format!("/api/v1/diag/reports/{id}"))).bearer_auth(&u.token).send().await.unwrap();
+    assert_eq!(r.status(), 403);
+}
+
+#[tokio::test]
+async fn report_retention_keeps_last_20_per_user_and_kind() {
+    let app = TestApp::spawn().await;
+    let admin = app.admin().await;
+    let u = app.user("Dimas").await;
+    for i in 0..25 {
+        app.client.post(app.url("/api/v1/diag/report")).bearer_auth(&u.token).json(&json!({"kind":"log","body":format!("log {i}")})).send().await.unwrap();
+    }
+    let v: serde_json::Value = app.client.get(app.url("/api/v1/diag/reports?kind=log")).bearer_auth(&admin.token).send().await.unwrap().json().await.unwrap();
+    let bodies: Vec<&str> = v.as_array().unwrap().iter().map(|r| r["body"].as_str().unwrap()).collect();
+    assert_eq!(bodies.len(), 20);
+    assert_eq!(bodies[0], "log 24");
+    assert_eq!(bodies[19], "log 5");
+}
+
+#[tokio::test]
+async fn report_rejected_when_disk_blocked() {
+    let app = TestApp::spawn().await;
+    let u = app.user("Dimas").await;
+    rynuvo_server::disk::check_now(&app.state.disk, 95);
+    let r = app.client.post(app.url("/api/v1/diag/report")).bearer_auth(&u.token).json(&json!({"kind":"log","body":"x"})).send().await.unwrap();
+    assert_eq!(r.status(), 507);
+}

@@ -16,6 +16,10 @@ class Store {
   selectedId = $state<Id | null>(null)
   messages = new SvelteMap<Id, Message[]>()
   hasMore = new SvelteMap<Id, boolean>()
+  /** channel id -> why its history failed to load */
+  loadError = new SvelteMap<Id, string>()
+  /** channel id -> live messages that arrived while its first page was loading */
+  private pending = new Map<Id, Message[]>()
   typing = new SvelteMap<Id, SvelteMap<Id, number>>()
   conn = $state<ConnState>({ state: 'connecting' })
   alerts = $state<string[]>([])
@@ -67,6 +71,8 @@ class Store {
     this.selectedId = null
     this.messages.clear()
     this.hasMore.clear()
+    this.loadError.clear()
+    this.pending.clear()
     this.typing.clear()
     this.alerts = []
     this.notice = notice
@@ -85,9 +91,19 @@ class Store {
   }
 
   async loadLatest(channel: Id) {
-    const list = await api.messages(channel)
-    this.messages.set(channel, list)
-    this.hasMore.set(channel, list.length === 50)
+    if (this.pending.has(channel)) return
+    this.pending.set(channel, [])
+    try {
+      const list = await api.messages(channel)
+      const extra = (this.pending.get(channel) ?? []).filter((m) => !list.some((x) => x.id === m.id))
+      this.messages.set(channel, [...list, ...extra].sort((a, b) => a.id - b.id))
+      this.hasMore.set(channel, list.length === 50)
+      this.loadError.delete(channel)
+    } catch (e) {
+      if (!this.messages.has(channel)) this.loadError.set(channel, errText(e))
+    } finally {
+      this.pending.delete(channel)
+    }
   }
 
   async loadOlder(channel: Id): Promise<number> {
@@ -101,7 +117,10 @@ class Store {
 
   private upsertMessage(m: Message) {
     const list = this.messages.get(m.channelId)
-    if (!list) return // not loaded; will fetch on open
+    if (!list) {
+      this.pending.get(m.channelId)?.push(m) // first page in flight; merged when it lands
+      return
+    }
     const i = list.findIndex((x) => x.id === m.id)
     if (i >= 0) {
       const copy = list.slice()
@@ -147,6 +166,8 @@ class Store {
         // drop caches of channels that disappeared while offline
         for (const id of [...this.messages.keys()]) if (!m.d.channels.some((c) => c.id === id)) this.messages.delete(id)
         if (!this.selected) this.select(next(this.channels, null, -1))
+        // Refresh every loaded channel: edits and deletes made while offline are not replayed as events.
+        for (const id of new Set([...this.messages.keys(), ...this.loadError.keys()])) void this.loadLatest(id)
         return
       }
       case 'messageCreated':

@@ -5,7 +5,10 @@ use std::{
 };
 
 use rynuvo_proto::{CLOSE_AUTH_REVOKED, WsServerMsg};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
+
+/// Messages a connection may have queued before it is considered stuck and cut off.
+pub const QUEUE_DEPTH: usize = 256;
 
 /// What the hub asks a connection task to do.
 #[derive(Debug, Clone)]
@@ -18,7 +21,16 @@ struct Conn {
     id: u64,
     user_id: i64,
     is_admin: bool,
-    tx: mpsc::UnboundedSender<Outgoing>,
+    tx: mpsc::Sender<Outgoing>,
+    kill: watch::Sender<bool>,
+}
+
+/// A registered connection: its queue, a flag raised when it must close, and whether it is the user's first.
+pub struct Registered {
+    pub id: u64,
+    pub rx: mpsc::Receiver<Outgoing>,
+    pub kill: watch::Receiver<bool>,
+    pub first: bool,
 }
 
 #[derive(Default)]
@@ -37,15 +49,16 @@ pub struct Hub {
 pub const TYPING_INTERVAL: Duration = Duration::from_secs(3);
 
 impl Hub {
-    /// Register a connection. Returns (conn id, receiver, whether this is the user's first connection).
-    pub fn register(&self, user_id: i64, is_admin: bool) -> (u64, mpsc::UnboundedReceiver<Outgoing>, bool) {
-        let (tx, rx) = mpsc::unbounded_channel();
+    /// Register a connection.
+    pub fn register(&self, user_id: i64, is_admin: bool) -> Registered {
+        let (tx, rx) = mpsc::channel(QUEUE_DEPTH);
+        let (kill_tx, kill) = watch::channel(false);
         let mut g = self.inner.lock().unwrap();
         let first = !g.conns.iter().any(|c| c.user_id == user_id);
         g.next_id += 1;
         let id = g.next_id;
-        g.conns.push(Conn { id, user_id, is_admin, tx });
-        (id, rx, first)
+        g.conns.push(Conn { id, user_id, is_admin, tx, kill: kill_tx });
+        Registered { id, rx, kill, first }
     }
 
     /// Remove a connection. Returns the user id if that was the user's last connection.
@@ -59,8 +72,16 @@ impl Hub {
     fn send_where(&self, out: Outgoing, pred: impl Fn(&Conn) -> bool) {
         let g = self.inner.lock().unwrap();
         for c in g.conns.iter().filter(|c| pred(c)) {
-            let _ = c.tx.send(out.clone());
+            if let Err(mpsc::error::TrySendError::Full(_)) = c.tx.try_send(out.clone()) {
+                tracing::warn!(conn = c.id, "connection is not reading; closing it");
+                let _ = c.kill.send(true);
+            }
         }
+    }
+
+    /// Queue a message for one connection.
+    pub fn send_to_conn(&self, conn_id: u64, out: Outgoing) {
+        self.send_where(out, |c| c.id == conn_id);
     }
 
     pub fn broadcast(&self, msg: WsServerMsg) {
@@ -105,5 +126,25 @@ impl Hub {
                 true
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slow_consumer_is_cut_off() {
+        let hub = Hub::default();
+        let mut r = hub.register(1, false);
+        for _ in 0..(QUEUE_DEPTH + 50) {
+            hub.broadcast(WsServerMsg::Pong);
+        }
+        assert!(*r.kill.borrow(), "connection asked to close once its queue is full");
+        let mut n = 0;
+        while r.rx.try_recv().is_ok() {
+            n += 1;
+        }
+        assert!(n <= QUEUE_DEPTH, "queue bounded, got {n}");
     }
 }

@@ -37,7 +37,8 @@ async fn kick(State(st): State<AppState>, au: AuthUser, Path(id): Path<i64>) -> 
         return Err(AppError::BadRequest("You can't remove yourself".into()));
     }
     let mut tx = st.db.begin().await?;
-    let n = sqlx::query("UPDATE users SET removed_at = ? WHERE id = ? AND removed_at IS NULL")
+    // Free the nickname: the key gets a suffix no real nickname can have (keys are trimmed and have no '#').
+    let n = sqlx::query("UPDATE users SET removed_at = ?, nickname_key = nickname_key || '#removed-' || id WHERE id = ? AND removed_at IS NULL")
         .bind(now_ms())
         .bind(id)
         .execute(&mut *tx)

@@ -231,3 +231,9 @@ pub async fn admin_transfer_code(core: State<'_, Core>, user: Id) -> CmdResult<T
 pub async fn admin_reports(core: State<'_, Core>) -> CmdResult<serde_json::Value> {
     core.api()?.reports(None).await.map_err(err)
 }
+
+#[tauri::command]
+pub async fn admin_report_body(core: State<'_, Core>, id: i64) -> CmdResult<String> {
+    let v = core.api()?.report_body(id).await.map_err(err)?;
+    Ok(v["body"].as_str().unwrap_or_default().to_string())
+}

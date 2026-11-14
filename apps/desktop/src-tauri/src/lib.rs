@@ -53,6 +53,7 @@ pub fn run() {
             commands::admin_kick,
             commands::admin_transfer_code,
             commands::admin_reports,
+            commands::admin_report_body,
             media::upload_image,
             media::post_image_message,
             media::save_image,

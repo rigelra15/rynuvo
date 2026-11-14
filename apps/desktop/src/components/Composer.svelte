@@ -46,13 +46,14 @@
     const content = text.trim()
     if ((!content && !file) || sending || left < 0) return
     sending = true
+    const cid = channel.id // the target channel never changes mid-send
     try {
       if (file) {
         const ref = await api.uploadImage(new Uint8Array(await file.arrayBuffer()))
-        await api.postImageMessage(channel.id, content, ref.id)
+        await api.postImageMessage(cid, content, ref.id)
         clearAttach()
       } else {
-        await api.postMessage(channel.id, content)
+        await api.postMessage(cid, content)
       }
       text = ''
       error = null

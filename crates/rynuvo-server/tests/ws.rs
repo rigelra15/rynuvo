@@ -87,3 +87,17 @@ async fn typing_relayed_not_echoed() {
     assert_eq!(wa.next().await, WsServerMsg::Pong, "no typing echo to sender");
     assert!(wb.try_next(300).await.is_none(), "second typing within 3s is dropped");
 }
+
+#[tokio::test]
+async fn oversized_message_drops_connection() {
+    let app = TestApp::spawn().await;
+    let a = app.user("Dimas").await;
+    let mut ws = app.ws_raw().await;
+    // A valid hello padded past the 64 KiB message limit must not be accepted.
+    let pad = "x".repeat(200 * 1024);
+    ws.send_json(json!({"t":"hello","d":{"token":a.token,"protocol":rynuvo_proto::PROTOCOL_VERSION,"pad":pad}})).await;
+    assert!(ws.try_next(2000).await.is_none(), "oversized hello must not produce Ready");
+    // Server keeps working for normal clients.
+    let mut ok = app.ws(&a.token).await;
+    assert!(matches!(ok.next().await, WsServerMsg::Ready { .. }));
+}

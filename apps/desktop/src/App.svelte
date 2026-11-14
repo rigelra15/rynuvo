@@ -65,7 +65,9 @@
       />
       <main class="main">
         {#if store.selected}
-          <ChannelView channel={store.selected} />
+          {#key store.selected.id}
+            <ChannelView channel={store.selected} />
+          {/key}
         {:else}
           <div class="none muted">No channels yet. Click + next to "Text" to create one.</div>
         {/if}

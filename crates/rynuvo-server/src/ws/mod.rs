@@ -20,22 +20,29 @@ use crate::{app::AppState, auth, now_ms, routes::channels::list_channels};
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 const PING_EVERY: Duration = Duration::from_secs(20);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+const SEND_TIMEOUT: Duration = Duration::from_secs(10);
+/// Clients only send small control messages; anything larger is hostile.
+const MAX_MESSAGE: usize = 64 * 1024;
 
 pub fn router() -> Router<AppState> {
     Router::new().route("/ws", get(upgrade))
 }
 
 async fn upgrade(State(st): State<AppState>, ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(move |socket| handle(st, socket))
+    ws.max_message_size(MAX_MESSAGE).max_frame_size(MAX_MESSAGE).on_upgrade(move |socket| handle(st, socket))
 }
 
 async fn close(mut socket: WebSocket, code: u16, reason: &'static str) {
     let _ = socket.send(Message::Close(Some(CloseFrame { code, reason: reason.into() }))).await;
 }
 
+async fn send_raw(socket: &mut WebSocket, msg: Message) -> bool {
+    matches!(tokio::time::timeout(SEND_TIMEOUT, socket.send(msg)).await, Ok(Ok(())))
+}
+
 async fn send(socket: &mut WebSocket, msg: &WsServerMsg) -> bool {
     let txt = serde_json::to_string(msg).expect("serialize");
-    socket.send(Message::Text(txt.into())).await.is_ok()
+    send_raw(socket, Message::Text(txt.into())).await
 }
 
 async fn read_hello(socket: &mut WebSocket) -> Option<(String, u32)> {
@@ -75,7 +82,8 @@ async fn handle(st: AppState, mut socket: WebSocket) {
     let _ = sqlx::query("UPDATE devices SET last_seen = ? WHERE id = ?").bind(now_ms()).bind(au.device_id).execute(&st.db).await;
 
     let user_id = au.user.id;
-    let (conn_id, mut rx, first) = st.hub.register(user_id, au.user.is_admin);
+    let reg = st.hub.register(user_id, au.user.is_admin);
+    let (conn_id, mut rx, mut kill, first) = (reg.id, reg.rx, reg.kill, reg.first);
     let ready = match snapshot(&st, au.user).await {
         Ok(r) => r,
         Err(e) => {
@@ -88,23 +96,30 @@ async fn handle(st: AppState, mut socket: WebSocket) {
         if first {
             st.hub.broadcast_except(user_id, WsServerMsg::Presence { user_id, online: true });
         }
-        run(&st, &mut socket, &mut rx, user_id).await;
+        run(&st, &mut socket, &mut rx, &mut kill, user_id).await;
     }
     if let Some(uid) = st.hub.unregister(conn_id) {
         st.hub.broadcast(WsServerMsg::Presence { user_id: uid, online: false });
     }
 }
 
-async fn run(st: &AppState, socket: &mut WebSocket, rx: &mut tokio::sync::mpsc::UnboundedReceiver<Outgoing>, user_id: i64) {
+async fn run(
+    st: &AppState,
+    socket: &mut WebSocket,
+    rx: &mut tokio::sync::mpsc::Receiver<Outgoing>,
+    kill: &mut tokio::sync::watch::Receiver<bool>,
+    user_id: i64,
+) {
     let mut ping = tokio::time::interval(PING_EVERY);
     ping.tick().await;
     let mut last_rx = tokio::time::Instant::now();
     loop {
         tokio::select! {
+            _ = kill.changed() => return,
             out = rx.recv() => match out {
                 Some(Outgoing::Msg(m)) => if !send(socket, &m).await { return },
                 Some(Outgoing::Close(code, reason)) => {
-                    let _ = socket.send(Message::Close(Some(CloseFrame { code, reason: reason.into() }))).await;
+                    let _ = send_raw(socket, Message::Close(Some(CloseFrame { code, reason: reason.into() }))).await;
                     return;
                 }
                 None => return,
@@ -128,7 +143,7 @@ async fn run(st: &AppState, socket: &mut WebSocket, rx: &mut tokio::sync::mpsc::
             }
             _ = ping.tick() => {
                 if last_rx.elapsed() > IDLE_TIMEOUT { return }
-                if socket.send(Message::Ping(Vec::new().into())).await.is_err() { return }
+                if !send_raw(socket, Message::Ping(Vec::new().into())).await { return }
             }
         }
     }

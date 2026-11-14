@@ -23,7 +23,7 @@
 {#if channel.kind === 'voice'}
   <section class="soon muted">
     <div class="big">🔊</div>
-    <p>Voice segera hadir di update berikutnya.</p>
+    <p>Voice is coming in the next update.</p>
   </section>
 {:else}
   <MessageList channel={channel.id} />

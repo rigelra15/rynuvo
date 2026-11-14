@@ -113,3 +113,39 @@ async fn auth_revoked_stops_reconnect() {
     assert!(after.iter().all(|e| !matches!(e, SessionEvent::Conn(ConnState::Connecting))), "no reconnect: {after:?}");
     assert!(store.get(&base).is_none());
 }
+
+/// A server that sends Ready and then goes silent without closing (half-open connection).
+async fn silent_server() -> String {
+    use futures_util::StreamExt;
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((s, _)) = l.accept().await else { return };
+            tokio::spawn(async move {
+                let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+                let _hello = ws.next().await;
+                let ready = r#"{"t":"ready","d":{"me":{"id":1,"nickname":"x","isAdmin":false},"users":[],"channels":[],"online":[],"alerts":[]}}"#;
+                use futures_util::SinkExt;
+                ws.send(tokio_tungstenite::tungstenite::Message::text(ready)).await.unwrap();
+                // Hold the socket open but never read or write again.
+                tokio::time::sleep(Duration::from_secs(600)).await;
+                drop(ws);
+            });
+        }
+    });
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn silent_server_triggers_reconnect() {
+    use rynuvo_desktop_lib::core::session::Timing;
+    let base = silent_server().await;
+    let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::default());
+    let (ev, emit) = collector();
+    let timing = Timing { ping_every: Duration::from_millis(200), read_timeout: Duration::from_millis(800) };
+    let h = Session::start_with(Api::new(&base, Some("t".into())).unwrap(), store, base.clone(), emit, timing);
+    wait_for(&ev, |e| e.iter().any(|x| matches!(x, SessionEvent::Conn(ConnState::Online)))).await;
+    wait_for(&ev, |e| e.iter().any(|x| matches!(x, SessionEvent::Conn(ConnState::Reconnecting { .. })))).await;
+    h.stop();
+}

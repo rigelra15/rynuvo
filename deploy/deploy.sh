@@ -9,32 +9,26 @@ cargo zigbuild -p rynuvo-server --release --target x86_64-unknown-linux-gnu.2.39
 BIN=target/x86_64-unknown-linux-gnu/release/rynuvo-server
 ls -lh "$BIN"
 
-scp -q "$BIN" deploy/rynuvo.service deploy/Caddyfile.rynuvo deploy/config.example.toml "$HOST":/tmp/
-ssh "$HOST" 'sudo bash -s' <<'REMOTE'
+# Stage in a private temp dir on the remote (the VPS is shared; fixed /tmp names could be pre-created).
+STAGE=$(ssh "$HOST" 'mktemp -d')
+scp -q "$BIN" deploy/rynuvo.service deploy/Caddyfile.rynuvo deploy/config.example.toml deploy/caddy-install.sh "$HOST:$STAGE/"
+ssh "$HOST" "sudo STAGE=$STAGE bash -s" <<'REMOTE'
 set -euo pipefail
+trap 'rm -rf "$STAGE"' EXIT
 id rynuvo >/dev/null 2>&1 || useradd --system --home /var/lib/rynuvo --shell /usr/sbin/nologin rynuvo
-install -m 0755 /tmp/rynuvo-server /usr/local/bin/rynuvo-server
+install -m 0755 "$STAGE/rynuvo-server" /usr/local/bin/rynuvo-server
 install -d -m 0755 /etc/rynuvo
-[ -f /etc/rynuvo/config.toml ] || install -m 0644 /tmp/config.example.toml /etc/rynuvo/config.toml
+[ -f /etc/rynuvo/config.toml ] || install -m 0644 "$STAGE/config.example.toml" /etc/rynuvo/config.toml
 install -d -o rynuvo -g rynuvo -m 0755 /var/lib/rynuvo /var/lib/rynuvo/downloads
-install -m 0644 /tmp/rynuvo.service /etc/systemd/system/rynuvo.service
+install -m 0644 "$STAGE/rynuvo.service" /etc/systemd/system/rynuvo.service
 systemctl daemon-reload
 systemctl enable --now rynuvo
 systemctl restart rynuvo
 
-install -m 0644 /tmp/Caddyfile.rynuvo /etc/caddy/sites/rynuvo.caddy
-LINE='import /etc/caddy/sites/rynuvo.caddy'
-if ! grep -qxF "$LINE" /etc/caddy/Caddyfile; then
-  cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.pre-rynuvo-$(date +%Y%m%d%H%M)"
-  echo "$LINE" >> /etc/caddy/Caddyfile
-fi
-caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-systemctl reload caddy
-rm -f /tmp/rynuvo-server /tmp/rynuvo.service /tmp/Caddyfile.rynuvo /tmp/config.example.toml
+bash "$STAGE/caddy-install.sh" "$STAGE/Caddyfile.rynuvo" /etc/caddy/Caddyfile /etc/caddy/sites/rynuvo.caddy
 sleep 1
 systemctl is-active rynuvo
 ps -o rss=,comm= -C rynuvo-server
-journalctl -u rynuvo --no-pager | grep -i "owner" | tail -1 || true
 REMOTE
 
 for i in 1 2 3 4 5; do

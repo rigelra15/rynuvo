@@ -79,3 +79,15 @@ async fn transfer_code_once_and_expires() {
     sqlx::query("UPDATE transfer_codes SET expires_at = 0").execute(&app.state.db).await.unwrap();
     assert_eq!(claim(&app, &t2.code).await.status(), 403);
 }
+
+#[tokio::test]
+async fn removed_member_can_rejoin_with_same_nickname() {
+    let app = TestApp::spawn().await;
+    let admin = app.admin().await;
+    let u = app.user("Dimas").await;
+    let r = app.client.delete(app.url(&format!("/api/v1/admin/users/{}", u.user.id))).bearer_auth(&admin.token).send().await.unwrap();
+    assert!(r.status().is_success(), "{}", r.status());
+    app.set_invite(TestApp::INVITE).await;
+    let r = app.join_raw(TestApp::INVITE, "Dimas").await;
+    assert_eq!(r.status(), 200, "nickname of a removed member is free again");
+}

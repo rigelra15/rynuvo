@@ -33,6 +33,7 @@ export const api = {
   adminKick: (user: Id) => invoke<void>('admin_kick', { user }),
   adminTransferCode: (user: Id) => invoke<TransferCode>('admin_transfer_code', { user }),
   adminReports: () => invoke<Report[]>('admin_reports'),
+  adminReportBody: (id: Id) => invoke<string>('admin_report_body', { id }),
   uploadImage: (bytes: Uint8Array) => invoke<ImageRef>('upload_image', bytes),
   postImageMessage: (channel: Id, content: string, imageId: string) =>
     invoke<Message>('post_image_message', { channel, content, imageId }),
@@ -67,7 +68,8 @@ export function describeNet(r: NetReport): string[] {
   ]
 }
 
-export interface Report { id: Id; userId: Id; nickname: string; kind: string; body: string; createdAt: number }
+/** `body` is a preview; `size` is the full length. */
+export interface Report { id: Id; userId: Id; nickname: string; kind: string; body: string; size: number; createdAt: number }
 
 export function onSessionEvent(cb: (e: SessionEvent) => void): Promise<UnlistenFn> {
   return listen<SessionEvent>('rynuvo://event', (e) => cb(e.payload))

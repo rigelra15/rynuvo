@@ -34,7 +34,7 @@
       <input bind:value={code} placeholder="XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" required />
     </label>
     {#if !transfer}
-      <label>Nickname<input bind:value={nickname} maxlength="32" required /></label>
+      <label>Nickname<input bind:value={nickname} required /></label>
     {/if}
 
     {#if error}<p class="err">{error}</p>{/if}

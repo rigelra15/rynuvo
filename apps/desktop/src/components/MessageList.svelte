@@ -64,8 +64,13 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="list" bind:this={el} onscroll={onScroll} onclick={onClick}>
-  {#if list === undefined}
-    <div class="empty muted">Memuat…</div>
+  {#if list === undefined && store.loadError.has(channel)}
+    <div class="empty muted">
+      <p>Couldn't load messages: {store.loadError.get(channel)}</p>
+      <button class="btn sm" onclick={() => store.loadLatest(channel)}>Retry</button>
+    </div>
+  {:else if list === undefined}
+    <div class="empty muted">Loading…</div>
   {:else if list.length === 0}
     <div class="empty muted">No messages yet. Say hi to your friends!</div>
   {:else}

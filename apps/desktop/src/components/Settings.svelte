@@ -81,7 +81,7 @@
         <section>
           <h3>Nickname</h3>
           <form class="row" onsubmit={rename}>
-            <input bind:value={nickname} maxlength="32" />
+            <input bind:value={nickname} />
             <button class="btn primary" disabled={!nickname.trim() || nickname.trim() === store.me?.nickname}>Save</button>
           </form>
           {#if nickMsg}<p class="note">{nickMsg}</p>{/if}

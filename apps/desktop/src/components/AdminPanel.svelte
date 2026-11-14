@@ -58,8 +58,17 @@
     }
   }
 
+  let full = $state<Record<Id, string>>({})
+  async function loadFull(id: Id) {
+    try {
+      full[id] = await api.adminReportBody(id)
+    } catch (e) {
+      error = errText(e)
+    }
+  }
+
   function summary(r: Report): string {
-    if (r.kind !== 'nettest') return `${Math.round(r.body.length / 1024)} KB of log`
+    if (r.kind !== 'nettest') return `${Math.max(1, Math.round(r.size / 1024))} KB of log`
     try {
       const n = JSON.parse(r.body)
       return `${n.mapping}, UDP ${n.udpOk ? 'ok' : 'blocked'}, IPv6 ${n.ipv6Ok ? 'yes' : 'no'}, ${n.uploadMbps ?? '?'} Mbps`
@@ -111,7 +120,12 @@
       <button class="rhead" onclick={() => (openReport = openReport === r.id ? null : r.id)}>
         <span class="kind">{r.kind}</span><span>{r.nickname}</span><span class="muted">{when(r.createdAt)}</span><span class="muted sum">{summary(r)}</span>
       </button>
-      {#if openReport === r.id}<pre class="selectable">{r.body}</pre>{/if}
+      {#if openReport === r.id}
+        <pre class="selectable">{full[r.id] ?? r.body}</pre>
+        {#if r.size > r.body.length && full[r.id] === undefined}
+          <button class="btn sm" onclick={() => loadFull(r.id)}>Load full log ({Math.round(r.size / 1024)} KB)</button>
+        {/if}
+      {/if}
     </div>
   {/each}
 </section>
