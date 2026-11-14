@@ -18,7 +18,21 @@
   let version = $state('')
   let error = $state<string | null>(null)
 
-  onMount(() => void api.appVersion().then((v) => (version = v)))
+  let autostart = $state(false)
+  onMount(() => {
+    void api.appVersion().then((v) => (version = v))
+    void api.prefsGet().then((p) => (autostart = p.autostart))
+  })
+
+  async function setAutostart() {
+    try {
+      const p = await api.prefsGet()
+      autostart = (await api.prefsSet({ ...p, autostart })).autostart
+    } catch (err) {
+      autostart = !autostart
+      error = errText(err)
+    }
+  }
 
   async function rename(e: SubmitEvent) {
     e.preventDefault()
@@ -109,6 +123,11 @@
         </section>
 
         <section>
+          <h3>Startup</h3>
+          <label class="chk"><input type="checkbox" bind:checked={autostart} onchange={setAutostart} /> Open Rynuvo when I sign in to this computer</label>
+        </section>
+
+        <section>
           <h3>Having problems?</h3>
           <button class="btn" onclick={sendLog}>Send log to admin</button>
           {#if logMsg}<p class="note">{logMsg}</p>{/if}
@@ -143,5 +162,6 @@
   .note { color: var(--muted); }
   ul { margin: 0; padding-left: 18px; font-size: 13px; }
   .err { color: var(--danger); }
+  .chk { display: flex; gap: 8px; align-items: center; font-size: 13px; }
   footer { display: flex; justify-content: space-between; align-items: center; padding-top: 14px; }
 </style>

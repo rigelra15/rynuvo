@@ -7,6 +7,17 @@ export type VoiceEvent =
   | { kind: 'level'; db: number; open: boolean }
   | { kind: 'path'; via: 'udp' | 'ws' }
   | { kind: 'deviceError'; message: string }
+  | { kind: 'state'; channelId: Id | null; muted: boolean; deafened: boolean }
+
+export interface Prefs {
+  inputDevice: string | null
+  outputDevice: string | null
+  vadThreshold: number
+  volumes: Record<string, number>
+  shortcutMute: string
+  shortcutDeafen: string
+  autostart: boolean
+}
 
 /** Who is in which voice channel, after one server message. Returns the same array when nothing changed. */
 export function applyVoice(members: VoiceMember[], msg: WsServerMsg): VoiceMember[] {

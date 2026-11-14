@@ -56,6 +56,8 @@ pub enum VoiceEvent {
     Level { db: f32, open: bool },
     Path { via: LinkPath },
     DeviceError { message: String },
+    /// My own voice state changed (from the UI, a shortcut, the tray or the server).
+    State { channel_id: Option<Id>, muted: bool, deafened: bool },
 }
 
 pub type EventSink = Arc<dyn Fn(VoiceEvent) + Send + Sync>;

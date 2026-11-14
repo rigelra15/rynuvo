@@ -5,6 +5,8 @@ mod diag;
 mod mac_notify;
 mod media;
 mod notify;
+pub mod prefs;
+mod tray;
 pub mod voice;
 mod voice_cmd;
 
@@ -20,6 +22,20 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::Builder::new().macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent).build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, s, e| tray::on_shortcut(app, s, e.state()))
+                .build(),
+        )
+        .manage(tray::Shortcuts::default())
+        .on_window_event(|w, e| {
+            // Closing the window keeps Rynuvo (and voice) running in the tray.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = e {
+                api.prevent_close();
+                let _ = w.hide();
+            }
+        })
         .register_asynchronous_uri_scheme_protocol("rynuvo-media", media::protocol)
         .setup(move |app| {
             if let Ok(dir) = app.path().app_log_dir() {
@@ -37,10 +53,25 @@ pub fn run() {
             let voice = voice::ctl::VoiceCtl::new(
                 Arc::new(|| Box::new(voice::devices::CpalBackend::default()) as Box<dyn voice::backend::AudioBackend>),
                 Arc::new(move |e| {
+                    if let voice::engine::VoiceEvent::State { muted, deafened, .. } = &e {
+                        tray::update(&handle, *muted, *deafened);
+                    }
                     let _ = handle.emit(commands::VOICE_EVENT, e);
                 }),
             );
+            let prefs_file = match &profile {
+                Some(p) => format!("prefs-{p}.json"),
+                None => "prefs.json".into(),
+            };
+            let prefs = prefs::PrefsStore::open(dir.join(prefs_file));
+            let p = prefs.get();
+            voice.set_prefs(p.audio());
+            app.manage(prefs);
             app.manage(commands::Core::new(store, dir.join(file), voice));
+            tray::build(app.handle())?;
+            if let Err(e) = tray::register_shortcuts(app.handle(), &p) {
+                tracing::warn!("shortcuts: {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -80,7 +111,17 @@ pub fn run() {
             voice_cmd::voice_set_threshold,
             voice_cmd::voice_mic_test,
             voice_cmd::voice_kick,
+            voice_cmd::prefs_get,
+            voice_cmd::prefs_set,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Rynuvo");
+        .build(tauri::generate_context!())
+        .expect("error while running Rynuvo")
+        .run(|app, e| {
+            // macOS: clicking the Dock icon brings the hidden window back.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = e {
+                tray::show_main(app);
+            }
+            let _ = (app, e);
+        });
 }

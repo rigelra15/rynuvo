@@ -1,7 +1,7 @@
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { Channel, ChannelKind, Id, ImageRef, Message, User, WsServerMsg } from './types'
-import type { MyVoice, VoiceEvent } from './voice'
+import type { MyVoice, Prefs, VoiceEvent } from './voice'
 
 export type ConnState = { state: 'connecting' } | { state: 'online' } | { state: 'reconnecting'; inMs: number }
 
@@ -53,6 +53,8 @@ export const api = {
   voiceSetThreshold: (threshold: number) => invoke<void>('voice_set_threshold', { threshold }),
   voiceMicTest: (on: boolean) => invoke<void>('voice_mic_test', { on }),
   voiceKick: (userId: Id) => invoke<void>('voice_kick', { userId }),
+  prefsGet: () => invoke<Prefs>('prefs_get'),
+  prefsSet: (next: Prefs) => invoke<Prefs>('prefs_set', { next }),
 }
 
 export function onVoiceEvent(cb: (e: VoiceEvent) => void): Promise<UnlistenFn> {

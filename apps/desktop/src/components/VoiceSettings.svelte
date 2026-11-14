@@ -2,6 +2,8 @@
   import { onDestroy, onMount } from 'svelte'
   import { api, errText } from '../lib/api'
   import { store } from '../lib/state.svelte'
+  import type { Prefs } from '../lib/voice'
+  import ShortcutInput from './ShortcutInput.svelte'
 
   let inputs = $state<string[]>([])
   let outputs = $state<string[]>([])
@@ -11,8 +13,15 @@
   let testing = $state(false)
   let error = $state<string | null>(null)
 
+  let prefs = $state<Prefs | null>(null)
+  let scMsg = $state<string | null>(null)
+
   onMount(async () => {
     try {
+      prefs = await api.prefsGet()
+      input = prefs.inputDevice ?? ''
+      output = prefs.outputDevice ?? ''
+      sensitivity = Math.round(prefs.vadThreshold * 100)
       const d = await api.voiceDevices()
       inputs = d.inputs
       outputs = d.outputs
@@ -32,6 +41,16 @@
   function threshold() {
     void api.voiceSetThreshold(sensitivity / 100)
   }
+  async function shortcut(which: 'shortcutMute' | 'shortcutDeafen', v: string) {
+    if (!prefs) return
+    try {
+      prefs = await api.prefsSet({ ...prefs, [which]: v })
+      scMsg = null
+    } catch (e) {
+      scMsg = errText(e)
+    }
+  }
+
   async function test() {
     testing = !testing
     await api.voiceMicTest(testing)
@@ -64,6 +83,16 @@
   {#if testing}<p class="muted">You should hear yourself. Use headphones to avoid echo.</p>{/if}
 </section>
 
+{#if prefs}
+  <section>
+    <h3>Shortcuts</h3>
+    <p class="muted">Work even when Rynuvo is in the background.</p>
+    <div class="sc"><span>Mute</span><ShortcutInput value={prefs.shortcutMute} onChange={(v) => shortcut('shortcutMute', v)} /></div>
+    <div class="sc"><span>Deafen</span><ShortcutInput value={prefs.shortcutDeafen} onChange={(v) => shortcut('shortcutDeafen', v)} /></div>
+    {#if scMsg}<p class="err">{scMsg}</p>{/if}
+  </section>
+{/if}
+
 {#if error}<p class="err">{error}</p>{/if}
 
 <style>
@@ -76,4 +105,5 @@
   .fill { height: 100%; background: var(--faint); transition: width 90ms linear; }
   .fill.open { background: var(--speaking); }
   .err { color: var(--danger); }
+  .sc { display: flex; justify-content: space-between; align-items: center; width: 100%; }
 </style>

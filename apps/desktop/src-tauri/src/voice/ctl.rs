@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 
 use super::{
     backend::AudioBackend,
-    engine::{EngineOpts, EventSink, Tone, VoiceEngine},
+    engine::{EngineOpts, EventSink, Tone, VoiceEngine, VoiceEvent},
     link::LinkCfg,
 };
 use crate::core::session::SessionHandle;
@@ -103,6 +103,20 @@ impl VoiceCtl {
         MyVoice { channel_id: s.want, muted: s.muted, deafened: s.deafened }
     }
 
+    fn notify(&self) {
+        let m = self.state();
+        (self.events)(VoiceEvent::State { channel_id: m.channel_id, muted: m.muted, deafened: m.deafened });
+    }
+
+    /// Apply saved audio preferences (devices, threshold, per-person volumes).
+    pub fn set_prefs(&self, p: AudioPrefs) {
+        self.set_devices(p.input.clone(), p.output.clone());
+        self.set_threshold(p.threshold);
+        for (u, v) in p.volumes {
+            self.set_volume(u, v);
+        }
+    }
+
     pub fn channel(&self) -> Option<Id> {
         self.st.lock().unwrap().want
     }
@@ -116,6 +130,7 @@ impl VoiceCtl {
     pub fn join(&self, channel_id: Id) {
         self.st.lock().unwrap().want = Some(channel_id);
         self.send(WsClientMsg::VoiceJoin { channel_id });
+        self.notify();
     }
 
     pub fn leave(&self) {
@@ -125,6 +140,7 @@ impl VoiceCtl {
             self.send(WsClientMsg::VoiceLeave);
         }
         self.stop_engine();
+        self.notify();
     }
 
     fn push_state(&self) {
@@ -151,6 +167,7 @@ impl VoiceCtl {
             }
         }
         self.push_state();
+        self.notify();
         self.state()
     }
 
@@ -167,6 +184,7 @@ impl VoiceCtl {
             s.deafened = deafened;
         }
         self.push_state();
+        self.notify();
         self.state()
     }
 
@@ -336,6 +354,7 @@ impl VoiceCtl {
                 tracing::info!("voice ended: {reason}");
                 self.st.lock().unwrap().want = None;
                 self.stop_engine();
+                self.notify();
             }
             WsServerMsg::VoiceMemberLeft { user_id, channel_id } => {
                 let (me, want, engine, engine_ch) = {
@@ -347,6 +366,7 @@ impl VoiceCtl {
                     if want == Some(*channel_id) {
                         self.st.lock().unwrap().want = None;
                         self.stop_engine();
+                        self.notify();
                     }
                 } else if engine_ch == Some(*channel_id) {
                     if let Some(e) = engine {

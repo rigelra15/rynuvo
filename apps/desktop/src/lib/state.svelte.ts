@@ -50,7 +50,18 @@ class Store {
     return this.users.get(id)?.nickname ?? 'someone'
   }
 
+  async loadPrefs() {
+    try {
+      const p = await api.prefsGet()
+      this.volumes.clear()
+      for (const [id, v] of Object.entries(p.volumes)) this.volumes.set(Number(id), v)
+    } catch {
+      // defaults are fine
+    }
+  }
+
   async boot() {
+    void this.loadPrefs()
     try {
       const info = await api.bootstrap()
       if (!info) {
@@ -204,6 +215,10 @@ class Store {
         return
       case 'deviceError':
         this.voiceNotice = e.message
+        return
+      case 'state':
+        if (this.myVoice.channelId !== null && e.channelId === null) this.voiceGone()
+        this.myVoice = { channelId: e.channelId, muted: e.muted, deafened: e.deafened }
         return
     }
   }
