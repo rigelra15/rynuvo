@@ -2,8 +2,6 @@
   import { api, errText } from '../lib/api'
   import { store } from '../lib/state.svelte'
 
-  const DEFAULT_SERVER = 'https://rynuvo.hypertopia.web.id'
-  let server = $state(store.server || DEFAULT_SERVER)
   let code = $state('')
   let nickname = $state('')
   let transfer = $state(false)
@@ -15,8 +13,8 @@
     busy = true
     error = null
     try {
-      const me = transfer ? await api.claimTransfer(server, code) : await api.join(server, code, nickname)
-      store.signedIn(server, me)
+      const me = transfer ? await api.claimTransfer(code) : await api.join(code, nickname)
+      store.signedIn(me)
     } catch (err) {
       error = errText(err)
     } finally {
@@ -31,7 +29,6 @@
     <h1>Sign in to Rynuvo</h1>
     {#if store.notice}<p class="notice">{store.notice}</p>{/if}
 
-    <label>Server address<input bind:value={server} autocomplete="off" spellcheck="false" required /></label>
     <label>
       {transfer ? 'Transfer code' : 'Invite code'}
       <input bind:value={code} placeholder="XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" required />

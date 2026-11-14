@@ -53,8 +53,7 @@ class Store {
     }
   }
 
-  signedIn(server: string, me: User) {
-    this.server = server
+  signedIn(me: User) {
     this.me = me
     this.notice = null
     this.phase = 'app'

@@ -15,8 +15,8 @@ export interface TransferCode { code: string; expiresAt: number }
 
 export const api = {
   bootstrap: () => invoke<BootInfo | null>('bootstrap'),
-  join: (server: string, invite: string, nickname: string) => invoke<User>('join', { server, invite, nickname }),
-  claimTransfer: (server: string, code: string) => invoke<User>('claim_transfer', { server, code }),
+  join: (invite: string, nickname: string) => invoke<User>('join', { invite, nickname }),
+  claimTransfer: (code: string) => invoke<User>('claim_transfer', { code }),
   logout: () => invoke<void>('logout'),
   renameMe: (nickname: string) => invoke<User>('rename_me', { nickname }),
   createChannel: (kind: ChannelKind, name: string) => invoke<Channel>('create_channel', { kind, name }),

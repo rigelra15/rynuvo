@@ -120,16 +120,23 @@ pub async fn bootstrap(app: AppHandle, core: State<'_, Core>) -> CmdResult<Optio
     Ok(Some(BootInfo { server, me }))
 }
 
+/// The circle's server. Fixed in the app; `RYNUVO_SERVER` overrides it for local testing.
+pub const SERVER: &str = "https://rynuvo.pokyvl.my.id";
+
+fn server() -> String {
+    std::env::var("RYNUVO_SERVER").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| SERVER.to_string())
+}
+
 #[tauri::command]
-pub async fn join(app: AppHandle, core: State<'_, Core>, server: String, invite: String, nickname: String) -> CmdResult<User> {
-    let api = Api::new(&server, None)?;
+pub async fn join(app: AppHandle, core: State<'_, Core>, invite: String, nickname: String) -> CmdResult<User> {
+    let api = Api::new(&server(), None)?;
     let resp = api.join(&invite, &nickname, &device_name()).await.map_err(err)?;
     core.signed_in(&app, api.base(), resp)
 }
 
 #[tauri::command]
-pub async fn claim_transfer(app: AppHandle, core: State<'_, Core>, server: String, code: String) -> CmdResult<User> {
-    let api = Api::new(&server, None)?;
+pub async fn claim_transfer(app: AppHandle, core: State<'_, Core>, code: String) -> CmdResult<User> {
+    let api = Api::new(&server(), None)?;
     let resp = api.claim_transfer(&code, &device_name()).await.map_err(err)?;
     core.signed_in(&app, api.base(), resp)
 }

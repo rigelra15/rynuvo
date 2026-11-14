@@ -1,6 +1,6 @@
 # /etc/rynuvo/config.toml
 bind = "127.0.0.1:8110"
-public_url = "https://rynuvo.hypertopia.web.id"
+public_url = "https://rynuvo.pokyvl.my.id"
 public_ip = "43.157.206.245"
 data_dir = "/var/lib/rynuvo"
 stun_ports = [3478, 3479]
