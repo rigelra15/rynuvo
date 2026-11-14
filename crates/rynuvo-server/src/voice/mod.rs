@@ -1,4 +1,5 @@
 //! Voice channels: membership, signaling over the WebSocket, and usage accounting.
+pub mod relay;
 pub mod rooms;
 
 pub use rooms::{Member, VoiceRooms};

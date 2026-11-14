@@ -11,6 +11,8 @@ use crate::{
 
 pub struct TestApp {
     pub addr: SocketAddr,
+    /// STUN + voice relay UDP address.
+    pub udp: SocketAddr,
     pub client: reqwest::Client,
     pub state: AppState,
     pub _tmp: tempfile::TempDir,
@@ -19,32 +21,39 @@ pub struct TestApp {
 impl TestApp {
     pub async fn spawn() -> TestApp {
         let tmp = tempfile::tempdir().unwrap();
+        let udp_sock = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let udp = udp_sock.local_addr().unwrap();
         let cfg = Config {
             bind: "127.0.0.1:0".parse().unwrap(),
             public_url: "http://127.0.0.1".into(),
             public_ip: "127.0.0.1".parse().unwrap(),
             data_dir: tmp.path().to_path_buf(),
-            stun_ports: [0, 0],
+            stun_ports: [udp.port(), 0],
             disk_warn_pct: 85,
             disk_block_pct: 92,
             max_upload_bytes: 5_242_880,
         };
         std::fs::create_dir_all(cfg.media_dir()).unwrap();
         let pool = db::open_pool("sqlite::memory:").await.unwrap();
+        let hub = Hub::default();
+        let voice = crate::voice::VoiceRooms::default();
+        let relay = crate::voice::relay::Relay::new(voice.clone(), hub.clone());
         let state = AppState {
             db: pool,
             disk: DiskState::new(cfg.disk_warn_pct, cfg.disk_block_pct),
             cfg: Arc::new(cfg),
-            hub: Hub::default(),
-            voice: Default::default(),
+            hub: hub.clone(),
+            voice: voice.clone(),
+            relay: relay.clone(),
         };
+        crate::stun::spawn_on(udp_sock, Some(relay));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let router = build_router(state.clone());
         tokio::spawn(async move {
             axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
         });
-        TestApp { addr, client: reqwest::Client::new(), state, _tmp: tmp }
+        TestApp { addr, udp, client: reqwest::Client::new(), state, _tmp: tmp }
     }
 
     pub async fn set_invite(&self, code: &str) {
@@ -130,6 +139,25 @@ impl WsClient {
             let m = tokio::time::timeout_at(deadline, self.ws.next()).await.ok()??.ok()?;
             match m {
                 Message::Text(t) => return Some(serde_json::from_str(t.as_str()).expect("server msg")),
+                Message::Close(_) => return None,
+                _ => continue,
+            }
+        }
+    }
+
+    pub async fn send_binary(&mut self, b: Vec<u8>) {
+        use futures_util::SinkExt;
+        self.ws.send(tokio_tungstenite::tungstenite::Message::binary(b)).await.unwrap();
+    }
+
+    /// Next binary frame within `ms`, skipping text and control frames.
+    pub async fn next_binary(&mut self, ms: u64) -> Option<Vec<u8>> {
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::Message;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(ms);
+        loop {
+            match tokio::time::timeout_at(deadline, self.ws.next()).await.ok()??.ok()? {
+                Message::Binary(b) => return Some(b.to_vec()),
                 Message::Close(_) => return None,
                 _ => continue,
             }

@@ -123,6 +123,7 @@ async fn run(
             _ = kill.changed() => return,
             out = rx.recv() => match out {
                 Some(Outgoing::Msg(m)) => if !send(socket, &m).await { return },
+                Some(Outgoing::Bin(b)) => if !send_raw(socket, Message::Binary(b.into())).await { return },
                 Some(Outgoing::Close(code, reason)) => {
                     let _ = send_raw(socket, Message::Close(Some(CloseFrame { code, reason: reason.into() }))).await;
                     return;
@@ -146,6 +147,7 @@ async fn run(
                         Ok(WsClientMsg::VoiceKick { user_id: target }) => crate::voice::kick(st, user_id, is_admin, target).await,
                         _ => {}
                     },
+                    Message::Binary(b) => st.relay.from_ws(conn_id, &b).await,
                     Message::Close(_) => return,
                     _ => {}
                 }

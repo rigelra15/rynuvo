@@ -2,7 +2,7 @@ use axum::Router;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
-use crate::{config::Config, disk::DiskState, routes, voice::VoiceRooms, ws::{self, Hub}};
+use crate::{config::Config, disk::DiskState, routes, voice::{VoiceRooms, relay::Relay}, ws::{self, Hub}};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -11,6 +11,7 @@ pub struct AppState {
     pub hub: Hub,
     pub disk: DiskState,
     pub voice: VoiceRooms,
+    pub relay: Relay,
 }
 
 pub fn build_router(state: AppState) -> Router {

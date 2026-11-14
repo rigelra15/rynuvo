@@ -62,14 +62,19 @@ async fn serve(cfg: Config) -> anyhow::Result<()> {
     if let Some(code) = identity::ensure_owner_code(&pool).await.map_err(|e| anyhow::anyhow!("{e:?}"))? {
         tracing::warn!("owner code (join with this to become super-admin): {code}");
     }
+    let hub = Hub::default();
+    let voice = rynuvo_server::voice::VoiceRooms::default();
+    let relay = rynuvo_server::voice::relay::Relay::new(voice.clone(), hub.clone());
     let state = AppState {
         db: pool,
         disk: DiskState::new(cfg.disk_warn_pct, cfg.disk_block_pct),
         cfg: Arc::new(cfg.clone()),
-        hub: Hub::default(),
-        voice: Default::default(),
+        hub,
+        voice: voice.clone(),
+        relay: relay.clone(),
     };
-    rynuvo_server::stun::spawn(cfg.stun_ports)?;
+    rynuvo_server::stun::spawn(cfg.stun_ports, Some(relay))?;
+    rynuvo_server::voice::relay::Relay::spawn_drop_logger();
     rynuvo_server::disk::spawn_watcher(cfg.data_dir.clone(), state.disk.clone(), state.hub.clone());
     let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
     tracing::info!("rynuvo-server listening on {}", cfg.bind);

@@ -76,7 +76,7 @@ fn stun_ignores_garbage() {
 async fn stun_udp_roundtrip() {
     let server = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let addr = server.local_addr().unwrap();
-    stun::spawn_on(server);
+    stun::spawn_on(server, None);
     let client = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let tx = [3u8; 12];
     client.send_to(&binding_request(tx), addr).await.unwrap();

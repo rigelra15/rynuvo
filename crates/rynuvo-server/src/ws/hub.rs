@@ -14,6 +14,8 @@ pub const QUEUE_DEPTH: usize = 256;
 #[derive(Debug, Clone)]
 pub enum Outgoing {
     Msg(WsServerMsg),
+    /// Voice packet for a client on the WebSocket path.
+    Bin(Vec<u8>),
     Close(u16, &'static str),
 }
 
