@@ -54,3 +54,7 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 videotoolbox = "0.21"
 screencapturekit = "11"
 apple-cf = "0.11"
+
+[target."cfg(windows)".dependencies]
+wasapi = "0.27"
+windows-capture = "2"

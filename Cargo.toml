@@ -19,29 +19,7 @@ opt-level = 3
 # Audio DSP must run faster than real time even in debug builds.
 [profile.dev.package.sonora]
 opt-level = 3
-[profile.dev.package.sonora-aec3]
-opt-level = 3
-[profile.dev.package.sonora-agc2]
-opt-level = 3
-[profile.dev.package.sonora-ns]
-opt-level = 3
-[profile.dev.package.sonora-fft]
-opt-level = 3
-[profile.dev.package.sonora-simd]
-opt-level = 3
-[profile.dev.package.sonora-common-audio]
-opt-level = 3
 [profile.dev.package.nnnoiseless]
-opt-level = 3
-[profile.dev.package.opusic-sys]
-opt-level = 3
-[profile.dev.package.libwebp-sys]
-opt-level = 3
-[profile.dev.package.png]
-opt-level = 3
-[profile.dev.package.fdeflate]
-opt-level = 3
-[profile.dev.package.zune-jpeg]
 opt-level = 3
 
 # macOS 27 beta's `strip` corrupts large proc-macro dylibs (sqlx-macros: "mis-aligned LINKEDIT
