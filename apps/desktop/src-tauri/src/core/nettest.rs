@@ -83,7 +83,7 @@ fn parse_response(buf: &[u8], txid: &[u8; 12]) -> Option<SocketAddr> {
     None
 }
 
-async fn query(sock: &UdpSocket, server: SocketAddr) -> Option<SocketAddr> {
+pub(crate) async fn query(sock: &UdpSocket, server: SocketAddr) -> Option<SocketAddr> {
     let (req, txid) = binding_request();
     let mut buf = [0u8; 1500];
     for _ in 0..3 {
