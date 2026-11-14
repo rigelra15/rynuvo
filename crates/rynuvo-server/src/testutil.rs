@@ -92,7 +92,72 @@ impl TestApp {
         r.json().await.unwrap()
     }
 
+    /// Raw WebSocket connection, no hello sent.
+    pub async fn ws_raw(&self) -> WsClient {
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/api/v1/ws", self.addr)).await.unwrap();
+        WsClient { ws }
+    }
+
+    /// Connected WebSocket that already sent Hello (Ready is the next message).
+    pub async fn ws(&self, token: &str) -> WsClient {
+        let mut c = self.ws_raw().await;
+        c.send_json(serde_json::json!({"t":"hello","d":{"token":token,"protocol":rynuvo_proto::PROTOCOL_VERSION}})).await;
+        c
+    }
+
     pub fn url(&self, path: &str) -> String {
         format!("http://{}{}", self.addr, path)
+    }
+}
+
+pub struct WsClient {
+    ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+}
+
+impl WsClient {
+    pub async fn send_json(&mut self, v: serde_json::Value) {
+        use futures_util::SinkExt;
+        self.ws.send(tokio_tungstenite::tungstenite::Message::text(v.to_string())).await.unwrap();
+    }
+
+    /// Next server message within `ms`, skipping control frames. None on timeout/close.
+    pub async fn try_next(&mut self, ms: u64) -> Option<rynuvo_proto::WsServerMsg> {
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::Message;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(ms);
+        loop {
+            let m = tokio::time::timeout_at(deadline, self.ws.next()).await.ok()??.ok()?;
+            match m {
+                Message::Text(t) => return Some(serde_json::from_str(t.as_str()).expect("server msg")),
+                Message::Close(_) => return None,
+                _ => continue,
+            }
+        }
+    }
+
+    pub async fn next(&mut self) -> rynuvo_proto::WsServerMsg {
+        self.try_next(3000).await.expect("expected a server message")
+    }
+
+    /// Wait for a close frame and return its code.
+    pub async fn expect_close(&mut self) -> u16 {
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::Message;
+        loop {
+            let m = tokio::time::timeout(std::time::Duration::from_secs(3), self.ws.next())
+                .await
+                .expect("timeout waiting for close")
+                .expect("stream ended without close frame");
+            match m {
+                Ok(Message::Close(Some(f))) => return u16::from(f.code),
+                Ok(Message::Close(None)) => panic!("close without code"),
+                Ok(_) => continue,
+                Err(e) => panic!("ws error: {e}"),
+            }
+        }
+    }
+
+    pub async fn close(mut self) {
+        let _ = self.ws.close(None).await;
     }
 }

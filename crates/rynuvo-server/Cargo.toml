@@ -4,7 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [features]
-test-util = ["dep:tempfile", "dep:reqwest"]
+test-util = ["dep:tempfile", "dep:reqwest", "dep:tokio-tungstenite", "dep:futures-util"]
 
 [dependencies]
 rynuvo-proto = { path = "../rynuvo-proto" }
@@ -25,6 +25,8 @@ tower-http = { version = "0.7", features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = { version = "3", optional = true }
+tokio-tungstenite = { version = "0.30", optional = true }
+futures-util = { version = "0.3", optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
 
 [dev-dependencies]

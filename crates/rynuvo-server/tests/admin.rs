@@ -42,8 +42,15 @@ async fn kick_user_revokes_tokens_and_reassigns_channels() {
 }
 
 #[tokio::test]
-#[ignore = "enabled in Task 8"]
-async fn kicked_user_ws_closed_with_4001() {}
+async fn kicked_user_ws_closed_with_4001() {
+    let app = TestApp::spawn().await;
+    let admin = app.admin().await;
+    let b = app.user("Bayu").await;
+    let mut ws = app.ws(&b.token).await;
+    ws.next().await; // Ready
+    app.client.delete(app.url(&format!("/api/v1/admin/users/{}", b.user.id))).bearer_auth(&admin.token).send().await.unwrap();
+    assert_eq!(ws.expect_close().await, rynuvo_proto::CLOSE_AUTH_REVOKED);
+}
 
 async fn claim(app: &TestApp, code: &str) -> reqwest::Response {
     app.client.post(app.url("/api/v1/claim-transfer")).json(&json!({"code": code, "deviceName": "laptop baru"})).send().await.unwrap()

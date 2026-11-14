@@ -2,7 +2,7 @@ use axum::Router;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
-use crate::{config::Config, disk::DiskState, routes, ws::Hub};
+use crate::{config::Config, disk::DiskState, routes, ws::{self, Hub}};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -13,5 +13,5 @@ pub struct AppState {
 }
 
 pub fn build_router(state: AppState) -> Router {
-    Router::new().nest("/api/v1", routes::api(&state.cfg)).with_state(state)
+    Router::new().nest("/api/v1", routes::api(&state.cfg).merge(ws::router())).with_state(state)
 }
