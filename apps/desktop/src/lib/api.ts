@@ -1,6 +1,6 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { Channel, ChannelKind, Id, Message, User, WsServerMsg } from './types'
+import type { Channel, ChannelKind, Id, ImageRef, Message, User, WsServerMsg } from './types'
 
 export type ConnState = { state: 'connecting' } | { state: 'online' } | { state: 'reconnecting'; inMs: number }
 
@@ -33,6 +33,10 @@ export const api = {
   adminKick: (user: Id) => invoke<void>('admin_kick', { user }),
   adminTransferCode: (user: Id) => invoke<TransferCode>('admin_transfer_code', { user }),
   adminReports: () => invoke<Report[]>('admin_reports'),
+  uploadImage: (bytes: Uint8Array) => invoke<ImageRef>('upload_image', bytes),
+  postImageMessage: (channel: Id, content: string, imageId: string) =>
+    invoke<Message>('post_image_message', { channel, content, imageId }),
+  saveImage: (id: string) => invoke<string>('save_image', { id }),
 }
 
 export interface Report { id: Id; userId: Id; nickname: string; kind: string; body: string; createdAt: number }
@@ -43,5 +47,7 @@ export function onSessionEvent(cb: (e: SessionEvent) => void): Promise<UnlistenF
 
 /** Tauri command errors arrive as plain strings. */
 export function errText(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : 'Terjadi kesalahan'
+  return typeof e === 'string' ? e : e instanceof Error ? e.message : 'Something went wrong'
 }
+
+export const mediaUrl = (id: string) => convertFileSrc(id, 'rynuvo-media')

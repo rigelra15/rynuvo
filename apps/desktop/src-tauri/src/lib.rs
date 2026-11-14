@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod core;
+mod media;
 mod notify;
 
 use std::sync::Arc;
@@ -14,6 +15,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .register_asynchronous_uri_scheme_protocol("rynuvo-media", media::protocol)
         .setup(move |app| {
             let dir = app.path().app_config_dir()?;
             let file = match &profile {
@@ -43,6 +45,9 @@ pub fn run() {
             commands::admin_kick,
             commands::admin_transfer_code,
             commands::admin_reports,
+            media::upload_image,
+            media::post_image_message,
+            media::save_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Rynuvo");

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { render } from '../lib/markdown'
   import { store } from '../lib/state.svelte'
-  import { api, errText } from '../lib/api'
+  import { api, errText, mediaUrl } from '../lib/api'
+  import ImageViewer from './ImageViewer.svelte'
   import type { Message } from '../lib/types'
 
   let { m, head }: { m: Message; head: boolean } = $props()
@@ -9,6 +10,12 @@
   let editing = $state(false)
   let draft = $state('')
   let error = $state<string | null>(null)
+  let viewing = $state(false)
+
+  function fit(w: number, h: number) {
+    const k = Math.min(1, 400 / w, 300 / h)
+    return `width:${Math.round(w * k)}px;height:${Math.round(h * k)}px`
+  }
 
   const mine = $derived(store.me?.id === m.authorId)
   const canDelete = $derived(mine || (store.selected ? store.canManage(store.selected) : false))
@@ -17,8 +24,8 @@
   function time(ms: number) {
     const d = new Date(ms)
     const today = new Date().toDateString() === d.toDateString()
-    const t = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-    return today ? t : `${d.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit' })} ${t}`
+    const t = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    return today ? t : `${d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })} ${t}`
   }
 
   function startEdit() {
@@ -37,7 +44,7 @@
   }
 
   async function remove() {
-    if (!confirm('Hapus pesan ini?')) return
+    if (!confirm('Delete this message?')) return
     try {
       await api.deleteMessage(m.id)
     } catch (e) {
@@ -62,20 +69,26 @@
     {#if editing}
       <!-- svelte-ignore a11y_autofocus -->
       <textarea bind:value={draft} onkeydown={editKey} rows="2" autofocus></textarea>
-      <div class="hint">Enter simpan · Esc batal</div>
+      <div class="hint">Enter to save · Esc to cancel</div>
     {:else}
       {#if m.content}<div class="text selectable">{@html html}</div>{/if}
-      {#if m.editedAt}<span class="edited">(diedit)</span>{/if}
+      {#if m.editedAt}<span class="edited">(edited)</span>{/if}
+      {#if m.image}
+        <button class="img" style={fit(m.image.width, m.image.height)} onclick={() => (viewing = true)}>
+          <img src={mediaUrl(m.image.id)} alt="" loading="lazy" />
+        </button>
+      {/if}
     {/if}
     {#if error}<div class="err">{error}</div>{/if}
   </div>
   {#if !editing && (mine || canDelete)}
     <div class="actions">
       {#if mine}<button title="Edit" onclick={startEdit}>✎</button>{/if}
-      {#if canDelete}<button title="Hapus" onclick={remove}>🗑</button>{/if}
+      {#if canDelete}<button title="Delete" onclick={remove}>🗑</button>{/if}
     </div>
   {/if}
 </div>
+{#if viewing && m.image}<ImageViewer image={m.image} onclose={() => (viewing = false)} />{/if}
 
 <style>
   .msg { position: relative; display: grid; grid-template-columns: 40px 1fr; column-gap: 12px; padding: 2px 18px; }
@@ -92,6 +105,8 @@
   .text :global(pre) { background: var(--panel-2); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 4px 0; }
   .text :global(pre code) { background: none; padding: 0; }
   .text :global(a) { color: #a99cf9; }
+  .img { display: block; margin-top: 4px; padding: 0; border-radius: 8px; overflow: hidden; background: var(--elev); cursor: zoom-in; }
+  .img img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .edited { font-size: 11px; color: var(--faint); }
   textarea { width: 100%; resize: none; }
   .hint { font-size: 11px; color: var(--faint); }
