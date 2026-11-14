@@ -24,3 +24,8 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.zune-jpeg]
 opt-level = 3
+
+# macOS 27 beta's `strip` corrupts large proc-macro dylibs (sqlx-macros: "mis-aligned LINKEDIT
+# string pool"), and release builds strip debuginfo by default. Don't strip build-time artifacts.
+[profile.release.build-override]
+strip = false
