@@ -9,7 +9,7 @@ async fn hello_gets_ready_with_snapshot() {
     let c = app.create_channel(&a.token, "text", "umum").await;
     let mut ws = app.ws(&a.token).await;
     match ws.next().await {
-        WsServerMsg::Ready { me, users, channels, online, alerts } => {
+        WsServerMsg::Ready { me, users, channels, online, alerts, .. } => {
             assert_eq!(me.id, a.user.id);
             assert_eq!(users.len(), 1);
             assert_eq!(channels, vec![c]);
@@ -24,7 +24,7 @@ async fn hello_gets_ready_with_snapshot() {
 async fn bad_token_closed_4001() {
     let app = TestApp::spawn().await;
     let mut ws = app.ws_raw().await;
-    ws.send_json(json!({"t":"hello","d":{"token":"nope","protocol":1}})).await;
+    ws.send_json(json!({"t":"hello","d":{"token":"nope","protocol":2}})).await;
     assert_eq!(ws.expect_close().await, CLOSE_AUTH_REVOKED);
 }
 

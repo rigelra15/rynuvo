@@ -65,6 +65,7 @@ async fn snapshot(st: &AppState, me: User) -> anyhow::Result<WsServerMsg> {
         channels,
         online: st.hub.online_ids(),
         alerts,
+        voice: Vec::new(),
     })
 }
 

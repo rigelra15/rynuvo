@@ -5,7 +5,7 @@ use std::path::Path;
 async fn health_ok() {
     let app = TestApp::spawn().await;
     let v: serde_json::Value = app.client.get(app.url("/api/v1/health")).send().await.unwrap().json().await.unwrap();
-    assert_eq!(v, serde_json::json!({"ok": true, "protocol": 1}));
+    assert_eq!(v, serde_json::json!({"ok": true, "protocol": rynuvo_proto::PROTOCOL_VERSION}));
 }
 
 #[test]
