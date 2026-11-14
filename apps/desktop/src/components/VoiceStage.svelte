@@ -82,7 +82,21 @@
             oncontextmenu={(e) => { e.preventDefault(); onMenu(m.userId, e) }}
           >
             {#if streaming}<span class="badge">LIVE</span>{/if}
-            <Avatar user={store.user(m.userId)} id={m.userId} size={avatarSize} speaking={talking} />
+            {#if streaming && !strip}
+              <div class="live">
+                <Avatar user={store.user(m.userId)} id={m.userId} size={Math.min(avatarSize, 56)} speaking={talking} />
+                {#if m.userId === store.me?.id}
+                  <span class="self"><Icon name="screen" size={16} /> You're sharing your screen</span>
+                  {#if store.live?.viewers.length}<span class="sub">{store.live.viewers.length} watching</span>{/if}
+                {:else}
+                  <button class="watch" onclick={(e) => { e.stopPropagation(); open(m.userId) }}>
+                    <Icon name="screen" size={16} /> Watch Stream
+                  </button>
+                {/if}
+              </div>
+            {:else}
+              <Avatar user={store.user(m.userId)} id={m.userId} size={avatarSize} speaking={talking} />
+            {/if}
             <span class="n">
               {#if m.deafened}<Icon name="headphonesOff" size={13} />{:else if m.muted}<Icon name="micOff" size={13} />{/if}
               {store.nick(m.userId)}
@@ -152,6 +166,15 @@
   .tile.watchable { cursor: pointer; }
   .tile.watchable:hover { filter: brightness(1.1); }
   .badge { position: absolute; top: 8px; left: 8px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; z-index: 2; }
+  .live { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 8px; }
+  .watch {
+    display: inline-flex; align-items: center; gap: 7px; padding: 8px 16px; border-radius: 8px;
+    background: rgba(255, 255, 255, 0.92); color: #16171c; font-weight: 600; font-size: 14px;
+    transition: transform 120ms, box-shadow 120ms;
+  }
+  .watch:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
+  .self { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.45); color: #fff; font-weight: 600; font-size: 13px; }
+  .sub { color: rgba(255, 255, 255, 0.78); font-size: 12px; }
   .area.strip { flex: 0 0 auto; display: block; }
   .grid.strip { flex-wrap: wrap; }
   .grid.strip .tile { width: 150px; height: 84px; }
