@@ -4,7 +4,7 @@ pub mod voice_wire;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 pub const CLOSE_AUTH_REVOKED: u16 = 4001;
 pub const CLOSE_PROTOCOL_OLD: u16 = 4002;
 
@@ -187,6 +187,27 @@ pub enum WsClientMsg {
     VoiceState { muted: bool, deafened: bool },
     #[serde(rename_all = "camelCase")]
     VoiceKick { user_id: Id },
+    /// Go Live in my current voice channel. `codecs`: what I can encode, best first.
+    #[serde(rename_all = "camelCase")]
+    StreamStart { codecs: Vec<String>, preset: String },
+    StreamStop,
+    /// Start watching `user_id`'s stream. `codecs`: what I can decode.
+    #[serde(rename_all = "camelCase")]
+    StreamWatch { user_id: Id, codecs: Vec<String> },
+    #[serde(rename_all = "camelCase")]
+    StreamUnwatch { user_id: Id },
+    /// Opaque connection setup data (P2P candidates) for a streamer–viewer pair.
+    #[serde(rename_all = "camelCase")]
+    StreamSignal { to: Id, data: serde_json::Value },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamInfo {
+    pub user_id: Id,
+    pub channel_id: Id,
+    pub codecs: Vec<String>,
+    pub preset: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -201,6 +222,8 @@ pub enum WsServerMsg {
         alerts: Vec<String>,
         #[serde(default)]
         voice: Vec<VoiceMember>,
+        #[serde(default)]
+        streams: Vec<StreamInfo>,
     },
     MessageCreated(Message),
     MessageUpdated(Message),
@@ -229,12 +252,34 @@ pub enum WsServerMsg {
     /// Your voice connection was ended by the server; `reason` is shown to the user.
     #[serde(rename_all = "camelCase")]
     VoiceEnded { reason: String },
+    StreamStarted(StreamInfo),
+    #[serde(rename_all = "camelCase")]
+    StreamStopped { user_id: Id, channel_id: Id },
+    /// To both sides of a pair when a viewer starts (`joined`) or stops watching. `key` encrypts
+    /// their direct P2P packets; `codecs` is the viewer's decodable list.
+    #[serde(rename_all = "camelCase")]
+    StreamViewer { streamer: Id, viewer: Id, codecs: Vec<String>, key: String, joined: bool },
+    #[serde(rename_all = "camelCase")]
+    StreamSignal { from: Id, data: serde_json::Value },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn stream_msgs_shape() {
+        let v = serde_json::to_value(WsClientMsg::StreamWatch { user_id: 3, codecs: vec!["h264".into()] }).unwrap();
+        assert_eq!(v, json!({"t":"streamWatch","d":{"userId":3,"codecs":["h264"]}}));
+        let v = serde_json::to_value(WsServerMsg::StreamViewer { streamer: 1, viewer: 2, codecs: vec![], key: "k".into(), joined: true }).unwrap();
+        assert_eq!(v, json!({"t":"streamViewer","d":{"streamer":1,"viewer":2,"codecs":[],"key":"k","joined":true}}));
+        let s = StreamInfo { user_id: 1, channel_id: 2, codecs: vec!["hevc".into()], preset: "1080p60".into() };
+        let v = serde_json::to_value(WsServerMsg::StreamStarted(s.clone())).unwrap();
+        assert_eq!(v, json!({"t":"streamStarted","d":{"userId":1,"channelId":2,"codecs":["hevc"],"preset":"1080p60"}}));
+        assert_eq!(serde_json::from_value::<WsServerMsg>(v).unwrap(), WsServerMsg::StreamStarted(s));
+        assert_eq!(serde_json::to_value(WsClientMsg::StreamStop).unwrap(), json!({"t":"streamStop"}));
+    }
 
     #[test]
     fn voice_msgs_shape() {
@@ -270,7 +315,7 @@ mod tests {
     fn ws_client_hello_roundtrip() {
         let m = WsClientMsg::Hello { token: "abc".into(), protocol: PROTOCOL_VERSION };
         let s = serde_json::to_string(&m).unwrap();
-        assert_eq!(s, r#"{"t":"hello","d":{"token":"abc","protocol":2}}"#);
+        assert_eq!(s, r#"{"t":"hello","d":{"token":"abc","protocol":3}}"#);
         assert_eq!(serde_json::from_str::<WsClientMsg>(&s).unwrap(), m);
         let ping: WsClientMsg = serde_json::from_str(r#"{"t":"ping"}"#).unwrap();
         assert_eq!(ping, WsClientMsg::Ping);

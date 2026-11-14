@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rynuvo_proto::voice_wire::{DOWN_AUDIO, DOWN_KEEPALIVE_ACK, UP_AUDIO, UP_KEEPALIVE, open_up, peek_up, seal_down};
+use rynuvo_proto::voice_wire::{DOWN_AUDIO, DOWN_KEEPALIVE_ACK, DOWN_VIDEO, UP_AUDIO, UP_KEEPALIVE, UP_VIDEO, open_up, peek_up, seal_down};
 use tokio::net::UdpSocket;
 
 use super::{VoiceRooms, rooms::Route};
@@ -94,6 +94,38 @@ pub fn handle_packet(rooms: &VoiceRooms, pkt: &[u8], from: Source, now: Instant)
                     m.bytes_out += p.len() as u64;
                     out.push((dest, p));
                 }
+            }
+            UP_VIDEO => {
+                if up.payload.len() < 8 {
+                    return out;
+                }
+                let to = rynuvo_proto::Id::from_be_bytes(up.payload[..8].try_into().unwrap());
+                let from_user = members[i].user_id;
+                let frag = &up.payload[8..];
+                // Find the pair entry (either direction) to authorize and account the bytes.
+                let mut allowed = false;
+                for m in members.iter_mut() {
+                    // Either `from` streams to `to`, or `from` is a viewer sending feedback to `to`.
+                    let viewer = if m.user_id == from_user { to } else if m.user_id == to { from_user } else { continue };
+                    if let Some(v) = m.stream.as_mut().and_then(|s| s.viewers.iter_mut().find(|v| v.user_id == viewer)) {
+                        v.relay_bytes += frag.len() as u64;
+                        allowed = true;
+                        break;
+                    }
+                }
+                if !allowed {
+                    return drop_packet();
+                }
+                let Some(m) = members.iter_mut().find(|m| m.user_id == to) else { return out };
+                let dest = match dest_of(m.route, now) {
+                    Some(Dest::Ws(_)) => Dest::Ws(m.conn_id),
+                    Some(d) => d,
+                    None => return out,
+                };
+                m.down_seq = m.down_seq.wrapping_add(1);
+                let p = seal_down(&m.key, DOWN_VIDEO, m.session, m.down_seq, from_user, frag);
+                m.bytes_out += p.len() as u64;
+                out.push((dest, p));
             }
             _ => {}
         }

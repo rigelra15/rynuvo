@@ -13,8 +13,12 @@ use crate::Id;
 
 pub const UP_AUDIO: u8 = 0xA1;
 pub const UP_KEEPALIVE: u8 = 0xA2;
+/// Screen-share fragment for one peer: payload = `to_user` (i64 BE) + fragment.
+pub const UP_VIDEO: u8 = 0xA3;
 pub const DOWN_AUDIO: u8 = 0xB1;
 pub const DOWN_KEEPALIVE_ACK: u8 = 0xB2;
+/// Relayed screen-share fragment: plaintext = `from_user` + fragment.
+pub const DOWN_VIDEO: u8 = 0xB3;
 /// Largest packet accepted or produced (fits one UDP datagram on any path).
 pub const MAX_PACKET: usize = 1200;
 const HEADER: usize = 9;
@@ -117,7 +121,7 @@ pub fn seal_up(key: &VoiceKey, kind: u8, session: u32, seq: u32, payload: &[u8])
 
 pub fn open_up(key: &VoiceKey, pkt: &[u8]) -> Result<Up, WireError> {
     let (kind, session, seq, payload) = open(key, 0, pkt)?;
-    if kind != UP_AUDIO && kind != UP_KEEPALIVE {
+    if kind != UP_AUDIO && kind != UP_KEEPALIVE && kind != UP_VIDEO {
         return Err(WireError::Malformed);
     }
     Ok(Up { kind, session, seq, payload })
@@ -132,7 +136,7 @@ pub fn seal_down(key: &VoiceKey, kind: u8, session: u32, seq: u32, from_user: Id
 
 pub fn open_down(key: &VoiceKey, pkt: &[u8]) -> Result<Down, WireError> {
     let (kind, _session, seq, plain) = open(key, 1, pkt)?;
-    if (kind != DOWN_AUDIO && kind != DOWN_KEEPALIVE_ACK) || plain.len() < 8 {
+    if (kind != DOWN_AUDIO && kind != DOWN_KEEPALIVE_ACK && kind != DOWN_VIDEO) || plain.len() < 8 {
         return Err(WireError::Malformed);
     }
     let from_user = Id::from_be_bytes(plain[..8].try_into().unwrap());
@@ -141,7 +145,7 @@ pub fn open_down(key: &VoiceKey, pkt: &[u8]) -> Result<Down, WireError> {
 
 /// Session id of an up packet without decrypting it. None for STUN, down packets, or bad sizes.
 pub fn peek_up(pkt: &[u8]) -> Option<(u8, u32)> {
-    if pkt.len() < HEADER + TAG || pkt.len() > MAX_PACKET || (pkt[0] != UP_AUDIO && pkt[0] != UP_KEEPALIVE) {
+    if pkt.len() < HEADER + TAG || pkt.len() > MAX_PACKET || !matches!(pkt[0], UP_AUDIO | UP_KEEPALIVE | UP_VIDEO) {
         return None;
     }
     Some((pkt[0], u32::from_be_bytes(pkt[1..5].try_into().unwrap())))

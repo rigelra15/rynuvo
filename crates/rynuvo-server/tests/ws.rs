@@ -24,7 +24,7 @@ async fn hello_gets_ready_with_snapshot() {
 async fn bad_token_closed_4001() {
     let app = TestApp::spawn().await;
     let mut ws = app.ws_raw().await;
-    ws.send_json(json!({"t":"hello","d":{"token":"nope","protocol":2}})).await;
+    ws.send_json(json!({"t":"hello","d":{"token":"nope","protocol":rynuvo_proto::PROTOCOL_VERSION}})).await;
     assert_eq!(ws.expect_close().await, CLOSE_AUTH_REVOKED);
 }
 
