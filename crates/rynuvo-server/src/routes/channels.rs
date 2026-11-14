@@ -122,5 +122,6 @@ async fn remove(State(st): State<AppState>, au: AuthUser, Path(id): Path<i64>) -
     managed(&st, &au, id).await?;
     sqlx::query("DELETE FROM channels WHERE id = ?").bind(id).execute(&st.db).await?;
     st.hub.broadcast(WsServerMsg::ChannelDeleted { id });
+    crate::voice::channel_deleted(&st, id);
     Ok(StatusCode::NO_CONTENT)
 }

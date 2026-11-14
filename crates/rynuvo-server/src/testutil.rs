@@ -36,6 +36,7 @@ impl TestApp {
             disk: DiskState::new(cfg.disk_warn_pct, cfg.disk_block_pct),
             cfg: Arc::new(cfg),
             hub: Hub::default(),
+            voice: Default::default(),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

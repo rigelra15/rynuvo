@@ -65,7 +65,7 @@ async fn snapshot(st: &AppState, me: User) -> anyhow::Result<WsServerMsg> {
         channels,
         online: st.hub.online_ids(),
         alerts,
-        voice: Vec::new(),
+        voice: st.voice.members(),
     })
 }
 
@@ -83,6 +83,7 @@ async fn handle(st: AppState, mut socket: WebSocket) {
     let _ = sqlx::query("UPDATE devices SET last_seen = ? WHERE id = ?").bind(now_ms()).bind(au.device_id).execute(&st.db).await;
 
     let user_id = au.user.id;
+    let is_admin = au.user.is_admin;
     let reg = st.hub.register(user_id, au.user.is_admin);
     let (conn_id, mut rx, mut kill, first) = (reg.id, reg.rx, reg.kill, reg.first);
     let ready = match snapshot(&st, au.user).await {
@@ -97,8 +98,9 @@ async fn handle(st: AppState, mut socket: WebSocket) {
         if first {
             st.hub.broadcast_except(user_id, WsServerMsg::Presence { user_id, online: true });
         }
-        run(&st, &mut socket, &mut rx, &mut kill, user_id).await;
+        run(&st, &mut socket, &mut rx, &mut kill, user_id, is_admin, conn_id).await;
     }
+    crate::voice::conn_closed(&st, conn_id);
     if let Some(uid) = st.hub.unregister(conn_id) {
         st.hub.broadcast(WsServerMsg::Presence { user_id: uid, online: false });
     }
@@ -110,6 +112,8 @@ async fn run(
     rx: &mut tokio::sync::mpsc::Receiver<Outgoing>,
     kill: &mut tokio::sync::watch::Receiver<bool>,
     user_id: i64,
+    is_admin: bool,
+    conn_id: u64,
 ) {
     let mut ping = tokio::time::interval(PING_EVERY);
     ping.tick().await;
@@ -136,6 +140,10 @@ async fn run(
                             }
                         }
                         Ok(WsClientMsg::Ping) => if !send(socket, &WsServerMsg::Pong).await { return },
+                        Ok(WsClientMsg::VoiceJoin { channel_id }) => crate::voice::join(st, user_id, conn_id, channel_id).await,
+                        Ok(WsClientMsg::VoiceLeave) => crate::voice::leave(st, user_id),
+                        Ok(WsClientMsg::VoiceState { muted, deafened }) => crate::voice::set_state(st, user_id, muted, deafened),
+                        Ok(WsClientMsg::VoiceKick { user_id: target }) => crate::voice::kick(st, user_id, is_admin, target).await,
                         _ => {}
                     },
                     Message::Close(_) => return,

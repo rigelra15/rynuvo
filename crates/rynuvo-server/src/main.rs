@@ -67,6 +67,7 @@ async fn serve(cfg: Config) -> anyhow::Result<()> {
         disk: DiskState::new(cfg.disk_warn_pct, cfg.disk_block_pct),
         cfg: Arc::new(cfg.clone()),
         hub: Hub::default(),
+        voice: Default::default(),
     };
     rynuvo_server::stun::spawn(cfg.stun_ports)?;
     rynuvo_server::disk::spawn_watcher(cfg.data_dir.clone(), state.disk.clone(), state.hub.clone());
