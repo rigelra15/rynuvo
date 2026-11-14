@@ -23,6 +23,11 @@ pub const UDP_SILENCE: Duration = Duration::from_secs(3);
 /// While on the WebSocket path, try UDP again this often.
 pub const UDP_REPROBE: Duration = Duration::from_secs(10);
 const KEEPALIVE: Duration = Duration::from_secs(1);
+/// No acknowledgement on any path for this long → the network changed under us: rebind UDP and
+/// ask the session to reconnect its WebSocket.
+pub const LINK_DEAD: Duration = Duration::from_secs(5);
+
+pub type OnDead = Arc<dyn Fn() + Send + Sync>;
 
 pub type WsSender = Arc<dyn Fn(Vec<u8>) + Send + Sync>;
 
@@ -52,12 +57,15 @@ struct Inner {
     session: u32,
     key: VoiceKey,
     seq: AtomicU32,
+    audio_seq: AtomicU32,
     /// 0 = UDP, 1 = WebSocket
     path: AtomicU8,
     udp: Mutex<Option<(Arc<UdpSocket>, SocketAddr)>>,
     ws: WsSender,
     down: mpsc::UnboundedSender<DownAudio>,
     last_udp_ack: Mutex<Instant>,
+    last_any_ack: Mutex<Instant>,
+    on_dead: Mutex<Option<OnDead>>,
     stop: watch::Sender<bool>,
 }
 
@@ -73,11 +81,14 @@ impl VoiceLink {
             session: cfg.session,
             key: cfg.key.clone(),
             seq: AtomicU32::new(0),
+            audio_seq: AtomicU32::new(0),
             path: AtomicU8::new(0),
             udp: Mutex::new(None),
             ws,
             down,
             last_udp_ack: Mutex::new(Instant::now()),
+            last_any_ack: Mutex::new(Instant::now()),
+            on_dead: Mutex::new(None),
             stop,
         });
         tokio::spawn(run(inner.clone(), cfg.host, cfg.udp_port, stop_rx));
@@ -88,8 +99,19 @@ impl VoiceLink {
         if self.inner.path.load(Ordering::Relaxed) == 0 { LinkPath::Udp } else { LinkPath::Ws }
     }
 
+    /// Send one Opus frame. The payload starts with this speaker's own audio frame counter, which
+    /// listeners use for jitter ordering (the packet header seq is per listener and only feeds the nonce).
     pub fn send_audio(&self, opus: Vec<u8>) {
-        self.inner.send(UP_AUDIO, &opus, self.path());
+        let n = self.inner.audio_seq.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+        let mut p = Vec::with_capacity(4 + opus.len());
+        p.extend_from_slice(&n.to_be_bytes());
+        p.extend_from_slice(&opus);
+        self.inner.send(UP_AUDIO, &p, self.path());
+    }
+
+    /// Called when neither path has answered for `LINK_DEAD`.
+    pub fn set_on_dead(&self, f: OnDead) {
+        *self.inner.on_dead.lock().unwrap() = Some(f);
     }
 
     /// A binary WebSocket frame from the server (the WebSocket path's downlink).
@@ -131,12 +153,16 @@ impl Inner {
     fn receive(&self, pkt: &[u8], via_udp: bool) {
         let Ok(d) = open_down(&self.key, pkt) else { return };
         match d.kind {
-            DOWN_KEEPALIVE_ACK if via_udp => {
-                *self.last_udp_ack.lock().unwrap() = Instant::now();
-                self.set_path(LinkPath::Udp);
+            DOWN_KEEPALIVE_ACK => {
+                *self.last_any_ack.lock().unwrap() = Instant::now();
+                if via_udp {
+                    *self.last_udp_ack.lock().unwrap() = Instant::now();
+                    self.set_path(LinkPath::Udp);
+                }
             }
-            DOWN_AUDIO => {
-                let _ = self.down.send(DownAudio { from: d.from_user, seq: d.seq, payload: d.payload });
+            DOWN_AUDIO if d.payload.len() >= 4 => {
+                let seq = u32::from_be_bytes(d.payload[..4].try_into().unwrap());
+                let _ = self.down.send(DownAudio { from: d.from_user, seq, payload: d.payload[4..].to_vec() });
             }
             _ => {}
         }
@@ -149,7 +175,8 @@ async fn bind_udp(host: &str, port: u16) -> Option<(Arc<UdpSocket>, SocketAddr)>
     for to in addrs.iter().filter(|a| a.is_ipv6()).chain(addrs.iter().filter(|a| a.is_ipv4())) {
         let local = if to.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" };
         if let Ok(s) = UdpSocket::bind(local).await {
-            if s.connect(to).await.is_ok() {
+            // `try_send` on a new socket fails with WouldBlock until writability was observed once.
+            if s.connect(to).await.is_ok() && s.writable().await.is_ok() {
                 return Some((Arc::new(s), *to));
             }
         }
@@ -158,7 +185,7 @@ async fn bind_udp(host: &str, port: u16) -> Option<(Arc<UdpSocket>, SocketAddr)>
 }
 
 async fn run(inner: Arc<Inner>, host: String, port: u16, mut stop: watch::Receiver<bool>) {
-    let udp = bind_udp(&host, port).await;
+    let mut udp = bind_udp(&host, port).await;
     if udp.is_none() {
         tracing::warn!("voice: no UDP route to {host}:{port}, using WebSocket");
         inner.set_path(LinkPath::Ws);
@@ -178,6 +205,18 @@ async fn run(inner: Arc<Inner>, host: String, port: u16, mut stop: watch::Receiv
             _ = stop.changed() => return,
             n = recv => if let Some(n) = n { inner.receive(&buf[..n], true) },
             _ = tick.tick() => {
+                if inner.last_any_ack.lock().unwrap().elapsed() > LINK_DEAD {
+                    tracing::info!("voice: no answer on any path for {LINK_DEAD:?}; rebinding UDP and reconnecting");
+                    *inner.last_any_ack.lock().unwrap() = Instant::now();
+                    udp = bind_udp(&host, port).await;
+                    *inner.udp.lock().unwrap() = udp.clone();
+                    last_probe = Instant::now();
+                    inner.send(UP_KEEPALIVE, &[], LinkPath::Udp);
+                    let cb = inner.on_dead.lock().unwrap().clone();
+                    if let Some(cb) = cb {
+                        cb();
+                    }
+                }
                 let since_ack = inner.last_udp_ack.lock().unwrap().elapsed();
                 let path = if udp.is_some() && since_ack <= UDP_SILENCE { LinkPath::Udp } else { LinkPath::Ws };
                 inner.set_path(path);
@@ -185,8 +224,11 @@ async fn run(inner: Arc<Inner>, host: String, port: u16, mut stop: watch::Receiv
                     LinkPath::Udp => inner.send(UP_KEEPALIVE, &[], LinkPath::Udp),
                     LinkPath::Ws => {
                         inner.send(UP_KEEPALIVE, &[], LinkPath::Ws);
-                        if udp.is_some() && last_probe.elapsed() >= UDP_REPROBE {
+                        if last_probe.elapsed() >= UDP_REPROBE {
                             last_probe = Instant::now();
+                            // A fresh socket: the old one may be bound to an address that no longer exists.
+                            udp = bind_udp(&host, port).await;
+                            *inner.udp.lock().unwrap() = udp.clone();
                             inner.send(UP_KEEPALIVE, &[], LinkPath::Udp);
                         }
                     }

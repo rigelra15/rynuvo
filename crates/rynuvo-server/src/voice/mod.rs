@@ -21,6 +21,10 @@ fn ended(st: &AppState, conn_id: u64, reason: &str) {
 /// Announce that `m` left and store its traffic.
 fn left(st: &AppState, m: Member) {
     st.hub.broadcast(WsServerMsg::VoiceMemberLeft { user_id: m.user_id, channel_id: m.channel_id });
+    store_usage(st, m);
+}
+
+fn store_usage(st: &AppState, m: Member) {
     let db = st.db.clone();
     tokio::spawn(async move {
         if let Err(e) = record_usage(&db, &m).await {
@@ -63,7 +67,12 @@ pub async fn join(st: &AppState, user_id: Id, conn_id: u64, channel_id: Id) {
         if prev.conn_id != conn_id {
             ended(st, prev.conn_id, MOVED);
         }
-        left(st, prev);
+        if prev.channel_id == channel_id {
+            // Same channel (typically a reconnect): the member never really left.
+            store_usage(st, prev);
+        } else {
+            left(st, prev);
+        }
     }
     let m = j.member;
     st.hub.send_to_conn(

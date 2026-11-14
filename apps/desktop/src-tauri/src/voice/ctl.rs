@@ -13,7 +13,7 @@ use super::{
     engine::{EngineOpts, EventSink, Tone, VoiceEngine, VoiceEvent},
     link::LinkCfg,
 };
-use crate::core::session::SessionHandle;
+use crate::core::session::{SessionEvent, SessionHandle};
 
 pub type BackendFactory = Arc<dyn Fn() -> Box<dyn AudioBackend> + Send + Sync>;
 
@@ -272,7 +272,7 @@ impl VoiceCtl {
         }
         if let Some(e) = engine {
             tracing::info!("voice: stopping engine");
-            e.stop();
+            e.stop_detached();
         }
     }
 
@@ -293,6 +293,8 @@ impl VoiceCtl {
             Arc::new(move |b| ws_session.send_binary(b)),
             self.events.clone(),
         ));
+        let rs = session.clone();
+        engine.set_on_dead(Arc::new(move || rs.reconnect()));
         engine.set_muted(s.muted);
         engine.set_deafened(s.deafened);
         engine.play_tone(Tone::Join);
@@ -318,6 +320,16 @@ impl VoiceCtl {
     }
 
     /// Feed every server message; voice ones drive the engine.
+    /// Everything the session reports. Losing the identity (removed from the circle) or needing an
+    /// update ends voice for good: the mic must not stay open for a server that ignores it.
+    pub fn on_session(&self, e: &SessionEvent) {
+        match e {
+            SessionEvent::Server(m) => self.on_server(m),
+            SessionEvent::Revoked | SessionEvent::UpdateRequired => self.detach(),
+            SessionEvent::Conn(_) => {}
+        }
+    }
+
     pub fn on_server(&self, m: &WsServerMsg) {
         match m {
             WsServerMsg::Ready { me, voice, .. } => {
@@ -363,7 +375,9 @@ impl VoiceCtl {
                     (s.me, s.want, s.engine.clone(), s.engine_channel)
                 };
                 if Some(*user_id) == me {
-                    if want == Some(*channel_id) {
+                    // Only a leave for the session that is actually running counts; while a (re)join is
+                    // pending it is a stale echo of the previous connection.
+                    if want == Some(*channel_id) && engine_ch == Some(*channel_id) {
                         self.st.lock().unwrap().want = None;
                         self.stop_engine();
                         self.notify();

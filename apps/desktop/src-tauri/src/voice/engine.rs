@@ -130,14 +130,35 @@ impl VoiceEngine {
         }
     }
 
+    /// See `VoiceLink::set_on_dead`.
+    pub fn set_on_dead(&self, f: crate::voice::link::OnDead) {
+        if let Some(l) = &self.link {
+            l.set_on_dead(f);
+        }
+    }
+
     pub fn stop(&self) {
+        if let Some(h) = self.signal_stop() {
+            let _ = h.join();
+        }
+    }
+
+    /// Stop without waiting: the audio thread may be stuck opening a device for seconds, and callers on
+    /// the async runtime (session task, commands) must not block on it. The thread is joined elsewhere.
+    pub fn stop_detached(&self) {
+        if let Some(h) = self.signal_stop() {
+            std::thread::spawn(move || {
+                let _ = h.join();
+            });
+        }
+    }
+
+    fn signal_stop(&self) -> Option<std::thread::JoinHandle<()>> {
         self.send(Cmd::Stop);
         if let Some(l) = &self.link {
             l.stop();
         }
-        if let Some(h) = self.thread.lock().unwrap().take() {
-            let _ = h.join();
-        }
+        self.thread.lock().unwrap().take()
     }
 }
 

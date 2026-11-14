@@ -90,9 +90,7 @@ impl Core {
         let app2 = app.clone();
         let voice = self.voice.clone();
         let emit = Arc::new(move |e: SessionEvent| {
-            if let SessionEvent::Server(m) = &e {
-                voice.on_server(m);
-            }
+            voice.on_session(&e);
             crate::notify::on_event(&app2, &e);
             let _ = app2.emit(EVENT, e);
         });

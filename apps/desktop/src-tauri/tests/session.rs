@@ -182,3 +182,41 @@ async fn session_routes_binary_frames() {
     assert_eq!(open_down(&key, &ack).unwrap().kind, DOWN_KEEPALIVE_ACK);
     h.stop();
 }
+
+/// The server stops reading (dead route after a network switch): once the socket's send buffer fills,
+/// a blocked send must not freeze the session until TCP gives up — it reconnects within seconds.
+#[tokio::test]
+async fn blocked_send_triggers_reconnect() {
+    use rynuvo_desktop_lib::core::session::Timing;
+    let base = silent_server().await;
+    let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::default());
+    let (ev, emit) = collector();
+    let timing = Timing { ping_every: Duration::from_secs(60), read_timeout: Duration::from_secs(60) };
+    let h = Session::start_with(Api::new(&base, Some("t".into())).unwrap(), store, base.clone(), emit, timing);
+    wait_for(&ev, |e| e.iter().any(|x| matches!(x, SessionEvent::Conn(ConnState::Online)))).await;
+    for _ in 0..400 {
+        h.send_binary(vec![0u8; 64 * 1024]);
+    }
+    let t = std::time::Instant::now();
+    while t.elapsed() < Duration::from_secs(8) {
+        if ev.lock().unwrap().iter().any(|x| matches!(x, SessionEvent::Conn(ConnState::Reconnecting { .. }))) {
+            h.stop();
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("session stuck on a blocked send");
+}
+
+#[tokio::test]
+async fn reconnect_on_request() {
+    let app = TestApp::spawn().await;
+    let a = app.user("Dimas").await;
+    let base = format!("http://{}", app.addr);
+    let (ev, emit) = collector();
+    let h = Session::start(Api::new(&base, Some(a.token.clone())).unwrap(), Arc::new(MemoryStore::default()), base.clone(), emit);
+    wait_for(&ev, |e| e.iter().any(|x| matches!(x, SessionEvent::Conn(ConnState::Online)))).await;
+    h.reconnect();
+    wait_for(&ev, |e| e.iter().any(|x| matches!(x, SessionEvent::Conn(ConnState::Reconnecting { .. })))).await;
+    h.stop();
+}

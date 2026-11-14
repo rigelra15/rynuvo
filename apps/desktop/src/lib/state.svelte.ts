@@ -300,19 +300,13 @@ class Store {
       case 'adminAlert':
         this.alerts = [...this.alerts, m.d.message]
         return
+      // My own channel comes only from the engine's `state` events (VoiceCtl owns it).
       case 'voiceJoined':
-        this.myVoice = { ...this.myVoice, channelId: m.d.channelId }
         return
       case 'voiceEnded':
-        this.myVoice = { ...this.myVoice, channelId: null }
-        this.voiceGone()
         this.voiceNotice = m.d.reason
         return
       case 'voiceMemberLeft':
-        if (m.d.userId === this.me?.id && this.myVoice.channelId === m.d.channelId) {
-          this.myVoice = { ...this.myVoice, channelId: null }
-          this.voiceGone()
-        }
         return
       case 'voiceMemberUpdated':
         return

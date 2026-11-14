@@ -103,6 +103,7 @@ pub struct SessionHandle {
     shared: Arc<Mutex<Shared>>,
     out: mpsc::UnboundedSender<WsClientMsg>,
     out_bin: mpsc::UnboundedSender<Vec<u8>>,
+    kick: mpsc::UnboundedSender<()>,
     stop: watch::Sender<bool>,
 }
 
@@ -130,6 +131,11 @@ impl SessionHandle {
         let _ = self.out.send(WsClientMsg::Typing { channel_id });
     }
 
+    /// Drop the current connection and connect again (the voice link saw the network change).
+    pub fn reconnect(&self) {
+        let _ = self.kick.send(());
+    }
+
     pub fn stop(&self) {
         let _ = self.stop.send(true);
     }
@@ -154,8 +160,9 @@ impl Session {
         let (out_tx, out_rx) = mpsc::unbounded_channel();
         let (bin_tx, bin_rx) = mpsc::unbounded_channel();
         let (stop_tx, stop_rx) = watch::channel(false);
-        let h = SessionHandle { shared: shared.clone(), out: out_tx, out_bin: bin_tx, stop: stop_tx };
-        tokio::spawn(run(api, store, server, emit, shared, (out_rx, bin_rx), stop_rx, timing));
+        let (kick_tx, kick_rx) = mpsc::unbounded_channel();
+        let h = SessionHandle { shared: shared.clone(), out: out_tx, out_bin: bin_tx, kick: kick_tx, stop: stop_tx };
+        tokio::spawn(run(api, store, server, emit, shared, (out_rx, bin_rx, kick_rx), stop_rx, timing));
         h
     }
 }
@@ -166,7 +173,7 @@ async fn run(
     server: String,
     emit: Emit,
     shared: Arc<Mutex<Shared>>,
-    (mut out_rx, mut bin_rx): (mpsc::UnboundedReceiver<WsClientMsg>, mpsc::UnboundedReceiver<Vec<u8>>),
+    (mut out_rx, mut bin_rx, mut kick_rx): (mpsc::UnboundedReceiver<WsClientMsg>, mpsc::UnboundedReceiver<Vec<u8>>, mpsc::UnboundedReceiver<()>),
     mut stop: watch::Receiver<bool>,
     timing: Timing,
 ) {
@@ -176,7 +183,8 @@ async fn run(
             return;
         }
         emit(SessionEvent::Conn(ConnState::Connecting));
-        let end = connect_once(&api, &emit, &shared, (&mut out_rx, &mut bin_rx), &mut stop, &mut attempt, timing)
+        while kick_rx.try_recv().is_ok() {} // requests made before this attempt are already served
+        let end = connect_once(&api, &emit, &shared, (&mut out_rx, &mut bin_rx, &mut kick_rx), &mut stop, &mut attempt, timing)
             .await
             .unwrap_or_else(|e| {
                 tracing::debug!("ws connect failed: {e}");
@@ -205,11 +213,21 @@ async fn run(
     }
 }
 
+/// A send that cannot complete within this time means the route is dead (the socket's buffer is full).
+const SEND_TIMEOUT: Duration = Duration::from_secs(2);
+
+async fn send_in_time<S>(ws: &mut S, m: WsMsg) -> bool
+where
+    S: futures_util::Sink<WsMsg> + Unpin,
+{
+    matches!(tokio::time::timeout(SEND_TIMEOUT, ws.send(m)).await, Ok(Ok(())))
+}
+
 async fn connect_once(
     api: &Api,
     emit: &Emit,
     shared: &Arc<Mutex<Shared>>,
-    (out_rx, bin_rx): (&mut mpsc::UnboundedReceiver<WsClientMsg>, &mut mpsc::UnboundedReceiver<Vec<u8>>),
+    (out_rx, bin_rx, kick_rx): (&mut mpsc::UnboundedReceiver<WsClientMsg>, &mut mpsc::UnboundedReceiver<Vec<u8>>, &mut mpsc::UnboundedReceiver<()>),
     stop: &mut watch::Receiver<bool>,
     attempt: &mut u32,
     timing: Timing,
@@ -236,20 +254,24 @@ async fn connect_once(
             }
             out = out_rx.recv() => {
                 if let Some(m) = out {
-                    if ready_seen {
-                        let _ = ws.send(WsMsg::text(serde_json::to_string(&m).unwrap())).await;
+                    if ready_seen && !send_in_time(&mut ws, WsMsg::text(serde_json::to_string(&m).unwrap())).await {
+                        return Ok(End::Retry);
                     }
                 }
             }
             bin = bin_rx.recv() => {
                 if let Some(b) = bin {
-                    if ready_seen && ws.send(WsMsg::binary(b)).await.is_err() {
+                    if ready_seen && !send_in_time(&mut ws, WsMsg::binary(b)).await {
                         return Ok(End::Retry);
                     }
                 }
             }
+            Some(()) = kick_rx.recv() => {
+                tracing::info!("reconnect requested");
+                return Ok(End::Retry);
+            }
             _ = ping.tick() => {
-                if ws.send(WsMsg::text(serde_json::to_string(&WsClientMsg::Ping).unwrap())).await.is_err() {
+                if !send_in_time(&mut ws, WsMsg::text(serde_json::to_string(&WsClientMsg::Ping).unwrap())).await {
                     return Ok(End::Retry);
                 }
             }

@@ -227,3 +227,34 @@ async fn channel_full_rejected() {
     wa.send_json(join(v.id)).await;
     assert_eq!(voice_ended(&mut wa).await, "This voice channel is full");
 }
+
+/// A reconnect re-joins the same channel before the server noticed the old connection died:
+/// nobody (including the new connection) may see the user leave.
+#[tokio::test]
+async fn rejoin_same_channel_does_not_announce_leave() {
+    let app = TestApp::spawn().await;
+    let a = app.user("Dimas").await;
+    let b = app.user("Ayu").await;
+    let v = app.create_channel(&a.token, "voice", "One").await;
+    let mut wa = ready(&app, &a.token).await;
+    let mut wb = ready(&app, &b.token).await;
+    wa.send_json(join(v.id)).await;
+    member_update(&mut wb, a.user.id).await;
+    let mut wa2 = ready(&app, &a.token).await;
+    wa2.send_json(join(v.id)).await;
+    let mut saw_left = false;
+    loop {
+        match wa2.try_next(1500).await {
+            Some(WsServerMsg::VoiceMemberLeft { user_id, .. }) if user_id == a.user.id => saw_left = true,
+            Some(WsServerMsg::VoiceJoined { .. }) => break,
+            Some(_) => {}
+            None => panic!("no VoiceJoined"),
+        }
+    }
+    assert!(!saw_left, "new connection was told it left");
+    assert_eq!(member_update(&mut wb, a.user.id).await.channel_id, v.id);
+    while let Some(m) = wb.try_next(300).await {
+        assert!(!matches!(m, WsServerMsg::VoiceMemberLeft { .. }), "peer saw a leave");
+    }
+    assert_eq!(app.state.voice.members().len(), 1);
+}

@@ -58,3 +58,17 @@ describe('store', () => {
     expect(store.messages.get(1)?.map((m) => m.id)).toEqual([1, 2, 3])
   })
 })
+
+describe('voice ownership', () => {
+  beforeEach(() => store.reset(null))
+
+  test('server voice messages do not move my channel; only engine state events do', () => {
+    store.apply(ready)
+    store.apply({ kind: 'server', data: { t: 'voiceJoined', d: { channelId: 5, session: 1, key: 'k', udpPort: 3478 } } } as never)
+    expect(store.myVoice.channelId).toBe(null)
+    store.applyVoiceEvent({ kind: 'state', channelId: 5, muted: false, deafened: false })
+    expect(store.myVoice.channelId).toBe(5)
+    store.apply({ kind: 'server', data: { t: 'voiceMemberLeft', d: { userId: 1, channelId: 5 } } } as never)
+    expect(store.myVoice.channelId).toBe(5)
+  })
+})

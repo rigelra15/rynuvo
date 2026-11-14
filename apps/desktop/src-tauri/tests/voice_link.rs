@@ -101,3 +101,62 @@ async fn falls_back_to_ws_when_udp_silent() {
     deliver(&b, &mut a, b"to ws").await;
     drop(black_hole);
 }
+
+/// Two people talk at once: each speaker's frames must reach the listener numbered 1, 2, 3…
+/// with no gaps from the other speaker's packets or from keepalive acks.
+#[tokio::test]
+async fn audio_seq_is_per_speaker() {
+    let app = TestApp::spawn().await;
+    let (a, ch) = client(&app, "Dimas", None, None).await;
+    let (b, _) = client(&app, "Ayu", Some(ch), None).await;
+    let (mut c, _) = client(&app, "Raka", Some(ch), None).await;
+    // Wait until all three routes are known to the relay.
+    deliver(&a, &mut c, b"warm").await;
+    deliver(&b, &mut c, b"warm").await;
+    while c.down.try_recv().is_ok() {}
+    tokio::time::sleep(Duration::from_millis(1200)).await; // let a keepalive ack go by
+    for _ in 0..10 {
+        a.link.send_audio(b"a".to_vec());
+        b.link.send_audio(b"b".to_vec());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let mut seqs: std::collections::HashMap<i64, Vec<u32>> = Default::default();
+    while let Ok(d) = c.down.try_recv() {
+        seqs.entry(d.from).or_default().push(d.seq);
+    }
+    for (from, s) in seqs {
+        assert_eq!(s.len(), 10, "all frames from {from} arrived");
+        let steps: Vec<u32> = s.windows(2).map(|w| w[1].wrapping_sub(w[0])).collect();
+        assert!(steps.iter().all(|&d| d == 1), "speaker {from} seqs have gaps: {s:?}");
+    }
+}
+
+/// Both paths dead (network switched): the link rebinds its UDP socket and asks for a reconnect.
+#[tokio::test]
+async fn dead_link_rebinds_and_asks_for_reconnect() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let hole = Arc::new(tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap());
+    let port = hole.local_addr().unwrap().port();
+    let ports = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+    let (h2, p2) = (hole.clone(), ports.clone());
+    tokio::spawn(async move {
+        let mut buf = [0u8; 1500];
+        while let Ok((_, from)) = h2.recv_from(&mut buf).await {
+            p2.lock().unwrap().insert(from.port());
+        }
+    });
+    let swallow: WsSender = Arc::new(|_| {});
+    let (down_tx, _down) = mpsc::unbounded_channel();
+    let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port: port, session: 1, key: VoiceKey([1; 32]) };
+    let link = VoiceLink::start(cfg, swallow, down_tx);
+    let dead = Arc::new(AtomicUsize::new(0));
+    let d2 = dead.clone();
+    link.set_on_dead(Arc::new(move || {
+        d2.fetch_add(1, Ordering::Relaxed);
+    }));
+    tokio::time::sleep(Duration::from_millis(7000)).await;
+    assert!(dead.load(Ordering::Relaxed) >= 1, "no reconnect requested");
+    assert!(ports.lock().unwrap().len() >= 2, "UDP socket was never rebound: {:?}", ports.lock().unwrap());
+    link.stop();
+}

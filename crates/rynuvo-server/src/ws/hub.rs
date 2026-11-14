@@ -9,6 +9,8 @@ use tokio::sync::{mpsc, watch};
 
 /// Messages a connection may have queued before it is considered stuck and cut off.
 pub const QUEUE_DEPTH: usize = 256;
+/// Queue slots media packets may not use, so chat events still fit behind a media backlog.
+const MEDIA_RESERVE: usize = 64;
 
 /// What the hub asks a connection task to do.
 #[derive(Debug, Clone)]
@@ -74,6 +76,10 @@ impl Hub {
     fn send_where(&self, out: Outgoing, pred: impl Fn(&Conn) -> bool) {
         let g = self.inner.lock().unwrap();
         for c in g.conns.iter().filter(|c| pred(c)) {
+            if matches!(out, Outgoing::Bin(_)) && c.tx.capacity() <= MEDIA_RESERVE {
+                // Real-time media is worthless late: drop it rather than disconnect a slow link.
+                continue;
+            }
             if let Err(mpsc::error::TrySendError::Full(_)) = c.tx.try_send(out.clone()) {
                 tracing::warn!(conn = c.id, "connection is not reading; closing it");
                 let _ = c.kill.send(true);
@@ -134,6 +140,23 @@ impl Hub {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_backlog_drops_packets_but_keeps_connection() {
+        let hub = Hub::default();
+        let mut r = hub.register(1, false);
+        for _ in 0..QUEUE_DEPTH * 2 {
+            hub.send_to_conn(r.id, Outgoing::Bin(vec![0; 10]));
+        }
+        assert!(!*r.kill.borrow(), "a slow reader of media must not be disconnected");
+        hub.send_to_conn(r.id, Outgoing::Msg(WsServerMsg::Pong));
+        assert!(!*r.kill.borrow(), "chat messages still fit behind the media backlog");
+        let mut last = None;
+        while let Ok(o) = r.rx.try_recv() {
+            last = Some(o);
+        }
+        assert!(matches!(last, Some(Outgoing::Msg(WsServerMsg::Pong))));
+    }
 
     #[test]
     fn slow_consumer_is_cut_off() {

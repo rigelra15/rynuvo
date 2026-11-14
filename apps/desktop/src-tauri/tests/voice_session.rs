@@ -73,11 +73,7 @@ async fn rig_on(app: TestApp, u: rynuvo_proto::JoinResp, ch: i64) -> Rig {
     let c2 = counts.clone();
     let ctl = VoiceCtl::new(Arc::new(move || Box::new(FakeBackend(c2.clone())) as Box<dyn AudioBackend>), Arc::new(|_| {}));
     let ctl2 = ctl.clone();
-    let emit = Arc::new(move |e: SessionEvent| {
-        if let SessionEvent::Server(m) = &e {
-            ctl2.on_server(m);
-        }
-    });
+    let emit = Arc::new(move |e: SessionEvent| ctl2.on_session(&e));
     let api = Api::new(&base, Some(u.token.clone())).unwrap();
     let s = Session::start(api, Arc::new(MemoryStore::default()), base, emit);
     ctl.attach(s, "127.0.0.1".into());
@@ -191,4 +187,65 @@ async fn leave_stops_engine_and_server_membership() {
     r.ctl.leave();
     eventually("left on server", || r.app.state.voice.member(r.user).is_none()).await;
     assert!(r.counts.lock().unwrap().stops >= 1);
+}
+
+/// A stale "you left" for the channel we are (re)joining must not cancel the join.
+#[tokio::test(flavor = "multi_thread")]
+async fn stale_self_leave_during_join_is_ignored() {
+    let r = rig().await;
+    r.ctl.join(r.channel);
+    r.ctl.on_server(&rynuvo_proto::WsServerMsg::VoiceMemberLeft { user_id: r.user, channel_id: r.channel });
+    eventually("engine started despite stale leave", || r.counts.lock().unwrap().starts == 1).await;
+    assert_eq!(r.ctl.state().channel_id, Some(r.channel));
+}
+
+/// Removed from the circle (WebSocket closed with "revoked"): voice must stop, not keep the mic open.
+#[tokio::test(flavor = "multi_thread")]
+async fn removed_from_circle_stops_voice() {
+    let app = TestApp::spawn().await;
+    let admin = app.admin().await;
+    let u = app.user("Dimas").await;
+    let ch = app.create_channel(&u.token, "voice", "Mabar").await.id;
+    let uid = u.user.id;
+    let r = rig_on(app, u, ch).await;
+    r.ctl.join(r.channel);
+    eventually("engine started", || r.counts.lock().unwrap().starts == 1).await;
+    let api = Api::new(&format!("http://{}", r.app.addr), Some(admin.token.clone())).unwrap();
+    api.admin_kick(uid).await.unwrap();
+    eventually("engine stopped", || r.counts.lock().unwrap().stops >= 1).await;
+    assert_eq!(r.ctl.state().channel_id, None);
+}
+
+/// A device that takes seconds to open (Bluetooth, a stuck WASAPI endpoint) must not block leaving.
+struct SlowBackend(Arc<Mutex<Counts>>);
+
+impl AudioBackend for SlowBackend {
+    fn start(&mut self, _i: Option<&str>, _o: Option<&str>, io: AudioIo) -> Result<(), String> {
+        self.0.lock().unwrap().starts += 1;
+        std::thread::sleep(Duration::from_secs(3));
+        self.0.lock().unwrap().io = Some(io);
+        Ok(())
+    }
+    fn stop(&mut self) {}
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn leave_does_not_wait_for_slow_device() {
+    let app = TestApp::spawn().await;
+    let u = app.user("Dimas").await;
+    let ch = app.create_channel(&u.token, "voice", "Mabar").await.id;
+    let base = format!("http://{}", app.addr);
+    let counts = Arc::new(Mutex::new(Counts::default()));
+    let c2 = counts.clone();
+    let ctl = VoiceCtl::new(Arc::new(move || Box::new(SlowBackend(c2.clone())) as Box<dyn AudioBackend>), Arc::new(|_| {}));
+    let ctl2 = ctl.clone();
+    let s = Session::start(Api::new(&base, Some(u.token.clone())).unwrap(), Arc::new(MemoryStore::default()), base, Arc::new(move |e: SessionEvent| ctl2.on_session(&e)));
+    ctl.attach(s, "127.0.0.1".into());
+    let uid = u.user.id;
+    eventually("online", || app.state.hub.online_ids().contains(&uid)).await;
+    ctl.join(ch);
+    eventually("device opening", || counts.lock().unwrap().starts == 1).await;
+    let t = std::time::Instant::now();
+    ctl.leave();
+    assert!(t.elapsed() < Duration::from_millis(500), "leave blocked for {:?}", t.elapsed());
 }
