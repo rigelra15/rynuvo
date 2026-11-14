@@ -1,6 +1,8 @@
 pub mod commands;
 pub mod core;
 mod diag;
+#[cfg(target_os = "macos")]
+mod mac_notify;
 mod media;
 mod notify;
 
@@ -21,6 +23,8 @@ pub fn run() {
             if let Ok(dir) = app.path().app_log_dir() {
                 let _ = core::logs::init(&dir);
             }
+            #[cfg(target_os = "macos")]
+            mac_notify::request_permission();
             let dir = app.path().app_config_dir()?;
             let file = match &profile {
                 Some(p) => format!("state-{p}.json"),

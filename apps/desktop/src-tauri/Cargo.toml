@@ -37,3 +37,9 @@ webp = "0.3"
 [dev-dependencies]
 rynuvo-server = { path = "../../../crates/rynuvo-server", features = ["test-util"] }
 tempfile = "3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSBundle", "NSError", "NSDictionary"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationContent", "UNNotificationRequest", "UNNotificationTrigger", "UNNotificationSound"] }

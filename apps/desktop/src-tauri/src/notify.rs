@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Mutex};
 
 use rynuvo_proto::{Id, WsServerMsg};
 use tauri::{AppHandle, Manager, Runtime};
+#[cfg(not(target_os = "macos"))]
 use tauri_plugin_notification::NotificationExt;
 
 use crate::core::session::SessionEvent;
@@ -61,6 +62,9 @@ pub fn on_event<R: Runtime>(app: &AppHandle<R>, e: &SessionEvent) {
             let ch = n.channels.get(&m.channel_id).map_or("channel", String::as_str);
             let nick = n.users.get(&m.author_id).map_or("someone", String::as_str);
             let (title, body) = format(ch, nick, &m.content, m.image.is_some());
+            #[cfg(target_os = "macos")]
+            crate::mac_notify::show(&title, &body);
+            #[cfg(not(target_os = "macos"))]
             if let Err(e) = app.notification().builder().title(title).body(body).show() {
                 tracing::warn!("notification failed: {e}");
             }
