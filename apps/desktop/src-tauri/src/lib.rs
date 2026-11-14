@@ -23,7 +23,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::Builder::new().macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent).build())
+        .plugin(autostart_plugin())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, s, e| tray::on_shortcut(app, s, e.state()))
@@ -125,4 +125,11 @@ pub fn run() {
             }
             let _ = (app, e);
         });
+}
+
+fn autostart_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    let b = tauri_plugin_autostart::Builder::new();
+    #[cfg(target_os = "macos")]
+    let b = b.macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent);
+    b.build()
 }
