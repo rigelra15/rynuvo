@@ -1,0 +1,22 @@
+[package]
+name = "rynuvo-desktop"
+version.workspace = true
+description = "Rynuvo desktop client"
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "rynuvo_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4" }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "2.12.5" }
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+rynuvo-proto = { path = "../../../crates/rynuvo-proto" }
