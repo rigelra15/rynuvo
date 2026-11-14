@@ -6,6 +6,7 @@ use rynuvo_server::{
     config::Config,
     db,
     disk::DiskState,
+    routes::identity,
     ws::Hub,
 };
 
@@ -23,6 +24,11 @@ enum Cmd {
         #[arg(long, default_value = "/etc/rynuvo/config.toml")]
         config: PathBuf,
     },
+    /// Print a fresh one-time owner code (claims super-admin on join).
+    OwnerCode {
+        #[arg(long, default_value = "/etc/rynuvo/config.toml")]
+        config: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -35,6 +41,13 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Serve { config } => serve(Config::load(&config)?).await,
+        Cmd::OwnerCode { config } => {
+            let cfg = Config::load(&config)?;
+            let pool = open(&cfg).await?;
+            let code = identity::new_owner_code(&pool).await.map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            println!("{code}");
+            Ok(())
+        }
     }
 }
 
@@ -46,6 +59,9 @@ async fn open(cfg: &Config) -> anyhow::Result<sqlx::SqlitePool> {
 
 async fn serve(cfg: Config) -> anyhow::Result<()> {
     let pool = open(&cfg).await?;
+    if let Some(code) = identity::ensure_owner_code(&pool).await.map_err(|e| anyhow::anyhow!("{e:?}"))? {
+        tracing::warn!("owner code (join with this to become super-admin): {code}");
+    }
     let state = AppState {
         db: pool,
         disk: DiskState::new(cfg.disk_block_pct),

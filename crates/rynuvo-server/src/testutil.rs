@@ -46,6 +46,10 @@ impl TestApp {
         TestApp { addr, client: reqwest::Client::new(), state, _tmp: tmp }
     }
 
+    pub async fn set_invite(&self, code: &str) {
+        crate::routes::identity::set_invite(&self.state.db, code).await.unwrap();
+    }
+
     pub fn url(&self, path: &str) -> String {
         format!("http://{}{}", self.addr, path)
     }
