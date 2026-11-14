@@ -5,6 +5,9 @@
   import ConnBanner from './components/ConnBanner.svelte'
   import CreateChannelDialog from './components/CreateChannelDialog.svelte'
   import Onboarding from './components/Onboarding.svelte'
+  import Settings from './components/Settings.svelte'
+  import DialogHost from './components/DialogHost.svelte'
+  import { dialog } from './lib/dialog.svelte'
   import Sidebar from './components/Sidebar.svelte'
   import { api, errText, onSessionEvent } from './lib/api'
   import { store } from './lib/state.svelte'
@@ -14,6 +17,10 @@
   let renaming = $state<Channel | null>(null)
   let menu = $state<{ c: Channel; x: number; y: number } | null>(null)
   let settingsOpen = $state(false)
+
+  $effect(() => {
+    if (store.phase === 'onboarding') settingsOpen = false
+  })
 
   onMount(() => {
     const un = onSessionEvent((e) => store.apply(e))
@@ -29,11 +36,11 @@
 
   async function del(c: Channel) {
     menu = null
-    if (!confirm(`Delete channel "${c.name}" and all of its messages?`)) return
+    if (!(await dialog.ask(`Delete channel "${c.name}" and all of its messages?`, 'Delete'))) return
     try {
       await api.deleteChannel(c.id)
     } catch (e) {
-      alert(errText(e))
+      void dialog.notice(errText(e))
     }
   }
 </script>
@@ -90,12 +97,11 @@
   {@const m = menu}
   <ChannelMenu x={m.x} y={m.y} onRename={() => ((renaming = m.c), (menu = null))} onDelete={() => del(m.c)} onClose={() => (menu = null)} />
 {/if}
-{#if settingsOpen}
-  <div class="tmp-settings">
-    <button class="btn" onclick={() => (settingsOpen = false)}>Close</button>
-    <button class="btn danger" onclick={() => store.logout()}>Sign out of this device</button>
-  </div>
+{#if settingsOpen && store.me}
+  <Settings onClose={() => (settingsOpen = false)} />
 {/if}
+
+<DialogHost />
 
 <style>
   .app { height: 100%; display: flex; flex-direction: column; }
@@ -103,5 +109,4 @@
   .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
   .none { flex: 1; display: grid; place-items: center; }
   .boot { height: 100%; display: grid; place-items: center; color: var(--accent); font-size: 40px; }
-  .tmp-settings { position: fixed; right: 16px; bottom: 16px; display: flex; gap: 8px; }
 </style>

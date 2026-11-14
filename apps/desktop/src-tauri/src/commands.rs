@@ -143,6 +143,7 @@ pub fn logout(core: State<'_, Core>) {
     if let Some(api) = g.api.take() {
         core.store.clear(&api.base());
     }
+    crate::notify::reset();
 }
 
 #[tauri::command]

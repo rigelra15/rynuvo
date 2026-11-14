@@ -86,6 +86,7 @@ impl Api {
     }
 
     fn req(&self, m: Method, path: &str) -> reqwest::RequestBuilder {
+        tracing::info!("http {m} {}", path.split('?').next().unwrap_or(path));
         let r = self.http.request(m, self.url(path));
         match &self.token {
             Some(t) => r.bearer_auth(t),

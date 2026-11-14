@@ -34,7 +34,7 @@ class Store {
   canManage = (c: Channel): boolean => !!this.me && (this.me.isAdmin || c.ownerId === this.me.id)
 
   nick(id: Id): string {
-    return this.users.get(id)?.nickname ?? 'seseorang'
+    return this.users.get(id)?.nickname ?? 'someone'
   }
 
   async boot() {

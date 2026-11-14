@@ -37,6 +37,34 @@ export const api = {
   postImageMessage: (channel: Id, content: string, imageId: string) =>
     invoke<Message>('post_image_message', { channel, content, imageId }),
   saveImage: (id: string) => invoke<string>('save_image', { id }),
+  runNettest: () => invoke<NetReport>('run_nettest'),
+  sendLog: () => invoke<void>('send_log'),
+  appVersion: () => invoke<string>('app_version'),
+}
+
+export type Mapping = 'endpointIndependent' | 'dependent' | 'unknown'
+export interface NetReport {
+  ipv4Mapped: (string | null)[]
+  ipv6Mapped: (string | null)[]
+  localIps: string[]
+  mapping: Mapping
+  udpOk: boolean
+  ipv6Ok: boolean
+  uploadMbps: number | null
+}
+
+/** Plain-language summary of a connection test. */
+export function describeNet(r: NetReport): string[] {
+  const p2p = !r.udpOk
+    ? 'UDP looks blocked: calls and screen share will go through the server.'
+    : r.mapping === 'endpointIndependent' || r.ipv6Ok
+      ? 'Direct connection with friends: very likely works.'
+      : 'Direct connection with friends: may not work, so it might go through the server.'
+  return [
+    p2p,
+    r.ipv6Ok ? 'IPv6: available.' : 'IPv6: not available.',
+    r.uploadMbps != null ? `Upload to server: ${r.uploadMbps} Mbps.` : 'Upload test failed.',
+  ]
 }
 
 export interface Report { id: Id; userId: Id; nickname: string; kind: string; body: string; createdAt: number }

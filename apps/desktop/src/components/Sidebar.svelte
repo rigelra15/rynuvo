@@ -59,7 +59,7 @@
   <footer class="me">
     <span class="av">{me.nickname.slice(0, 1).toUpperCase()}</span>
     <span class="nick">{me.nickname}</span>
-    <button class="gear" title="Pengaturan" onclick={onSettings}>⚙</button>
+    <button class="gear" title="Settings" onclick={onSettings}>⚙</button>
   </footer>
 </aside>
 

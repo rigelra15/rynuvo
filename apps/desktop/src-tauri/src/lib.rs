@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod core;
+mod diag;
 mod media;
 mod notify;
 
@@ -17,6 +18,9 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .register_asynchronous_uri_scheme_protocol("rynuvo-media", media::protocol)
         .setup(move |app| {
+            if let Ok(dir) = app.path().app_log_dir() {
+                let _ = core::logs::init(&dir);
+            }
             let dir = app.path().app_config_dir()?;
             let file = match &profile {
                 Some(p) => format!("state-{p}.json"),
@@ -48,6 +52,9 @@ pub fn run() {
             media::upload_image,
             media::post_image_message,
             media::save_image,
+            diag::run_nettest,
+            diag::send_log,
+            diag::app_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Rynuvo");

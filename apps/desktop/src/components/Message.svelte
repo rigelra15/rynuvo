@@ -3,6 +3,7 @@
   import { store } from '../lib/state.svelte'
   import { api, errText, mediaUrl } from '../lib/api'
   import ImageViewer from './ImageViewer.svelte'
+  import { dialog } from '../lib/dialog.svelte'
   import type { Message } from '../lib/types'
 
   let { m, head }: { m: Message; head: boolean } = $props()
@@ -44,7 +45,7 @@
   }
 
   async function remove() {
-    if (!confirm('Delete this message?')) return
+    if (!(await dialog.ask('Delete this message?', 'Delete'))) return
     try {
       await api.deleteMessage(m.id)
     } catch (e) {
