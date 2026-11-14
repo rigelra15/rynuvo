@@ -155,3 +155,20 @@ mod tests {
         assert!(w % 2 == 0 && h % 2 == 0);
     }
 }
+
+/// Whether the OS lets this app capture the screen, checked without asking the user.
+pub fn permission() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        unsafe extern "C" {
+            fn CGPreflightScreenCaptureAccess() -> bool;
+        }
+        // SAFETY: no arguments, only reads the TCC state.
+        if unsafe { CGPreflightScreenCaptureAccess() } { "granted" } else { "denied" }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "granted" // Windows has no capture permission for desktop apps
+    }
+}

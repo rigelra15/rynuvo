@@ -89,6 +89,25 @@ pub fn available() -> Vec<Codec> {
     }
 }
 
+/// One encoder as found on this machine (Settings self-check).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EncoderInfo {
+    pub codec: &'static str,
+    pub hardware: bool,
+    pub works: bool,
+}
+
+/// Try to open each codec at a small size and report what actually came up.
+pub fn probe() -> Vec<EncoderInfo> {
+    available()
+        .into_iter()
+        .map(|c| match open(c, 320, 240, 30, 1000) {
+            Ok(e) => EncoderInfo { codec: c.name(), hardware: e.hardware(), works: true },
+            Err(_) => EncoderInfo { codec: c.name(), hardware: false, works: false },
+        })
+        .collect()
+}
+
 /// Open the best encoder for `codec`: hardware first, software H.264 when that fails.
 pub fn open(codec: Codec, width: u32, height: u32, fps: u32, kbps: u32) -> Result<Box<dyn VideoEncoder>, String> {
     #[cfg(target_os = "macos")]
@@ -166,6 +185,16 @@ pub(crate) fn to_bgra(f: &Frame) -> Result<(u32, u32, std::borrow::Cow<'_, [u8]>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn probe_reports_every_codec_and_h264_always_works() {
+        let p = super::probe();
+        assert_eq!(p.len(), super::available().len());
+        let h = p.iter().find(|e| e.codec == "h264").expect("h264 listed");
+        assert!(h.works, "software H.264 is always there");
+        #[cfg(target_os = "macos")]
+        assert!(h.hardware, "VideoToolbox on a Mac");
+    }
+
     use super::*;
 
     pub fn pattern(w: u32, h: u32, t: u8) -> Frame {

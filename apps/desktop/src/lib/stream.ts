@@ -137,3 +137,25 @@ export class KeyGate {
     this.request()
   }
 }
+
+export interface SelfCheck {
+  encoders: { codec: string; hardware: boolean; works: boolean }[]
+  capture: 'granted' | 'denied'
+}
+
+const CODEC_LABEL: Record<string, string> = { h264: 'H.264', hevc: 'HEVC', av1: 'AV1' }
+
+/** Settings → Screen share self-check, one line per finding. */
+export function selfCheckLines(c: SelfCheck): { label: string; ok: boolean; detail: string }[] {
+  const lines = c.encoders.map((e) => ({
+    label: `${CODEC_LABEL[e.codec] ?? e.codec} encoder`,
+    ok: e.works,
+    detail: !e.works ? 'Not available' : e.hardware ? 'Hardware' : 'Software (uses more CPU)',
+  }))
+  lines.push(
+    c.capture === 'granted'
+      ? { label: 'Screen capture', ok: true, detail: 'Allowed' }
+      : { label: 'Screen capture', ok: false, detail: 'Not allowed — turn on Rynuvo in Screen Recording settings' },
+  )
+  return lines
+}

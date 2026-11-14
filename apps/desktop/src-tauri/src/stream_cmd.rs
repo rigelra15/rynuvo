@@ -25,6 +25,20 @@ pub fn stream_encoders() -> Vec<&'static str> {
     encode::available().iter().map(|c| c.name()).collect()
 }
 
+#[derive(serde::Serialize)]
+pub struct SelfCheck {
+    encoders: Vec<encode::EncoderInfo>,
+    capture: &'static str,
+}
+
+/// Settings self-check: which encoders really open, and whether capture is allowed.
+#[tauri::command]
+pub async fn stream_self_check() -> Result<SelfCheck, String> {
+    tauri::async_runtime::spawn_blocking(|| SelfCheck { encoders: encode::probe(), capture: crate::stream::capture::permission() })
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn stream_go_live(core: State<'_, Core>, source_id: String, preset: String) -> Result<(), String> {
     let ctl = core.stream.clone();
@@ -66,4 +80,15 @@ pub fn stream_unwatch(core: State<'_, Core>, user_id: Id) {
 #[tauri::command]
 pub fn stream_set_volume(core: State<'_, Core>, user_id: Id, volume: f32) {
     core.stream.set_stream_volume(user_id, volume);
+}
+
+/// macOS: open System Settings at Screen Recording so the user can allow Rynuvo.
+#[tauri::command]
+pub fn open_capture_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            .spawn();
+    }
 }

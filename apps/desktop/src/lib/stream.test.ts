@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { applyStreams, codecOrder, KeyGate, parseAu, statsLine, type Au, type StreamInfo } from './stream'
+import { applyStreams, codecOrder, KeyGate, parseAu, selfCheckLines, statsLine, type Au, type StreamInfo } from './stream'
 
 const s = (userId: number, channelId = 10): StreamInfo => ({ userId, channelId, codecs: ['h264'], preset: '1080p60' })
 
@@ -87,5 +87,22 @@ describe('KeyGate', () => {
     g.broken()
     expect(asks).toHaveLength(1)
     expect(g.accept(au(false), 0)).toBe(false)
+  })
+})
+
+describe('selfCheckLines', () => {
+  test('hardware encoder and permission granted', () => {
+    const l = selfCheckLines({ encoders: [{ codec: 'hevc', hardware: true, works: true }, { codec: 'h264', hardware: false, works: true }], capture: 'granted' })
+    expect(l).toEqual([
+      { label: 'HEVC encoder', ok: true, detail: 'Hardware' },
+      { label: 'H.264 encoder', ok: true, detail: 'Software (uses more CPU)' },
+      { label: 'Screen capture', ok: true, detail: 'Allowed' },
+    ])
+  })
+
+  test('denied capture and a broken encoder are flagged', () => {
+    const l = selfCheckLines({ encoders: [{ codec: 'av1', hardware: false, works: false }], capture: 'denied' })
+    expect(l[0]).toEqual({ label: 'AV1 encoder', ok: false, detail: 'Not available' })
+    expect(l[1]).toEqual({ label: 'Screen capture', ok: false, detail: 'Not allowed — turn on Rynuvo in Screen Recording settings' })
   })
 })

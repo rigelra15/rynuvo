@@ -125,6 +125,8 @@ pub fn run() {
             stream_cmd::stream_unwatch,
             stream_cmd::stream_set_volume,
             stream_cmd::stream_request_key,
+            stream_cmd::stream_self_check,
+            stream_cmd::open_capture_settings,
             voice_cmd::voice_state,
             voice_cmd::voice_join,
             voice_cmd::voice_leave,

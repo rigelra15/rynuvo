@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { PRESETS } from '../lib/stream'
+  import { PRESETS, selfCheckLines } from '../lib/stream'
   import { onMount } from 'svelte'
   import { api, describeNet, errText, type TransferCode } from '../lib/api'
   import { store } from '../lib/state.svelte'
@@ -18,6 +18,23 @@
   let logMsg = $state<string | null>(null)
   let version = $state('')
   let error = $state<string | null>(null)
+
+  let check = $state<ReturnType<typeof selfCheckLines> | null>(null)
+  let captureDenied = $state(false)
+  let checking = $state(false)
+
+  async function runCheck() {
+    checking = true
+    try {
+      const c = await api.streamSelfCheck()
+      check = selfCheckLines(c)
+      captureDenied = c.capture === 'denied'
+    } catch (err) {
+      error = errText(err)
+    } finally {
+      checking = false
+    }
+  }
 
   let autostart = $state(false)
   onMount(() => {
@@ -140,6 +157,17 @@
               {#each PRESETS as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
             </select>
           </label>
+          <button class="btn" onclick={runCheck} disabled={checking}>{checking ? 'Checking…' : 'Check screen sharing'}</button>
+          {#if check}
+            <ul class="check">
+              {#each check as l (l.label)}
+                <li class:bad={!l.ok}><span>{l.ok ? '✓' : '✕'} {l.label}</span><span class="note">{l.detail}</span></li>
+              {/each}
+            </ul>
+            {#if captureDenied}
+              <button class="btn" onclick={() => void api.openCaptureSettings()}>Open Screen Recording settings</button>
+            {/if}
+          {/if}
         </section>
 
         <section>
@@ -182,6 +210,9 @@
   .note { color: var(--muted); }
   ul { margin: 0; padding-left: 18px; font-size: 13px; }
   .err { color: var(--danger); }
+  .check { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+  .check li { display: flex; justify-content: space-between; gap: 12px; color: #86efac; }
+  .check li.bad { color: var(--danger); }
   .chk { display: flex; gap: 8px; align-items: center; font-size: 13px; }
   footer { display: flex; justify-content: space-between; align-items: center; padding-top: 14px; }
 </style>

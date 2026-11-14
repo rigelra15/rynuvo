@@ -2,7 +2,7 @@ import { invoke, convertFileSrc, Channel as IpcChannel } from '@tauri-apps/api/c
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { Channel, ChannelKind, Id, ImageRef, Message, User, WsServerMsg } from './types'
 import type { MyVoice, Prefs, VoiceEvent } from './voice'
-import type { Source, StreamEvent } from './stream'
+import type { SelfCheck, Source, StreamEvent } from './stream'
 
 export type ConnState = { state: 'connecting' } | { state: 'online' } | { state: 'reconnecting'; inMs: number }
 
@@ -56,6 +56,8 @@ export const api = {
   voiceKick: (userId: Id) => invoke<void>('voice_kick', { userId }),
   streamSources: () => invoke<Source[]>('stream_sources'),
   streamEncoders: () => invoke<string[]>('stream_encoders'),
+  streamSelfCheck: () => invoke<SelfCheck>('stream_self_check'),
+  openCaptureSettings: () => invoke<void>('open_capture_settings'),
   streamGoLive: (sourceId: string, preset: string) => invoke<void>('stream_go_live', { sourceId, preset }),
   streamStop: () => invoke<void>('stream_stop'),
   streamIsLive: () => invoke<boolean>('stream_is_live'),
