@@ -40,6 +40,7 @@ nnnoiseless = "0.5"
 ringbuf = "0.6.0"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
+openh264 = "0.9"
 
 [dev-dependencies]
 rynuvo-server = { path = "../../../crates/rynuvo-server", features = ["test-util"] }
@@ -50,3 +51,6 @@ objc2 = "0.6"
 block2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSBundle", "NSError", "NSDictionary"] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationContent", "UNNotificationRequest", "UNNotificationTrigger", "UNNotificationSound"] }
+videotoolbox = "0.21"
+screencapturekit = "11"
+apple-cf = "0.11"
