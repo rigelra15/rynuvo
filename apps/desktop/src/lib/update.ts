@@ -6,14 +6,18 @@ export type UpdatePhase =
 
 export const CHECK_EVERY_MS = 6 * 60 * 60 * 1000
 
-export interface Banner {
-  text: string
+
+export interface TopBar {
+  kind: 'outdated' | 'reconnecting' | 'update'
   canRestart: boolean
-  hint: string
 }
 
-/** `busy`: in voice or live, where a restart would cut everyone off. */
-export function banner(s: UpdatePhase, busy: boolean): Banner | null {
-  if (s.phase !== 'ready') return null
-  return { text: `Update ready (${s.version})`, canRestart: !busy, hint: busy ? 'Leave voice to restart' : '' }
+/** The one bar above the app. A ready update can always be installed once the server has refused
+ *  this version (`outdated`): there is no call left to interrupt. */
+export function topBar(s: { outdated: boolean; online: boolean; busy: boolean; update: UpdatePhase }): TopBar | null {
+  const ready = s.update.phase === 'ready'
+  if (s.outdated) return { kind: 'outdated', canRestart: ready }
+  if (!s.online) return { kind: 'reconnecting', canRestart: ready && !s.busy }
+  if (ready) return { kind: 'update', canRestart: !s.busy }
+  return null
 }
