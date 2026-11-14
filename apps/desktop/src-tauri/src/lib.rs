@@ -5,6 +5,7 @@ mod diag;
 mod mac_notify;
 mod media;
 mod notify;
+pub mod voice;
 
 use std::sync::Arc;
 

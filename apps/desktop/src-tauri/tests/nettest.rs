@@ -36,7 +36,7 @@ async fn nettest_against_local_server() {
     for p in &mut ports {
         let s = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         *p = s.local_addr().unwrap().port();
-        stun::spawn_on(s);
+        stun::spawn_on(s, None);
     }
     let r = nettest::run(&api, "127.0.0.1", ports).await;
     assert!(r.udp_ok, "{r:?}");

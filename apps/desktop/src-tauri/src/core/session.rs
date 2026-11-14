@@ -66,6 +66,8 @@ struct Shared {
     floor: HashMap<Id, Id>,
     /// channel id -> recently delivered ids, so out-of-order broadcasts are not mistaken for duplicates
     recent: HashMap<Id, std::collections::VecDeque<Id>>,
+    /// Where binary frames from the server go (the voice link's WebSocket downlink).
+    binary_sink: Option<mpsc::UnboundedSender<Vec<u8>>>,
 }
 
 impl Shared {
@@ -100,6 +102,7 @@ impl Shared {
 pub struct SessionHandle {
     shared: Arc<Mutex<Shared>>,
     out: mpsc::UnboundedSender<WsClientMsg>,
+    out_bin: mpsc::UnboundedSender<Vec<u8>>,
     stop: watch::Sender<bool>,
 }
 
@@ -107,6 +110,20 @@ impl SessionHandle {
     /// The UI loaded `channel` up to `last_id`; future gaps in it are caught up on reconnect.
     pub fn mark_loaded(&self, channel: Id, last_id: Id) {
         self.shared.lock().unwrap().track(channel, last_id);
+    }
+
+    /// Queue any client message (sent once the connection is ready).
+    pub fn send(&self, msg: WsClientMsg) {
+        let _ = self.out.send(msg);
+    }
+
+    /// Send a binary frame (voice packets on the WebSocket path). Dropped while disconnected.
+    pub fn send_binary(&self, b: Vec<u8>) {
+        let _ = self.out_bin.send(b);
+    }
+
+    pub fn set_binary_sink(&self, sink: Option<mpsc::UnboundedSender<Vec<u8>>>) {
+        self.shared.lock().unwrap().binary_sink = sink;
     }
 
     pub fn send_typing(&self, channel_id: Id) {
@@ -135,9 +152,10 @@ impl Session {
     pub fn start_with(api: Api, store: Arc<dyn SecretStore>, server: String, emit: Emit, timing: Timing) -> SessionHandle {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let (out_tx, out_rx) = mpsc::unbounded_channel();
+        let (bin_tx, bin_rx) = mpsc::unbounded_channel();
         let (stop_tx, stop_rx) = watch::channel(false);
-        let h = SessionHandle { shared: shared.clone(), out: out_tx, stop: stop_tx };
-        tokio::spawn(run(api, store, server, emit, shared, out_rx, stop_rx, timing));
+        let h = SessionHandle { shared: shared.clone(), out: out_tx, out_bin: bin_tx, stop: stop_tx };
+        tokio::spawn(run(api, store, server, emit, shared, (out_rx, bin_rx), stop_rx, timing));
         h
     }
 }
@@ -148,7 +166,7 @@ async fn run(
     server: String,
     emit: Emit,
     shared: Arc<Mutex<Shared>>,
-    mut out_rx: mpsc::UnboundedReceiver<WsClientMsg>,
+    (mut out_rx, mut bin_rx): (mpsc::UnboundedReceiver<WsClientMsg>, mpsc::UnboundedReceiver<Vec<u8>>),
     mut stop: watch::Receiver<bool>,
     timing: Timing,
 ) {
@@ -158,7 +176,7 @@ async fn run(
             return;
         }
         emit(SessionEvent::Conn(ConnState::Connecting));
-        let end = connect_once(&api, &emit, &shared, &mut out_rx, &mut stop, &mut attempt, timing)
+        let end = connect_once(&api, &emit, &shared, (&mut out_rx, &mut bin_rx), &mut stop, &mut attempt, timing)
             .await
             .unwrap_or_else(|e| {
                 tracing::debug!("ws connect failed: {e}");
@@ -191,7 +209,7 @@ async fn connect_once(
     api: &Api,
     emit: &Emit,
     shared: &Arc<Mutex<Shared>>,
-    out_rx: &mut mpsc::UnboundedReceiver<WsClientMsg>,
+    (out_rx, bin_rx): (&mut mpsc::UnboundedReceiver<WsClientMsg>, &mut mpsc::UnboundedReceiver<Vec<u8>>),
     stop: &mut watch::Receiver<bool>,
     attempt: &mut u32,
     timing: Timing,
@@ -220,6 +238,13 @@ async fn connect_once(
                 if let Some(m) = out {
                     if ready_seen {
                         let _ = ws.send(WsMsg::text(serde_json::to_string(&m).unwrap())).await;
+                    }
+                }
+            }
+            bin = bin_rx.recv() => {
+                if let Some(b) = bin {
+                    if ready_seen && ws.send(WsMsg::binary(b)).await.is_err() {
+                        return Ok(End::Retry);
                     }
                 }
             }
@@ -256,6 +281,11 @@ async fn connect_once(
                             }
                             WsServerMsg::Pong => {}
                             other => emit(SessionEvent::Server(other)),
+                        }
+                    }
+                    WsMsg::Binary(b) => {
+                        if let Some(sink) = &shared.lock().unwrap().binary_sink {
+                            let _ = sink.send(b.to_vec());
                         }
                     }
                     WsMsg::Close(f) => {

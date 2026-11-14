@@ -149,3 +149,36 @@ async fn silent_server_triggers_reconnect() {
     wait_for(&ev, |e| e.iter().any(|x| matches!(x, SessionEvent::Conn(ConnState::Reconnecting { .. })))).await;
     h.stop();
 }
+
+#[tokio::test]
+async fn session_routes_binary_frames() {
+    use rynuvo_proto::{
+        WsClientMsg,
+        voice_wire::{DOWN_KEEPALIVE_ACK, UP_KEEPALIVE, VoiceKey, open_down, seal_up},
+    };
+    let app = TestApp::spawn().await;
+    let a = app.user("Dimas").await;
+    let v = app.create_channel(&a.token, "voice", "Mabar").await;
+    let base = format!("http://{}", app.addr);
+    let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::default());
+    let (ev, emit) = collector();
+    let h = Session::start(Api::new(&base, Some(a.token.clone())).unwrap(), store, base.clone(), emit);
+    wait_for(&ev, |e| e.iter().any(|x| matches!(x, SessionEvent::Conn(ConnState::Online)))).await;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    h.set_binary_sink(Some(tx));
+    h.send(WsClientMsg::VoiceJoin { channel_id: v.id });
+    wait_for(&ev, |e| e.iter().any(|x| matches!(x, SessionEvent::Server(WsServerMsg::VoiceJoined { .. })))).await;
+    let (session, key) = ev
+        .lock()
+        .unwrap()
+        .iter()
+        .find_map(|x| match x {
+            SessionEvent::Server(WsServerMsg::VoiceJoined { session, key, .. }) => Some((*session, VoiceKey::from_b64(key).unwrap())),
+            _ => None,
+        })
+        .unwrap();
+    h.send_binary(seal_up(&key, UP_KEEPALIVE, session, 1, &[]));
+    let ack = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
+    assert_eq!(open_down(&key, &ack).unwrap().kind, DOWN_KEEPALIVE_ACK);
+    h.stop();
+}
