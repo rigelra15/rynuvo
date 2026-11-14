@@ -6,6 +6,7 @@ mod mac_notify;
 mod media;
 mod notify;
 pub mod prefs;
+pub mod stream;
 mod tray;
 pub mod voice;
 mod voice_cmd;
