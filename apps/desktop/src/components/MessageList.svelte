@@ -4,6 +4,7 @@
   import MessageView from './Message.svelte'
   import { store } from '../lib/state.svelte'
   import type { Id } from '../lib/types'
+  import { dayLabel, isHead, newDay } from '../lib/chat'
 
   let { channel }: { channel: Id } = $props()
 
@@ -12,14 +13,7 @@
   let loadingOlder = false
 
   const list = $derived(store.messages.get(channel))
-  const GROUP_MS = 5 * 60 * 1000
-
-  function isHead(i: number): boolean {
-    if (!list || i === 0) return true
-    const a = list[i - 1]
-    const b = list[i]
-    return a.authorId !== b.authorId || b.createdAt - a.createdAt > GROUP_MS
-  }
+  const now = $derived(list ? Date.now() : 0)
 
   // keep pinned to bottom on new messages unless the user scrolled up
   $effect.pre(() => {
@@ -76,7 +70,9 @@
   {:else}
     {#if store.hasMore.get(channel) === false}<div class="start muted">This is the start of the channel</div>{/if}
     {#each list as m, i (m.id)}
-      <MessageView {m} head={isHead(i)} />
+      {@const prev = list[i - 1]}
+      {#if newDay(prev, m)}<div class="day"><span>{dayLabel(m.createdAt, now)}</span></div>{/if}
+      <MessageView {m} head={isHead(prev, m) || newDay(prev, m)} />
     {/each}
   {/if}
 </div>
@@ -84,5 +80,7 @@
 <style>
   .list { flex: 1; overflow-y: auto; padding-bottom: 8px; }
   .empty { height: 100%; display: grid; place-items: center; }
-  .start { padding: 16px 18px 0; font-size: 12px; }
+  .start { padding: 16px 18px 0; font-size: 12px; text-align: center; }
+  .day { display: flex; justify-content: center; margin: 14px 0 4px; position: sticky; top: 6px; z-index: 1; pointer-events: none; }
+  .day span { font-size: 11.5px; font-weight: 600; color: var(--muted); background: var(--elev-2); border: 1px solid var(--line); padding: 3px 10px; border-radius: 999px; }
 </style>
