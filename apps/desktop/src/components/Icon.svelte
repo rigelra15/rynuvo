@@ -1,7 +1,7 @@
 <script lang="ts" module>
   export type IconName =
     | 'mic' | 'micOff' | 'headphones' | 'headphonesOff' | 'screen' | 'leave'
-    | 'hash' | 'volume' | 'plus' | 'settings' | 'edit' | 'trash' | 'close' | 'check' | 'logo'
+    | 'hash' | 'volume' | 'plus' | 'settings' | 'edit' | 'trash' | 'close' | 'check' | 'logo' | 'users'
 </script>
 
 <script lang="ts">
@@ -22,6 +22,8 @@
     <path d="M8 20h8M12 16v4" />
   {:else if name === 'leave'}
     <path d="M4.5 14.5c4.5-4 10.5-4 15 0l-2 2.5-3-1.2v-2.3a10 10 0 0 0-5 0v2.3l-3 1.2z" />
+  {:else if name === 'users'}
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
   {:else if name === 'hash'}
     <path d="M5 9h15M4 15h15M10 3 8 21M16 3l-2 18" />
   {:else if name === 'volume'}
