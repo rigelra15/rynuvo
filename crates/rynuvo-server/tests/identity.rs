@@ -87,3 +87,26 @@ async fn rename_me() {
     assert_eq!(r.status(), 200);
     assert_eq!(r.json::<User>().await.unwrap().nickname, "Bayu");
 }
+
+#[tokio::test]
+async fn avatar_is_set_cleared_and_validated() {
+    let app = TestApp::spawn().await;
+    app.set_invite("ABCD-EFGH-JKLM").await;
+    let a: JoinResp = join_raw(&app, "ABCD-EFGH-JKLM", "Dimas").await.json().await.unwrap();
+    let patch = |body: serde_json::Value| app.client.patch(app.url("/api/v1/me")).bearer_auth(&a.token).json(&body).send();
+
+    let r = patch(json!({"avatarIcon":"cat","avatarColor":"teal"})).await.unwrap();
+    assert_eq!(r.status(), 200);
+    let u: User = r.json().await.unwrap();
+    assert_eq!((u.nickname.as_str(), u.avatar_icon.as_deref(), u.avatar_color.as_deref()), ("Dimas", Some("cat"), Some("teal")));
+
+    let me: User = app.client.get(app.url("/api/v1/me")).bearer_auth(&a.token).send().await.unwrap().json().await.unwrap();
+    assert_eq!((me.avatar_icon.as_deref(), me.avatar_color.as_deref()), (Some("cat"), Some("teal")));
+
+    let u: User = patch(json!({"avatarIcon":null})).await.unwrap().json().await.unwrap();
+    assert_eq!((u.avatar_icon, u.avatar_color.as_deref()), (None, Some("teal")), "null clears only that field");
+
+    for bad in [json!({"avatarIcon":"dragon"}), json!({"avatarColor":"#ff0000"})] {
+        assert_eq!(patch(bad.clone()).await.unwrap().status(), 400, "{bad}");
+    }
+}

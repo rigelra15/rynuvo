@@ -16,7 +16,23 @@ pub struct User {
     pub id: Id,
     pub nickname: String,
     pub is_admin: bool,
+    /// One of [`AVATAR_ICONS`]; `None` shows the nickname's first letter.
+    #[serde(default)]
+    pub avatar_icon: Option<String>,
+    /// One of [`AVATAR_COLORS`]; `None` picks a colour from the user id.
+    #[serde(default)]
+    pub avatar_color: Option<String>,
 }
+
+/// Avatar icons a user can pick (drawn by the desktop app).
+pub const AVATAR_ICONS: [&str; 24] = [
+    "cat", "dog", "rabbit", "bird", "fish", "turtle", "ghost", "skull", "rocket", "gamepad", "headphones", "music",
+    "coffee", "pizza", "flame", "zap", "star", "moon", "sun", "leaf", "flower", "crown", "anchor", "camera",
+];
+
+/// Avatar colours a user can pick (the desktop app maps each key to a shade).
+pub const AVATAR_COLORS: [&str; 12] =
+    ["violet", "blue", "sky", "teal", "green", "lime", "amber", "orange", "red", "pink", "fuchsia", "slate"];
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -113,10 +129,21 @@ pub struct TransferCodeResp {
     pub expires_at: i64,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct RenameReq {
-    pub nickname: String,
+pub struct ProfileReq {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
+    /// Absent: unchanged. `null`: cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "some")]
+    pub avatar_icon: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "some")]
+    pub avatar_color: Option<Option<String>>,
+}
+
+/// Present field (even `null`) → `Some`, so absent and `null` differ.
+fn some<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
