@@ -1,0 +1,136 @@
+# Builds the desktop installers and the server binary, then publishes them as a GitHub Release.
+# Push a tag matching tauri.conf.json's version (e.g. `git tag v0.1.0 && git push origin v0.1.0`),
+# or run it by hand from the Actions tab to get the files as workflow artifacts only.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bundle: app,dmg
+            out: mac.dmg
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundle: nsis
+            out: windows-setup.exe
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Read version
+        id: v
+        run: echo "version=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Tag matches app version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          [ "${GITHUB_REF_NAME}" = "v${{ steps.v.outputs.version }}" ] || {
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match tauri.conf.json version ${{ steps.v.outputs.version }}"; exit 1; }
+
+      - name: Install frontend deps
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: apps/desktop
+        env:
+          # Signs the updater bundles (the key has no password).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
+
+      - name: Collect installer and updater bundle
+        run: |
+          mkdir -p out
+          b=target/${{ matrix.target }}/release/bundle
+          name="Rynuvo-${{ steps.v.outputs.version }}"
+          if [ "${{ matrix.os }}" = macos-latest ]; then
+            cp "$(ls $b/dmg/*.dmg | head -1)" "out/$name-mac.dmg"
+            cp $b/macos/*.app.tar.gz "out/$name-mac.app.tar.gz"
+            cp $b/macos/*.app.tar.gz.sig "out/$name-mac.app.tar.gz.sig"
+          else
+            src=$(ls $b/nsis/*-setup.exe | head -1)
+            cp "$src" "out/$name-windows-setup.exe"
+            cp "$src.sig" "out/$name-windows-setup.exe.sig"
+          fi
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}
+          path: out/*
+          if-no-files-found: error
+
+  server:
+    # ubuntu-24.04 ships glibc 2.39, the same floor the VPS build targets.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked -p rynuvo-server
+      - name: Collect binary
+        run: |
+          mkdir -p out
+          cp target/release/rynuvo-server out/rynuvo-server-linux-x86_64
+          ls -lh out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-linux-x86_64
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [desktop, server]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -lh dist
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" --title "Rynuvo $GITHUB_REF_NAME" --generate-notes

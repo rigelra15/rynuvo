@@ -1,0 +1,11 @@
+# /etc/rynuvo/config.toml
+bind = "127.0.0.1:8110"
+public_url = "https://rynuvo.pokyvl.my.id"
+public_ip = "43.157.206.245"
+data_dir = "/var/lib/rynuvo"
+stun_ports = [3478, 3479]
+disk_warn_pct = 85
+disk_block_pct = 92
+max_upload_bytes = 5242880
+quota_gb = 400
+backups_keep = 7

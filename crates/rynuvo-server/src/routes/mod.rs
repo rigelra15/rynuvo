@@ -1,0 +1,26 @@
+use axum::{Json, Router, routing::get};
+use rynuvo_proto::PROTOCOL_VERSION;
+
+use crate::app::AppState;
+
+pub mod admin;
+pub mod channels;
+pub mod diag;
+pub mod identity;
+pub mod media;
+pub mod messages;
+
+async fn health() -> Json<serde_json::Value> {
+    Json(serde_json::json!({"ok": true, "protocol": PROTOCOL_VERSION}))
+}
+
+pub fn api(cfg: &crate::config::Config) -> Router<AppState> {
+    Router::new()
+        .route("/health", get(health))
+        .merge(identity::router())
+        .merge(admin::router())
+        .merge(channels::router())
+        .merge(messages::router())
+        .merge(diag::router())
+        .merge(media::router(cfg.max_upload_bytes))
+}

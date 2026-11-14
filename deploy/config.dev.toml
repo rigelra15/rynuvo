@@ -1,0 +1,6 @@
+# Local development config: cargo run -p rynuvo-server -- serve --config deploy/config.dev.toml
+bind = "127.0.0.1:8110"
+public_url = "http://127.0.0.1:8110"
+public_ip = "127.0.0.1"
+data_dir = "./.devdata"
+stun_ports = [3478, 3479]
