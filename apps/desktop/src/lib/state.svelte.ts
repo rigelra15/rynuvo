@@ -16,6 +16,10 @@ class Store {
   users = new SvelteMap<Id, User>()
   online = new SvelteSet<Id>()
   channels = $state<Channel[]>([])
+  /** The first `ready` of this sign-in has arrived (the channel list is real). */
+  gotReady = $state(false)
+  /** Boot took too long (server down): stop waiting and show the app with its reconnect bar. */
+  bootTimedOut = $state(false)
   selectedId = $state<Id | null>(null)
   messages = new SvelteMap<Id, Message[]>()
   hasMore = new SvelteMap<Id, boolean>()
@@ -44,6 +48,16 @@ class Store {
   streamStats = new SvelteMap<Id, { fps: number; codec: string; kbps: number; path: string }>()
   streamNotice = $state<string | null>(null)
   streamPreset = $state('1080p60')
+
+  /** The splash can go: onboarding is up, or the channel list and the open text channel's first page are in. */
+  get ready(): boolean {
+    if (this.phase === 'onboarding') return true
+    if (this.phase !== 'app') return false
+    if (this.bootTimedOut) return true
+    if (!this.gotReady) return false
+    const c = this.selected
+    return !c || c.kind !== 'text' || this.messages.has(c.id) || this.loadError.has(c.id)
+  }
 
   get selected(): Channel | null {
     return this.channels.find((c) => c.id === this.selectedId) ?? null
@@ -85,6 +99,7 @@ class Store {
 
   async boot() {
     void this.loadPrefs()
+    setTimeout(() => (this.bootTimedOut = true), 8000)
     try {
       const info = await api.bootstrap()
       if (!info) {
@@ -111,6 +126,7 @@ class Store {
     this.users.clear()
     this.online.clear()
     this.channels = []
+    this.gotReady = false
     this.selectedId = null
     this.messages.clear()
     this.hasMore.clear()
@@ -336,6 +352,7 @@ class Store {
         this.online.clear()
         for (const id of m.d.online) this.online.add(id)
         this.channels = m.d.channels
+        this.gotReady = true
         this.alerts = m.d.alerts
         // drop caches of channels that disappeared while offline
         for (const id of [...this.messages.keys()]) if (!m.d.channels.some((c) => c.id === id)) this.messages.delete(id)
