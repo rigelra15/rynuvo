@@ -23,7 +23,7 @@ jobs:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
-            bundle: dmg
+            bundle: app,dmg
             out: mac.dmg
           - os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -70,13 +70,26 @@ jobs:
 
       - name: Build
         working-directory: apps/desktop
+        env:
+          # Signs the updater bundles (the key has no password).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
 
-      - name: Collect installer
+      - name: Collect installer and updater bundle
         run: |
           mkdir -p out
-          src=$(ls target/${{ matrix.target }}/release/bundle/${{ matrix.bundle }}/*.${{ matrix.bundle == 'dmg' && 'dmg' || 'exe' }} | head -1)
-          cp "$src" "out/Rynuvo-${{ steps.v.outputs.version }}-${{ matrix.out }}"
+          b=target/${{ matrix.target }}/release/bundle
+          name="Rynuvo-${{ steps.v.outputs.version }}"
+          if [ "${{ matrix.os }}" = macos-latest ]; then
+            cp "$(ls $b/dmg/*.dmg | head -1)" "out/$name-mac.dmg"
+            cp $b/macos/*.app.tar.gz "out/$name-mac.app.tar.gz"
+            cp $b/macos/*.app.tar.gz.sig "out/$name-mac.app.tar.gz.sig"
+          else
+            src=$(ls $b/nsis/*-setup.exe | head -1)
+            cp "$src" "out/$name-windows-setup.exe"
+            cp "$src.sig" "out/$name-windows-setup.exe.sig"
+          fi
           ls -lh out
 
       - uses: actions/upload-artifact@v4

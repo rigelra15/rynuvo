@@ -40,6 +40,18 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYzOTNCQTBGN0YzM0FBMkQKUldRdHFqTi9EN3FUWTl2MVNDblNBbTBvOW9xRmFwaXJrLzkxUHpxSXFBZENya2NLN2pTbWRPTXQK",
+      "endpoints": [
+        "https://rynuvo.pokyvl.my.id/downloads/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

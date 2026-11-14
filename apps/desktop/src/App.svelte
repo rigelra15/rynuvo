@@ -12,6 +12,7 @@
   import UserVolumeMenu from './components/UserVolumeMenu.svelte'
   import { api, errText, onSessionEvent, onStreamEvent, onVoiceEvent } from './lib/api'
   import { store } from './lib/state.svelte'
+  import { updater } from './lib/updater.svelte'
   import type { Channel, ChannelKind, Id } from './lib/types'
 
   let creating = $state<ChannelKind | null>(null)
@@ -41,6 +42,7 @@
   })
 
   onMount(() => {
+    updater.start()
     const un = onSessionEvent((e) => store.apply(e))
     const unv = onVoiceEvent((e) => store.applyVoiceEvent(e))
     const uns = onStreamEvent((e) => store.applyStreamEvent(e))
