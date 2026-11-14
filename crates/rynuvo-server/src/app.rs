@@ -13,5 +13,5 @@ pub struct AppState {
 }
 
 pub fn build_router(state: AppState) -> Router {
-    Router::new().nest("/api/v1", routes::api()).with_state(state)
+    Router::new().nest("/api/v1", routes::api(&state.cfg)).with_state(state)
 }

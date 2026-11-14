@@ -64,10 +64,11 @@ async fn serve(cfg: Config) -> anyhow::Result<()> {
     }
     let state = AppState {
         db: pool,
-        disk: DiskState::new(cfg.disk_block_pct),
+        disk: DiskState::new(cfg.disk_warn_pct, cfg.disk_block_pct),
         cfg: Arc::new(cfg.clone()),
         hub: Hub::default(),
     };
+    rynuvo_server::disk::spawn_watcher(cfg.data_dir.clone(), state.disk.clone(), state.hub.clone());
     let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
     tracing::info!("rynuvo-server listening on {}", cfg.bind);
     axum::serve(

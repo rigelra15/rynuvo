@@ -33,7 +33,7 @@ impl TestApp {
         let pool = db::open_pool("sqlite::memory:").await.unwrap();
         let state = AppState {
             db: pool,
-            disk: DiskState::new(cfg.disk_block_pct),
+            disk: DiskState::new(cfg.disk_warn_pct, cfg.disk_block_pct),
             cfg: Arc::new(cfg),
             hub: Hub::default(),
         };

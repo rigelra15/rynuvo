@@ -6,17 +6,19 @@ use crate::app::AppState;
 pub mod admin;
 pub mod channels;
 pub mod identity;
+pub mod media;
 pub mod messages;
 
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({"ok": true, "protocol": PROTOCOL_VERSION}))
 }
 
-pub fn api() -> Router<AppState> {
+pub fn api(cfg: &crate::config::Config) -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
         .merge(identity::router())
         .merge(admin::router())
         .merge(channels::router())
         .merge(messages::router())
+        .merge(media::router(cfg.max_upload_bytes))
 }
