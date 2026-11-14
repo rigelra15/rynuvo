@@ -4,7 +4,7 @@
   import MessageView from './Message.svelte'
   import { store } from '../lib/state.svelte'
   import type { Id } from '../lib/types'
-  import { dayLabel, isHead, newDay } from '../lib/chat'
+  import { byDay, dayLabel } from '../lib/chat'
 
   let { channel }: { channel: Id } = $props()
 
@@ -14,6 +14,7 @@
 
   const list = $derived(store.messages.get(channel))
   const now = $derived(list ? Date.now() : 0)
+  const days = $derived(list ? byDay(list) : [])
 
   // keep pinned to bottom on new messages unless the user scrolled up
   $effect.pre(() => {
@@ -69,10 +70,13 @@
     <div class="empty muted">No messages yet. Say hi to your friends!</div>
   {:else}
     {#if store.hasMore.get(channel) === false}<div class="start muted">This is the start of the channel</div>{/if}
-    {#each list as m, i (m.id)}
-      {@const prev = list[i - 1]}
-      {#if newDay(prev, m)}<div class="day"><span>{dayLabel(m.createdAt, now)}</span></div>{/if}
-      <MessageView {m} head={isHead(prev, m) || newDay(prev, m)} />
+    {#each days as d (new Date(d.at).toDateString())}
+      <section>
+        <div class="day"><span>{dayLabel(d.at, now)}</span></div>
+        {#each d.items as { m, head } (m.id)}
+          <MessageView {m} {head} />
+        {/each}
+      </section>
     {/each}
   {/if}
 </div>
@@ -81,6 +85,6 @@
   .list { flex: 1; overflow-y: auto; padding-bottom: 8px; }
   .empty { height: 100%; display: grid; place-items: center; }
   .start { padding: 16px 18px 0; font-size: 12px; text-align: center; }
-  .day { display: flex; justify-content: center; margin: 14px 0 4px; position: sticky; top: 6px; z-index: 1; pointer-events: none; }
+  .day { display: flex; justify-content: center; margin: 14px 0 4px; position: sticky; top: 6px; z-index: 3; pointer-events: none; }
   .day span { font-size: 11.5px; font-weight: 600; color: var(--muted); background: var(--elev-2); border: 1px solid var(--line); padding: 3px 10px; border-radius: 999px; }
 </style>

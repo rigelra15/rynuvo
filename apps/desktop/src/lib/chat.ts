@@ -29,3 +29,15 @@ export function dayLabel(ms: number, now: number): string {
   const s = `${d.getDate()} ${MONTHS[d.getMonth()]}`
   return d.getFullYear() === today.getFullYear() ? s : `${s} ${d.getFullYear()}`
 }
+
+/** Messages grouped by local day (each day gets its own block, so its date chip sticks only within it). */
+export function byDay<M extends Msg>(list: readonly M[]): { at: number; items: { m: M; head: boolean }[] }[] {
+  const days: { at: number; items: { m: M; head: boolean }[] }[] = []
+  list.forEach((m, i) => {
+    const prev = list[i - 1]
+    const fresh = newDay(prev, m)
+    if (fresh) days.push({ at: m.createdAt, items: [] })
+    days[days.length - 1].items.push({ m, head: fresh || isHead(prev, m) })
+  })
+  return days
+}

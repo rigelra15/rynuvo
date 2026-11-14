@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { dayLabel, isHead, newDay } from './chat'
+import { byDay, dayLabel, isHead, newDay } from './chat'
 
 const at = (y: number, mo: number, d: number, h = 12, mi = 0) => new Date(y, mo - 1, d, h, mi).getTime()
 const msg = (authorId: number, createdAt: number) => ({ authorId, createdAt })
@@ -25,5 +25,20 @@ describe('chat grouping', () => {
     expect(dayLabel(at(2026, 11, 13, 22), now)).toBe('Yesterday')
     expect(dayLabel(at(2026, 11, 12), now)).toBe('12 Nov')
     expect(dayLabel(at(2025, 11, 12), now)).toBe('12 Nov 2025')
+  })
+})
+
+describe('byDay', () => {
+  test('splits messages into local days and marks run heads, a new day always starting a run', () => {
+    const list = [msg(1, at(2026, 11, 13, 23, 58)), msg(1, at(2026, 11, 13, 23, 59)), msg(1, at(2026, 11, 14, 0, 1)), msg(2, at(2026, 11, 14, 0, 2))]
+    const days = byDay(list)
+    expect(days.map((d) => d.items.length)).toEqual([2, 2])
+    expect(days.map((d) => d.at)).toEqual([list[0].createdAt, list[2].createdAt])
+    expect(days.flatMap((d) => d.items.map((i) => i.head))).toEqual([true, false, true, true])
+    expect(days[1].items[0].m).toBe(list[2])
+  })
+
+  test('empty list has no days', () => {
+    expect(byDay([])).toEqual([])
   })
 })

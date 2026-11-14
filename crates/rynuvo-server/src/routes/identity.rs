@@ -123,32 +123,38 @@ async fn me(au: AuthUser) -> Json<User> {
 }
 
 async fn update_me(State(st): State<AppState>, au: AuthUser, Json(req): Json<ProfileReq>) -> AppResult<Json<User>> {
-    let mut user = au.user;
-    let mut key = None;
-    if let Some(n) = &req.nickname {
-        let (nickname, k) = auth::nickname_key(n)?;
-        user.nickname = nickname;
-        key = Some(k);
-    }
-    let pick = |v: Option<String>, allowed: &[&str], what: &str| match v {
-        Some(s) if !allowed.contains(&s.as_str()) => Err(AppError::BadRequest(format!("Unknown avatar {what}"))),
+    let (nickname, key) = match &req.nickname {
+        Some(n) => {
+            let (nickname, k) = auth::nickname_key(n)?;
+            (Some(nickname), Some(k))
+        }
+        None => (None, None),
+    };
+    let pick = |v: Option<Option<String>>, allowed: &[&str], what: &str| match v {
+        Some(Some(s)) if !allowed.contains(&s.as_str()) => Err(AppError::BadRequest(format!("Unknown avatar {what}"))),
         v => Ok(v),
     };
-    if let Some(v) = req.avatar_icon {
-        user.avatar_icon = pick(v, &AVATAR_ICONS, "icon")?;
-    }
-    if let Some(v) = req.avatar_color {
-        user.avatar_color = pick(v, &AVATAR_COLORS, "colour")?;
-    }
-    sqlx::query("UPDATE users SET nickname = ?, nickname_key = COALESCE(?, nickname_key), avatar_icon = ?, avatar_color = ? WHERE id = ?")
-        .bind(&user.nickname)
-        .bind(&key)
-        .bind(&user.avatar_icon)
-        .bind(&user.avatar_color)
-        .bind(user.id)
-        .execute(&st.db)
-        .await
-        .map_err(|e| if is_unique_violation(&e) { nickname_taken() } else { AppError::from(e) })?;
+    let icon = pick(req.avatar_icon, &AVATAR_ICONS, "icon")?;
+    let color = pick(req.avatar_color, &AVATAR_COLORS, "colour")?;
+    // Only the fields that were sent change, so two edits at once (or a rename on another device)
+    // never write back a stale copy of the others.
+    let row: (i64, String, bool, Option<String>, Option<String>) = sqlx::query_as(
+        "UPDATE users SET nickname = COALESCE(?1, nickname), nickname_key = COALESCE(?2, nickname_key), \
+         avatar_icon = CASE WHEN ?3 THEN ?4 ELSE avatar_icon END, avatar_color = CASE WHEN ?5 THEN ?6 ELSE avatar_color END \
+         WHERE id = ?7 RETURNING id, nickname, is_admin, avatar_icon, avatar_color",
+    )
+    .bind(&nickname)
+    .bind(&key)
+    .bind(icon.is_some())
+    .bind(icon.flatten())
+    .bind(color.is_some())
+    .bind(color.flatten())
+    .bind(au.user.id)
+    .fetch_one(&st.db)
+    .await
+    .map_err(|e| if is_unique_violation(&e) { nickname_taken() } else { AppError::from(e) })?;
+    let (id, nickname, is_admin, avatar_icon, avatar_color) = row;
+    let user = User { id, nickname, is_admin, avatar_icon, avatar_color };
     st.hub.broadcast(WsServerMsg::UserUpserted(user.clone()));
     Ok(Json(user))
 }
