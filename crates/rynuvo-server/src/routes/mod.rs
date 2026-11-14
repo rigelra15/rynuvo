@@ -3,6 +3,8 @@ use rynuvo_proto::PROTOCOL_VERSION;
 
 use crate::app::AppState;
 
+pub mod admin;
+pub mod channels;
 pub mod identity;
 
 async fn health() -> Json<serde_json::Value> {
@@ -13,4 +15,5 @@ pub fn api() -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
         .merge(identity::router())
+        .merge(admin::router())
 }

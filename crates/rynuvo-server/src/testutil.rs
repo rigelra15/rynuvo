@@ -50,6 +50,35 @@ impl TestApp {
         crate::routes::identity::set_invite(&self.state.db, code).await.unwrap();
     }
 
+    pub const INVITE: &'static str = "TEST-TEST-TEST";
+
+    pub async fn join_raw(&self, code: &str, nick: &str) -> reqwest::Response {
+        self.client
+            .post(self.url("/api/v1/join"))
+            .json(&serde_json::json!({"inviteCode": code, "nickname": nick, "deviceName": "test"}))
+            .send()
+            .await
+            .unwrap()
+    }
+
+    /// Join as super-admin "Admin" via a fresh owner code.
+    pub async fn admin(&self) -> rynuvo_proto::JoinResp {
+        let code = crate::routes::identity::new_owner_code(&self.state.db).await.unwrap();
+        let r = self.join_raw(&code, "Admin").await;
+        assert_eq!(r.status(), 200);
+        r.json().await.unwrap()
+    }
+
+    /// Join as a regular user with [`Self::INVITE`] (sets it if unset).
+    pub async fn user(&self, nick: &str) -> rynuvo_proto::JoinResp {
+        if crate::routes::identity::get_setting(&self.state.db, "invite_hash").await.unwrap().is_none() {
+            self.set_invite(Self::INVITE).await;
+        }
+        let r = self.join_raw(Self::INVITE, nick).await;
+        assert_eq!(r.status(), 200, "join {nick}");
+        r.json().await.unwrap()
+    }
+
     pub fn url(&self, path: &str) -> String {
         format!("http://{}{}", self.addr, path)
     }
