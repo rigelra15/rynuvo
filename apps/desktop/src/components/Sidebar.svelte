@@ -3,6 +3,7 @@
   import type { Channel, Id, User } from '../lib/types'
   import Icon from './Icon.svelte'
   import VoiceMembers from './VoiceMembers.svelte'
+  import UserPanel from './UserPanel.svelte'
 
   let {
     circleName = 'Rynuvo',
@@ -27,8 +28,6 @@
     onSettings: () => void
     onMemberMenu: (userId: Id, e: MouseEvent) => void
   } = $props()
-
-  const voiceChannel = $derived(channels.find((c) => c.id === store.myVoice.channelId) ?? null)
 
   const text = $derived(channels.filter((c) => c.kind === 'text'))
   const voice = $derived(channels.filter((c) => c.kind === 'voice'))
@@ -64,26 +63,7 @@
     {/each}
   </nav>
 
-  {#if voiceChannel}
-    <div class="vc">
-      <div class="vct">
-        <span class="ok">Voice connected</span>
-        <span class="muted">{voiceChannel.name}{store.voicePath === 'ws' ? ' · via server' : ''}</span>
-      </div>
-      <button class="gear" title="Leave voice" onclick={() => store.leaveVoice()}><Icon name="leave" /></button>
-    </div>
-  {/if}
-  <footer class="me">
-    <span class="av" class:talk={store.speaking.has(me.id)}>{me.nickname.slice(0, 1).toUpperCase()}</span>
-    <span class="nick">{me.nickname}</span>
-    <button class="gear" class:off={store.myVoice.muted} title={store.myVoice.muted ? 'Unmute' : 'Mute'} onclick={() => store.toggleMute()}>
-      <Icon name={store.myVoice.muted ? 'micOff' : 'mic'} size={16} />
-    </button>
-    <button class="gear" class:off={store.myVoice.deafened} title={store.myVoice.deafened ? 'Undeafen' : 'Deafen'} onclick={() => store.toggleDeafen()}>
-      <Icon name={store.myVoice.deafened ? 'headphonesOff' : 'headphones'} size={16} />
-    </button>
-    <button class="gear" title="Settings" onclick={onSettings}><Icon name="settings" size={16} /></button>
-  </footer>
+  <UserPanel {me} {onSettings} />
 </aside>
 
 <style>
@@ -99,16 +79,4 @@
   .ch.on { background: var(--elev); color: #fff; }
   .ico { width: 16px; display: inline-flex; opacity: 0.8; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .me { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--panel-2); }
-  .av { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 13px; }
-  .nick { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .gear { color: var(--muted); font-size: 16px; padding: 4px; border-radius: 6px; }
-  .gear:hover { color: var(--text); background: var(--elev); }
-  .gear { display: grid; place-items: center; }
-  .av { box-shadow: 0 0 0 2px transparent; transition: box-shadow 80ms; }
-  .av.talk { box-shadow: 0 0 0 2px var(--speaking); }
-  .vc { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel-2); border-bottom: 1px solid var(--line); }
-  .vct { flex: 1; display: flex; flex-direction: column; font-size: 12px; min-width: 0; }
-  .vct .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ok { color: var(--speaking); font-weight: 600; }
 </style>

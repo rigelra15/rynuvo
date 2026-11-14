@@ -21,6 +21,8 @@ class Store {
   /** Boot took too long (server down): stop waiting and show the app with its reconnect bar. */
   bootTimedOut = $state(false)
   selectedId = $state<Id | null>(null)
+  /** Which page the rail shows: the circle's channels, or Home (friends and activity). */
+  view = $state<'circle' | 'home'>('circle')
   messages = new SvelteMap<Id, Message[]>()
   hasMore = new SvelteMap<Id, boolean>()
   /** channel id -> why its history failed to load */
@@ -128,6 +130,7 @@ class Store {
     this.channels = []
     this.gotReady = false
     this.selectedId = null
+    this.view = 'circle'
     this.messages.clear()
     this.hasMore.clear()
     this.loadError.clear()
