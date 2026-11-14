@@ -4650,7 +4650,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "rynuvo-desktop"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "apple-cf",
@@ -4697,7 +4697,7 @@ dependencies = [
 
 [[package]]
 name = "rynuvo-proto"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -4708,7 +4708,7 @@ dependencies = [
 
 [[package]]
 name = "rynuvo-server"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "axum",
