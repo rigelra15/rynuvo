@@ -2,7 +2,7 @@
   import Icon from './Icon.svelte'
   import Avatar from './Avatar.svelte'
   import { untrack } from 'svelte'
-  import { avatarColor } from '../lib/avatar'
+  import { avatarColor, nameColor } from '../lib/avatar'
   import { render } from '../lib/markdown'
   import { store } from '../lib/state.svelte'
   import { api, errText, mediaUrl } from '../lib/api'
@@ -30,7 +30,7 @@
   // Just sent or received (not history): slides in.
   const fresh = untrack(() => Date.now() - m.createdAt < 4000) // decided once, at mount
   const author = $derived(store.user(m.authorId))
-  const nameColor = $derived(avatarColor(author ?? { id: m.authorId }))
+  const whoColor = $derived(nameColor(avatarColor(author ?? { id: m.authorId })))
 
   // The day is in the date chip above; the bubble shows the time only.
   const time = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
@@ -72,7 +72,7 @@
     <div class="side">{#if head}<Avatar user={author} id={m.authorId} size={32} />{/if}</div>
   {/if}
   <div class="bubble" class:editing class:has-img={!!m.image}>
-    {#if head && !mine}<div class="who" style="color:{nameColor}">{store.nick(m.authorId)}</div>{/if}
+    {#if head && !mine}<div class="who" style="color:{whoColor}">{store.nick(m.authorId)}</div>{/if}
     {#if editing}
       <!-- svelte-ignore a11y_autofocus -->
       <textarea bind:value={draft} onkeydown={editKey} rows="2" autofocus></textarea>
@@ -126,7 +126,7 @@
   .content { display: flex; flex-wrap: wrap; align-items: flex-end; column-gap: 10px; }
   .text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; word-break: break-word; line-height: 1.4; }
   .stamp { margin-left: auto; font-size: 10.5px; line-height: 1; padding-bottom: 1px; white-space: nowrap; color: var(--muted); }
-  .mine .stamp { color: rgba(255, 255, 255, 0.7); }
+  .mine .stamp { color: rgba(255, 255, 255, 0.86); }
 
   .text :global(p) { margin: 0; }
   .text :global(code) { font-family: var(--mono); background: rgba(0, 0, 0, 0.25); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
@@ -140,8 +140,9 @@
 
   textarea { width: 100%; resize: none; }
   .hint { font-size: 11px; color: var(--faint); }
-  .mine .hint { color: rgba(255, 255, 255, 0.7); }
+  .mine .hint { color: rgba(255, 255, 255, 0.86); }
   .err { color: #fca5a5; font-size: 12px; }
+  .mine .err { color: #fff; font-weight: 600; }
 
   .actions { display: flex; align-self: center; visibility: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
   .row:hover .actions { visibility: visible; }

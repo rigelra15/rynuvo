@@ -2,15 +2,15 @@
 export const PALETTE = {
   violet: '#8b5cf6',
   blue: '#3b82f6',
-  sky: '#0ea5e9',
-  teal: '#14b8a6',
-  green: '#22c55e',
-  lime: '#65a30d',
-  amber: '#d97706',
-  orange: '#f97316',
+  sky: '#0c8ec8',
+  teal: '#109788',
+  green: '#1b9a49',
+  lime: '#5d960c',
+  amber: '#ca6f06',
+  orange: '#d96413',
   red: '#ef4444',
-  pink: '#ec4899',
-  fuchsia: '#d946ef',
+  pink: '#e74796',
+  fuchsia: '#d244e8',
   slate: '#64748b',
 } as const
 export type ColorKey = keyof typeof PALETTE
@@ -31,4 +31,10 @@ export function avatarColor(u: { id: number; avatarColor?: string | null }): str
   const k = u.avatarColor
   if (k && k in PALETTE) return PALETTE[k as ColorKey]
   return PALETTE[KEYS[((u.id % KEYS.length) + KEYS.length) % KEYS.length]]
+}
+
+/** The colour for a name written on a dark bubble: the avatar colour lifted toward white so it stays readable (≥ 4.5:1). */
+export function nameColor(hex: string): string {
+  const mix = (i: number) => Math.round(parseInt(hex.slice(i, i + 2), 16) * 0.7 + 255 * 0.3)
+  return '#' + [1, 3, 5].map((i) => mix(i).toString(16).padStart(2, '0')).join('')
 }
