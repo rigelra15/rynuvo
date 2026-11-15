@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Slider from './Slider.svelte'
   import Icon from './Icon.svelte'
   import LyricsView from './LyricsView.svelte'
   import { store } from '../lib/state.svelte'
@@ -56,7 +57,7 @@
     <button class:on={store.queueOpen} title="Queue" onclick={() => (store.queueOpen = !store.queueOpen)}><Icon name="queue" /></button>
     <label class="vol" title="Music volume (only for you)">
       <Icon name="volume" size={16} />
-      <input type="range" min="0" max="1" step="0.05" value={store.musicVolume} style="--v:{store.musicVolume * 100}%" oninput={(e) => store.setMusicVolume(Number(e.currentTarget.value))} />
+      <Slider value={store.musicVolume} step={0.05} tone="light" label="Music volume" oninput={(v) => store.setMusicVolume(v)} />
     </label>
   </div>
   {#if s.queue.length}
@@ -128,21 +129,7 @@
   .ctl button.on { background: rgba(255, 255, 255, 0.34); }
   .ctl button:disabled { opacity: 0.4; cursor: not-allowed; }
   .vol { flex: 1; display: flex; align-items: center; gap: 6px; margin-left: 4px; color: rgba(255, 255, 255, 0.8); min-width: 0; }
-  .vol input {
-    flex: 1; min-width: 40px; max-width: 120px; height: 16px; margin: 0; background: transparent; cursor: pointer;
-    -webkit-appearance: none; appearance: none;
-  }
-  .vol input::-webkit-slider-runnable-track {
-    height: 4px; border-radius: 2px;
-    background: linear-gradient(90deg, #fff var(--v), rgba(255, 255, 255, 0.22) var(--v));
-  }
-  .vol input::-webkit-slider-thumb {
-    -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 50%; background: #fff;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); transform: scale(0.85); transition: transform 120ms;
-  }
-  .vol:hover input::-webkit-slider-thumb { transform: scale(1); }
-  .vol input:focus-visible { outline: none; }
-  .vol input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.35); }
+  .vol :global(.slider) { flex: 1; min-width: 40px; max-width: 120px; }
   .next { font-size: 12px; color: rgba(255, 255, 255, 0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .below { flex: 1; min-height: 0; margin-top: 4px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 6px; }
   .plain { height: 100%; overflow: hidden; mask-image: linear-gradient(transparent, #000 15%, #000 85%, transparent); }
