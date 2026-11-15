@@ -13,7 +13,7 @@ use crate::core::{
     identity::SecretStore,
     session::{Session, SessionEvent, SessionHandle},
 };
-use crate::{stream::ctl::StreamCtl, voice::ctl::VoiceCtl};
+use crate::{music::ctl::MusicCtl, stream::ctl::StreamCtl, voice::ctl::VoiceCtl};
 
 pub const EVENT: &str = "rynuvo://event";
 pub const VOICE_EVENT: &str = "rynuvo://voice";
@@ -29,6 +29,7 @@ pub struct Core {
     pub state_path: PathBuf,
     pub voice: VoiceCtl,
     pub stream: StreamCtl,
+    pub music: MusicCtl,
     inner: Mutex<Inner>,
 }
 
@@ -60,8 +61,8 @@ pub fn device_name() -> String {
 }
 
 impl Core {
-    pub fn new(store: Arc<dyn SecretStore>, state_path: PathBuf, voice: VoiceCtl, stream: StreamCtl) -> Self {
-        Self { store, state_path, voice, stream, inner: Mutex::default() }
+    pub fn new(store: Arc<dyn SecretStore>, state_path: PathBuf, voice: VoiceCtl, stream: StreamCtl, music: MusicCtl) -> Self {
+        Self { store, state_path, voice, stream, music, inner: Mutex::default() }
     }
 
     fn load(&self) -> Persisted {
@@ -91,9 +92,13 @@ impl Core {
         let app2 = app.clone();
         let voice = self.voice.clone();
         let stream = self.stream.clone();
+        let music = self.music.clone();
         let emit = Arc::new(move |e: SessionEvent| {
             voice.on_session(&e);
             stream.on_session(&e);
+            if let SessionEvent::Server(m) = &e {
+                music.on_server(m, crate::music::now_ms());
+            }
             crate::notify::on_event(&app2, &e);
             let _ = app2.emit(EVENT, e);
         });
