@@ -11,7 +11,7 @@ use rynuvo_desktop_lib::voice::{
 async fn main() {
     let secs: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(10);
     println!("{:#?}", devices::list());
-    let opts = EngineOpts { me: 1, input: None, output: None, threshold: 0.5, volumes: HashMap::new() };
+    let opts = EngineOpts { me: 1, input: None, output: None, threshold: 0.5, volumes: HashMap::new(), music_volume: 0.5 };
     let engine = VoiceEngine::start(
         Box::new(CpalBackend::default()),
         opts,
