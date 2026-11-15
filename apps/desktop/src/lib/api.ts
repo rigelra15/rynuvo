@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { Channel, ChannelKind, Id, ImageRef, Message, User, WsServerMsg } from './types'
 import type { MyVoice, Prefs, VoiceEvent } from './voice'
 import type { SelfCheck, Source, StreamEvent } from './stream'
-import type { Lyrics, MusicCmd, MusicStatus } from './music'
+import type { Lyrics, MusicCmd, MusicStatus, SongResult } from './music'
 
 export type ConnState = { state: 'connecting' } | { state: 'online' } | { state: 'reconnecting'; inMs: number }
 
@@ -74,6 +74,7 @@ export const api = {
   streamRequestKey: (userId: Id) => invoke<void>('stream_request_key', { userId }),
   streamSetVolume: (userId: Id, volume: number) => invoke<void>('stream_set_volume', { userId, volume }),
   musicPlay: (query: string, textChannelId: Id | null) => invoke<void>('music_play', { query, textChannelId }),
+  musicSearch: (query: string) => invoke<SongResult[]>('music_search', { query }),
   musicCmd: (cmd: MusicCmd, textChannelId: Id | null) => invoke<void>('music_cmd', { cmd, textChannelId }),
   musicLyrics: (videoId: string, title: string, artist: string, durationMs: number) =>
     invoke<Lyrics | null>('music_lyrics', { videoId, title, artist, durationMs }),

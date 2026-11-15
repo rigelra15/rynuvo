@@ -63,6 +63,18 @@ pub async fn music_play(core: State<'_, Core>, http: State<'_, MusicHttp>, query
     Ok(())
 }
 
+/// Songs matching `query` on YouTube Music, best first (for the song picker).
+#[tauri::command]
+pub async fn music_search(http: State<'_, MusicHttp>, query: String) -> Result<Vec<rynuvo_proto::MusicEntryReq>, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(vec![]);
+    }
+    let mut found = ytm::search(&http.0, query).await?;
+    found.truncate(6);
+    Ok(found)
+}
+
 /// Any other music command (skip, pause, seek, queue, …).
 #[tauri::command]
 pub fn music_cmd(core: State<'_, Core>, cmd: MusicCmd, text_channel_id: Option<Id>) {

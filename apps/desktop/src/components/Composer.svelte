@@ -8,6 +8,7 @@
   import { mentionQuery, suggest } from '../lib/mention'
   import { parseCommand } from '../lib/music'
   import { fly } from 'svelte/transition'
+  import SongPicker from './SongPicker.svelte'
 
   let { channel }: { channel: Channel } = $props()
   const MAX = 4000
@@ -18,6 +19,7 @@
   let file = $state<File | null>(null)
   let preview = $state<string | null>(null)
   let dragging = $state(false)
+  let songs = $state(false)
   let area: HTMLTextAreaElement | undefined = $state()
 
   // @mention autocomplete
@@ -177,20 +179,25 @@
       rows="1"
       placeholder="Message #{channel.name}"
     ></textarea>
+    <button class="song" class:on={songs} title="Play a song" aria-label="Play a song" onclick={() => (songs = !songs)}><Icon name="music" size={18} /></button>
     {#if left < 200}<span class="count" class:over={left < 0}>{left}</span>{/if}
+    {#if songs}<SongPicker textChannelId={channel.id} onClose={() => { songs = false; area?.focus() }} />{/if}
   </div>
 </div>
 
 <style>
   .composer { padding: 0 18px 18px; }
   .box { position: relative; background: var(--elev-2); border-radius: 10px; }
-  textarea { width: 100%; resize: none; background: transparent; border: 0; padding: 12px 14px; max-height: 200px; field-sizing: content; }
+  textarea { width: 100%; resize: none; background: transparent; border: 0; padding: 12px 48px 12px 14px; max-height: 200px; field-sizing: content; }
   .box.drag { outline: 2px dashed var(--accent); }
   .att { position: relative; display: inline-block; margin: 10px 12px 0; }
   .att img { max-height: 120px; max-width: 240px; border-radius: 6px; display: block; }
   .x { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; border-radius: 50%; background: var(--danger); color: #fff; font-size: 11px; display: grid; place-items: center; }
   .busy { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.55); color: #fff; font-size: 12px; border-radius: 6px; }
-  .count { position: absolute; right: 10px; bottom: 8px; font-size: 11px; color: var(--muted); }
+  .song { position: absolute; right: 8px; bottom: 6px; width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); transition: color 120ms, background 120ms; }
+  .song:hover, .song.on { color: var(--text); background: var(--elev); }
+  .song.on { color: var(--accent); }
+  .count { position: absolute; right: 48px; bottom: 8px; font-size: 11px; color: var(--muted); }
   .count.over { color: var(--danger); }
   .mentions { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
   .mh { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); padding: 4px 8px 6px; }

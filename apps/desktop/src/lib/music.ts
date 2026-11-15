@@ -21,7 +21,18 @@ export interface MusicState {
   serverTime: number
 }
 
+/** A song found on YouTube Music, before it is queued. */
+export interface SongResult {
+  videoId: string
+  title: string
+  artist: string
+  album: string | null
+  artUrl: string
+  durationMs: number
+}
+
 export type MusicCmd =
+  | { op: 'add'; entry: SongResult }
   | { op: 'skip' }
   | { op: 'pause' }
   | { op: 'resume' }

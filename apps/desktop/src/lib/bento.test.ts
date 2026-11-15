@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'vitest'
-import { bento } from './bento'
+import { describe, expect, it, test } from 'vitest'
+import { bento, fill } from './bento'
 
 describe('bento', () => {
   test('one person fills the stage at 16:9', () => {
@@ -24,5 +24,17 @@ describe('bento', () => {
   test('empty or unmeasured stage gives no size', () => {
     expect(bento(0, 900, 500, 8)).toEqual({ cols: 1, rows: 0, w: 0, h: 0 })
     expect(bento(3, 0, 0, 8).w).toBe(0)
+  })
+})
+
+describe('fill', () => {
+  it('stretches the chosen columns and rows over the whole area', () => {
+    const b = bento(1, 1000, 700, 10)
+    expect(fill(b, 1000, 700, 10)).toEqual({ ...b, w: 1000, h: 700 })
+    const four = bento(4, 1000, 700, 10)
+    const f = fill(four, 1000, 700, 10)
+    expect(f.cols * f.w + (f.cols - 1) * 10).toBeLessThanOrEqual(1000)
+    expect(f.rows * f.h + (f.rows - 1) * 10).toBeLessThanOrEqual(700)
+    expect(f.w).toBeGreaterThan(four.w - 1)
   })
 })

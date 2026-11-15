@@ -4,7 +4,7 @@
   import { membersOf } from '../lib/voice'
   import { avatarColor } from '../lib/avatar'
   import { pop } from '../lib/motion'
-  import { bento } from '../lib/bento'
+  import { bento, fill } from '../lib/bento'
   import { groupTitle } from '../lib/home'
   import type { Channel, Id } from '../lib/types'
   import Icon from './Icon.svelte'
@@ -33,7 +33,8 @@
   const GAP = 10
   let gw = $state(0)
   let gh = $state(0)
-  const layout = $derived(bento(list.length, gw, gh, GAP))
+  // Beside the music panel the tiles stretch to fill the whole left side.
+  const layout = $derived(playerUp ? fill(bento(list.length, gw, gh, GAP), gw, gh, GAP) : bento(list.length, gw, gh, GAP))
   const avatarSize = $derived(strip ? 36 : Math.round(Math.min(112, Math.max(40, layout.h * 0.34))))
 
   const who = $derived(groupTitle(list.map((m) => store.nick(m.userId))))
@@ -157,8 +158,9 @@
       radial-gradient(closest-side at 30% 35%, color-mix(in srgb, var(--accent) 38%, transparent), transparent),
       radial-gradient(closest-side at 70% 65%, color-mix(in srgb, var(--g2) 32%, transparent), transparent),
       radial-gradient(closest-side at 65% 25%, color-mix(in srgb, var(--g3) 26%, transparent), transparent);
-    animation: drift 20s ease-in-out infinite alternate;
+    animation: drift 20s ease-in-out infinite alternate, breathe 7s ease-in-out infinite;
   }
+  @keyframes breathe { 0%, 100% { filter: brightness(0.85); } 50% { filter: brightness(1.25); } }
   .anyone-speaking .glow { opacity: 0.9; }
   @keyframes drift {
     from { transform: translate(-6%, -4%) rotate(0deg); }
@@ -174,6 +176,7 @@
   .joinbtn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 
   .area { flex: 1; min-height: 0; min-width: 0; display: grid; place-items: center; }
+  .split .area { align-self: stretch; }
   .split { flex: 1; min-height: 0; display: flex; gap: 16px; }
   .grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
   .tile {

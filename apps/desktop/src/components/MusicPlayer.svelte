@@ -13,8 +13,7 @@
 
   // Every frame while playing, so the bar and the lyrics glide instead of stepping.
   const frame = frameClock(() => !paused)
-  let dragMs = $state<number | null>(null)
-  const pos = $derived(dragMs ?? positionMs(s, music.receivedAt, frame.now))
+  const pos = $derived(positionMs(s, music.receivedAt, frame.now))
   const pct = $derived(now.durationMs ? (pos / now.durationMs) * 100 : 0)
 
   const inVoice = $derived(membersOf(store.voice, s.channelId).map((m) => m.userId))
@@ -24,29 +23,6 @@
   const status = $derived(store.musicStatus.get(now.videoId))
   const lyrics = $derived(lyricsOf(now))
 
-  function seekAt(e: PointerEvent, bar: HTMLElement) {
-    const r = bar.getBoundingClientRect()
-    return Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * now.durationMs)
-  }
-  function down(e: PointerEvent) {
-    if (!canControl) return
-    const bar = e.currentTarget as HTMLElement
-    bar.setPointerCapture(e.pointerId)
-    dragMs = seekAt(e, bar)
-  }
-  function move(e: PointerEvent) {
-    if (dragMs !== null) dragMs = seekAt(e, e.currentTarget as HTMLElement)
-  }
-  function up() {
-    if (dragMs === null) return
-    store.musicCmd({ op: 'seek', ms: dragMs })
-    dragMs = null
-  }
-  function key(e: KeyboardEvent) {
-    if (!canControl) return
-    const d = e.key === 'ArrowRight' ? 5000 : e.key === 'ArrowLeft' ? -5000 : 0
-    if (d) store.musicCmd({ op: 'seek', ms: Math.max(0, Math.min(now.durationMs - 1000, pos + d)) })
-  }
 </script>
 
 <aside class="player" class:paused>
@@ -67,24 +43,8 @@
     <div class="note">Loading the song…</div>
   {/if}
   <div class="seek">
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <div
-      class="bar"
-      class:locked={!canControl}
-      role="slider"
-      tabindex={canControl ? 0 : -1}
-      aria-label="Song position"
-      aria-valuemin={0}
-      aria-valuemax={now.durationMs}
-      aria-valuenow={pos}
-      title={canControl ? undefined : onlyWho}
-      onpointerdown={down}
-      onpointermove={move}
-      onpointerup={up}
-      onkeydown={key}
-    >
+    <div class="bar" role="progressbar" aria-label="Song position" aria-valuemin={0} aria-valuemax={now.durationMs} aria-valuenow={Math.round(pos)}>
       <div class="fill" style="transform:scaleX({pct / 100})"></div>
-      <div class="knob" style="left:{pct}%"></div>
     </div>
     <div class="times"><span>{clock(pos)}</span><span>{clock(now.durationMs)}</span></div>
   </div>
@@ -96,12 +56,12 @@
     <button class:on={store.queueOpen} title="Queue" onclick={() => (store.queueOpen = !store.queueOpen)}><Icon name="queue" /></button>
     <label class="vol" title="Music volume (only for you)">
       <Icon name="volume" size={16} />
-      <input type="range" min="0" max="1" step="0.05" value={store.musicVolume} oninput={(e) => store.setMusicVolume(Number(e.currentTarget.value))} />
+      <input type="range" min="0" max="1" step="0.05" value={store.musicVolume} style="--v:{store.musicVolume * 100}%" oninput={(e) => store.setMusicVolume(Number(e.currentTarget.value))} />
     </label>
   </div>
-  <div class="next">
-    {#if s.queue.length}Up next: {s.queue[0].artist} — {s.queue[0].title}{s.queue.length > 1 ? ` · ${s.queue.length - 1} more` : ''}{:else}Nothing queued · type !p and a song{/if}
-  </div>
+  {#if s.queue.length}
+    <div class="next">Up next: {s.queue[0].artist} — {s.queue[0].title}{s.queue.length > 1 ? ` · ${s.queue.length - 1} more` : ''}</div>
+  {/if}
 
   <div class="below">
     {#if store.queueOpen}
@@ -137,16 +97,18 @@
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
   }
   .head { display: flex; gap: 16px; align-items: center; min-width: 0; }
-  .sleeve { position: relative; flex: none; width: 112px; height: 112px; margin-right: 26px; }
+  .sleeve { position: relative; flex: none; width: 112px; height: 112px; margin-right: 58px; }
   .cover, .label { background-size: cover; background-position: center; background-color: #2a2b35; }
   .cover { position: absolute; inset: 0; border-radius: 10px; z-index: 2; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
   .disc {
-    position: absolute; z-index: 1; width: 104px; height: 104px; left: 34px; top: 4px; border-radius: 50%; display: grid; place-items: center;
+    position: absolute; z-index: 1; width: 108px; height: 108px; left: 62px; top: 2px; border-radius: 50%; display: grid; place-items: center;
     background: repeating-radial-gradient(circle, #111 0 2px, #1c1c22 2px 4px); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
     animation: spin 6s linear infinite;
   }
   .paused .disc { animation-play-state: paused; }
-  .label { width: 38px; height: 38px; border-radius: 50%; }
+  /* The album art on the record's label, with a spindle hole. */
+  .label { position: relative; width: 46px; height: 46px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.6); }
+  .label::after { content: ''; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%; background: #111; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .kicker { text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; color: rgba(255, 255, 255, 0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -156,13 +118,8 @@
   .note { font-size: 12px; color: rgba(255, 255, 255, 0.7); }
   .seek { display: flex; flex-direction: column; gap: 2px; }
   .times { display: flex; justify-content: space-between; font-size: 11px; color: rgba(255, 255, 255, 0.7); font-variant-numeric: tabular-nums; }
-  .bar { height: 16px; position: relative; cursor: pointer; touch-action: none; }
-  .bar.locked { cursor: not-allowed; }
-  .bar::before { content: ''; position: absolute; left: 0; right: 0; top: 6px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.22); }
-  .fill { position: absolute; left: 0; right: 0; top: 6px; height: 4px; border-radius: 2px; background: #fff; transform-origin: left; }
-  .knob { position: absolute; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transform: translateX(-50%); opacity: 0; transition: opacity 120ms; }
-  .bar:hover .knob, .bar:focus-visible .knob { opacity: 1; }
-  .bar.locked .knob { display: none; }
+  .bar { position: relative; height: 4px; margin: 6px 0 4px; border-radius: 2px; overflow: hidden; background: rgba(255, 255, 255, 0.2); }
+  .fill { position: absolute; inset: 0; background: #fff; transform-origin: left; }
   .ctl { display: flex; gap: 10px; align-items: center; }
   .ctl button { width: 38px; height: 38px; border-radius: 50%; background: rgba(255, 255, 255, 0.14); display: grid; place-items: center; color: #fff; transition: background 120ms, transform 120ms; }
   .ctl button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.24); }
@@ -171,7 +128,21 @@
   .ctl button.on { background: rgba(255, 255, 255, 0.34); }
   .ctl button:disabled { opacity: 0.4; cursor: not-allowed; }
   .vol { flex: 1; display: flex; align-items: center; gap: 6px; margin-left: 4px; color: rgba(255, 255, 255, 0.8); min-width: 0; }
-  .vol input { flex: 1; min-width: 40px; max-width: 120px; accent-color: #fff; }
+  .vol input {
+    flex: 1; min-width: 40px; max-width: 120px; height: 16px; margin: 0; background: transparent; cursor: pointer;
+    -webkit-appearance: none; appearance: none;
+  }
+  .vol input::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 2px;
+    background: linear-gradient(90deg, #fff var(--v), rgba(255, 255, 255, 0.22) var(--v));
+  }
+  .vol input::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 50%; background: #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); transform: scale(0.85); transition: transform 120ms;
+  }
+  .vol:hover input::-webkit-slider-thumb { transform: scale(1); }
+  .vol input:focus-visible { outline: none; }
+  .vol input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.35); }
   .next { font-size: 12px; color: rgba(255, 255, 255, 0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .below { flex: 1; min-height: 0; margin-top: 4px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 6px; }
   .plain { height: 100%; overflow: hidden; mask-image: linear-gradient(transparent, #000 15%, #000 85%, transparent); }
