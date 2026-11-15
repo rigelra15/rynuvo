@@ -1,5 +1,7 @@
 //! Sender bitrate control from viewer loss reports (AIMD).
 pub const MIN_KBPS: u32 = 500;
+/// Sending starts here and climbs on clean reports (slow start).
+pub const START_KBPS: u32 = 2_500;
 
 pub struct Controller {
     max: u32,
@@ -9,7 +11,7 @@ pub struct Controller {
 impl Controller {
     pub fn new(max_kbps: u32) -> Self {
         let max = max_kbps.max(MIN_KBPS);
-        Controller { max, target: max }
+        Controller { max, target: START_KBPS.min(max) }
     }
     pub fn on_report(&mut self, loss: f32) {
         let t = self.target as f32;
@@ -36,9 +38,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn starts_low_and_ramps_up_to_the_preset() {
+        // Full rate at once floods a slow (mobile) uplink before any loss report can arrive, and
+        // starves the streamer's own server connection.
+        let mut c = Controller::new(10_000);
+        assert_eq!(c.target_kbps(), START_KBPS);
+        let mut reports = 0;
+        while c.target_kbps() < 10_000 {
+            c.on_report(0.0);
+            reports += 1;
+        }
+        assert!(reports <= 40, "reaches the preset within ~20 s of clean reports, took {reports}");
+        assert_eq!(Controller::new(1_000).target_kbps(), 1_000, "a preset below the start rate starts at its max");
+    }
+
+    #[test]
     fn rate_backs_off_on_loss() {
         let mut c = Controller::new(8000);
-        assert_eq!(c.target_kbps(), 8000);
+        while c.target_kbps() < 8000 {
+            c.on_report(0.0);
+        }
         c.on_report(0.10);
         assert_eq!(c.target_kbps(), 6800);
         for _ in 0..50 {

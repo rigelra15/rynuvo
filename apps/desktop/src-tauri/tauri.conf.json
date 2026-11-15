@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Rynuvo",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "identifier": "id.hypertopia.rynuvo",
   "build": {
     "frontendDist": "../dist",
@@ -41,7 +41,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "hardenedRuntime": false
+    }
   },
   "plugins": {
     "updater": {
