@@ -31,8 +31,6 @@ const TICK: Duration = Duration::from_millis(10);
 const LEVEL_EVERY: Duration = Duration::from_millis(100);
 const FIRST_RETRY: Duration = Duration::from_secs(1);
 const RETRY_EVERY: Duration = Duration::from_secs(3);
-/// Output queued ahead of the sound card (40 ms).
-const PLAYBACK_AHEAD: usize = 2 * FRAME;
 /// Mic backlog beyond which old audio is dropped to keep latency low (200 ms).
 const CAPTURE_MAX_BACKLOG: usize = 10 * FRAME;
 /// DSP frames processed per tick at most (60 ms of audio per 10 ms tick), so commands are
@@ -82,6 +80,16 @@ enum Cmd {
     Stop,
 }
 
+/// Ask the OS to run this thread promptly. At normal priority a busy or hot Mac can let its 10 ms
+/// tick slip, and the speaker runs dry (music breaking up).
+fn realtime_ish() {
+    #[cfg(target_os = "macos")]
+    // SAFETY: only changes the calling thread's scheduling class.
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0);
+    }
+}
+
 pub struct VoiceEngine {
     tx: mpsc::Sender<Cmd>,
     link: Option<VoiceLink>,
@@ -98,7 +106,10 @@ impl VoiceEngine {
         let link2 = link.clone();
         let h = std::thread::Builder::new()
             .name("rynuvo-voice".into())
-            .spawn(move || Worker::new(backend, opts, link2, down_rx, events).run(rx))
+            .spawn(move || {
+                realtime_ish();
+                Worker::new(backend, opts, link2, down_rx, events).run(rx)
+            })
             .expect("spawn voice thread");
         VoiceEngine { tx, link, thread: Mutex::new(Some(h)) }
     }
@@ -206,6 +217,10 @@ struct Worker {
     devices: (Option<String>, Option<String>),
     capture: Option<HeapCons<f32>>,
     playback: Option<HeapProd<f32>>,
+    /// How much output to keep queued; grows when the card ran dry.
+    ahead: super::ahead::Ahead,
+    /// The first refill after opening the card starts from empty and isn't a dry spell.
+    primed: bool,
     errors: Option<mpsc::Receiver<String>>,
     retry_at: Option<Instant>,
     link: Option<VoiceLink>,
@@ -249,6 +264,8 @@ impl Worker {
             devices: (o.input, o.output),
             capture: None,
             playback: None,
+            ahead: Default::default(),
+            primed: false,
             errors: None,
             retry_at: None,
             link,
@@ -292,6 +309,8 @@ impl Worker {
         self.backend.start(input.as_deref(), output.as_deref(), AudioIo { capture: cap_p, playback: play_c, errors: etx })?;
         self.capture = Some(cap_c);
         self.playback = Some(play_p);
+        self.ahead = Default::default();
+        self.primed = false;
         self.errors = Some(erx);
         Ok(())
     }
@@ -341,7 +360,12 @@ impl Worker {
             Cmd::StreamAudio(u, pcm) => self.mixer.push_stream(u, &pcm),
             Cmd::StreamVolume(u, v) => self.mixer.set_stream_volume(u, v),
             Cmd::RemoveStream(u) => self.mixer.remove_stream(u),
-            Cmd::MusicSet { entry, song, at_ms, paused } => self.mixer.music().set(entry, song, at_ms, paused),
+            Cmd::MusicSet { entry, song, at_ms, paused } => {
+                // The mixer runs ahead of the speaker by what is queued; aim where the song will be
+                // when its next sample is heard, so everyone hears the same moment.
+                let lead = if paused { 0 } else { self.playback.as_ref().map_or(0, |p| p.occupied_len() / 48) as u32 };
+                self.mixer.music().set(entry, song, at_ms + lead, paused)
+            }
             Cmd::MusicClear => self.mixer.music().clear(),
             Cmd::MusicVolume(v) => self.mixer.music().set_volume(v),
             Cmd::Stop => return false,
@@ -420,8 +444,11 @@ impl Worker {
 
     fn pump_playback(&mut self) {
         let Some(play) = self.playback.as_mut() else { return };
+        let queued = play.occupied_len();
+        let target = if self.primed { self.ahead.update(queued) } else { super::ahead::MIN };
+        self.primed = true;
         let mut out = [0f32; FRAME];
-        while play.occupied_len() < PLAYBACK_AHEAD && play.vacant_len() >= FRAME {
+        while play.occupied_len() < target && play.vacant_len() >= FRAME {
             self.mixer.mix(&mut out);
             if self.deafened {
                 out.fill(0.0);

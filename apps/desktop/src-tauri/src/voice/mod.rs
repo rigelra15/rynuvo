@@ -8,6 +8,7 @@ pub mod music;
 
 /// Samples in one 20 ms Opus frame at 48 kHz mono.
 pub const FRAME: usize = 960;
+pub mod ahead;
 pub mod backend;
 pub mod devices;
 pub mod dsp;
