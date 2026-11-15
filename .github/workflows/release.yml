@@ -68,6 +68,25 @@ jobs:
         working-directory: apps/desktop
         run: pnpm install --frozen-lockfile
 
+      # Tauri's own APPLE_CERTIFICATE import only accepts trusted (Apple-issued) identities, so the
+      # self-signed certificate goes into a keychain here and Tauri gets just its name.
+      - name: Import Mac signing certificate
+        if: matrix.os == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          kc="$RUNNER_TEMP/signing.keychain-db"; kp=$(openssl rand -hex 16)
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$kp" "$kc"
+          security set-keychain-settings -t 3600 -u "$kc"
+          security unlock-keychain -p "$kp" "$kc"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kp" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          security find-identity -p codesigning "$kc"
+
       - name: Build
         working-directory: apps/desktop
         env:
@@ -76,9 +95,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
           # macOS: one fixed self-signed certificate, so every version is the same app to macOS and
           # Screen Recording / Microphone permissions survive updates (ad-hoc signing loses them).
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos-latest' && secrets.APPLE_SIGNING_IDENTITY || '' }}
         run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
 
       - name: Mac app is signed with the Rynuvo certificate
