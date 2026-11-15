@@ -56,9 +56,8 @@
         {#if l.bg?.length}
           <span class="bg">{#if now}{@render sung(l.bg, l, endOf(i))}{:else}{l.bg.map((w) => w.text).join(' ')}{/if}</span>
         {/if}
-        {@const a = noteOf.get(l)}
-        {#if a?.roman}<span class="roman">{a.roman}</span>{/if}
-        {#if a?.translation}<span class="trans">{a.translation}</span>{/if}
+        {#if noteOf.get(l)?.roman}<span class="roman">{noteOf.get(l)?.roman}</span>{/if}
+        {#if noteOf.get(l)?.translation}<span class="trans">{noteOf.get(l)?.translation}</span>{/if}
       </p>
       {/if}
     {/each}
