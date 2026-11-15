@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeLines, clock, withInterludes, lyricAt, mayControl, parseCommand, playQuery, positionMs, type MusicState, wordFill } from './music'
+import { activeLines, lyricsStatus, clock, withInterludes, lyricAt, mayControl, parseCommand, playQuery, positionMs, type MusicState, wordFill } from './music'
 
 describe('music commands', () => {
   it('play aliases take the rest as the query', () => {
@@ -125,5 +125,16 @@ describe('interludes', () => {
   })
   it('lines without end times only get the opening dots', () => {
     expect(withInterludes([L(500), L(30000)]).some((l) => l.gap)).toBe(false)
+  })
+})
+
+describe('lyrics status', () => {
+  const w = { ms: 1, text: 'a' }
+  it('names how well a source knows the song', () => {
+    expect(lyricsStatus(undefined)).toEqual({ label: 'Checking…', tone: 'wait' })
+    expect(lyricsStatus(null)).toEqual({ label: 'Not found', tone: 'bad' })
+    expect(lyricsStatus({ lines: [{ ms: 1, text: 'a', words: [w] }], plain: 'a', source: 'X' })).toEqual({ label: 'Word synced', tone: 'good' })
+    expect(lyricsStatus({ lines: [{ ms: 1, text: 'a', words: [] }], plain: 'a', source: 'X' })).toEqual({ label: 'Line synced', tone: 'good' })
+    expect(lyricsStatus({ lines: [], plain: 'a', source: 'X' })).toEqual({ label: 'Plain text', tone: 'meh' })
   })
 })

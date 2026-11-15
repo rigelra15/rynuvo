@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { scale } from 'svelte/transition'
   import { activeLines, withInterludes, wordFill, type LyricLine, type Word } from '../lib/music'
 
   /** `pos`: where the song is now (ms), updated every frame while playing. */
@@ -40,10 +41,13 @@
       {@const now = d === 0}
       <!-- Lines away from the ones being sung blur a little, more the further they are. -->
       {#if l.gap}
-        {@const p = Math.max(0, Math.min(1, (at - l.ms) / ((l.end ?? l.ms + 1) - l.ms)))}
-        <div data-i={i} class="gap" class:now class:ending={now && p > 0.92} aria-hidden="true" style="--d:{Math.min(d, 4)}">
-          {#each [0, 1, 2] as k (k)}<i style="--f:{Math.max(0, Math.min(1, p * 3 - k)).toFixed(2)}"></i>{/each}
-        </div>
+        <!-- Only while no one sings: gone as soon as the next line starts. -->
+        {#if now}
+          {@const p = Math.max(0, Math.min(1, (at - l.ms) / ((l.end ?? l.ms + 1) - l.ms)))}
+          <div data-i={i} class="gap" class:ending={p > 0.9} aria-hidden="true" in:scale={{ duration: 260, start: 0.4, opacity: 0 }}>
+            {#each [0, 1, 2] as k (k)}<i style="--f:{Math.max(0, Math.min(1, p * 3 - k)).toFixed(2)}"></i>{/each}
+          </div>
+        {/if}
       {:else}
       <p data-i={i} class:now class:past={i < lo} class:duet={l.duet} style="--d:{Math.min(d, 4)};filter:{d > 0 && d <= 9 ? `blur(${Math.min(0.4 + d * 0.45, 2.2).toFixed(2)}px)` : 'none'}">
         <span class="main">{#if now && l.words.length}{@render sung(l.words, l, endOf(i))}{:else}{l.text || '♪'}{/if}</span>
@@ -83,9 +87,8 @@
      singing comes back. */
   .gap {
     display: flex; gap: 9px; align-items: center; height: 44px; padding: 0 2px; transform-origin: left center;
-    opacity: calc(0.35 - var(--d) * 0.06); transform: scale(0.9); transition: opacity 400ms, transform 400ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: breathe 2.4s ease-in-out infinite; transition: opacity 300ms, transform 300ms;
   }
-  .gap.now { opacity: 1; transform: scale(1); animation: breathe 2.4s ease-in-out infinite; }
   .gap.ending { transform: scale(0.6); opacity: 0; animation: none; }
   .gap i { width: 11px; height: 11px; border-radius: 50%; background: #fff; opacity: calc(0.3 + var(--f) * 0.7); }
   @keyframes breathe { 50% { transform: scale(1.14); } }
@@ -99,7 +102,7 @@
   .bg .w.sung { transform: translateY(-2px); }
   @media (prefers-reduced-motion: reduce) {
     .list, p, .w, .gap { transition: none; }
-    .gap.now { animation: none; }
+    .gap { animation: none; }
     .w.sung { transform: none; }
   }
 </style>

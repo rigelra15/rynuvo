@@ -119,28 +119,30 @@ fn nonempty(v: &Value, k: &str) -> Option<String> {
     v.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(String::from)
 }
 
-/// The best SimpMusic entry: closest in length (within 10 s), then the richest timing.
+/// The best SimpMusic entry for this video: closest in length, then the richest timing. Entries are
+/// looked up by video id, so one whose stored length is off (it happens) still counts when its
+/// timed lyrics fit inside the song.
 pub fn pick_simpmusic(v: &Value, duration_ms: u32) -> Option<Lyrics> {
-    let list = v.get("data")?.as_array()?;
-    let best = list
+    let mut list: Vec<(i64, &Value)> = v
+        .get("data")?
+        .as_array()?
         .iter()
-        .filter_map(|e| {
+        .map(|e| {
             let secs = e.get("durationSeconds").and_then(Value::as_f64);
-            let skew = secs.map_or(0, |s| ((s * 1000.0) as i64 - duration_ms as i64).abs());
-            (skew <= MAX_SKEW_MS).then_some((skew, e))
+            (secs.map_or(0, |s| ((s * 1000.0) as i64 - duration_ms as i64).abs()), e)
         })
-        .min_by_key(|(skew, _)| *skew)?
-        .1;
-    let plain = nonempty(best, "plainLyric").map(|p| unescape(&p));
-    for key in ["richSyncLyrics", "syncedLyrics"] {
-        if let Some(t) = nonempty(best, key) {
-            let lines = parse_lrc(&t);
-            if !lines.is_empty() {
-                return Some(Lyrics { lines, plain, source: "SimpMusic" });
-            }
+        .collect();
+    list.sort_by_key(|(skew, _)| *skew);
+    list.into_iter().find_map(|(skew, e)| {
+        let plain = nonempty(e, "plainLyric").map(|p| unescape(&p));
+        let lines = ["richSyncLyrics", "syncedLyrics"].iter().find_map(|k| Some(parse_lrc(&nonempty(e, k)?)).filter(|l| !l.is_empty()));
+        let fits = |l: &Vec<Line>| l.last().is_some_and(|x| x.ms as i64 <= duration_ms as i64 + MAX_SKEW_MS);
+        match lines {
+            Some(lines) if skew <= MAX_SKEW_MS || fits(&lines) => Some(Lyrics { lines, plain, source: "SimpMusic" }),
+            None if skew <= MAX_SKEW_MS => plain.map(|p| Lyrics { lines: Vec::new(), plain: Some(p), source: "SimpMusic" }),
+            _ => None,
         }
-    }
-    plain.map(|p| Lyrics { lines: Vec::new(), plain: Some(p), source: "SimpMusic" })
+    })
 }
 
 pub fn pick_lrclib(v: &Value) -> Option<Lyrics> {
@@ -297,6 +299,23 @@ pub fn pick_netease(v: &Value) -> Option<Lyrics> {
     timed(parse_lrc(&nonempty(v.get("lrc")?, "lyric")?), "NetEase")
 }
 
+/// The title as search engines match it best: no apostrophes ("I’ve" finds nothing on LrcRed,
+/// "Ive" does) and no "(feat. …)" / "[Remastered]" extras.
+pub fn search_title(title: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0;
+    for c in title.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = (depth - 1).max(0),
+            '\'' | '’' | '‘' | '`' => {}
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Sources to ask, in order, for a channel's choice.
 pub fn order(source: &str) -> Vec<&'static str> {
     const AUTO: [&str; 5] = ["simpmusic", "betterlyrics", "lrcred", "lrclib", "netease"];
@@ -328,7 +347,7 @@ async fn from_source(http: &reqwest::Client, src: &str, video_id: &str, title: &
             timed(parse_ttml(v.get("ttml")?.as_str()?), "BetterLyrics")
         }
         "lrcred" => {
-            let q = format!("{title} {first_artist}");
+            let q = format!("{} {first_artist}", search_title(title));
             let u = with_query("https://lrc.red/search.json", &[("q", &q)])?;
             let isrc = pick_lrcred(&get_json(ua(http.get(u))).await?, duration_ms)?;
             let t = ua(http.get(format!("https://lrc.red/s/{isrc}.ttml"))).send().await.ok()?.error_for_status().ok()?.text().await.ok()?;
@@ -339,7 +358,7 @@ async fn from_source(http: &reqwest::Client, src: &str, video_id: &str, title: &
             get_json(ua(http.get(u))).await.and_then(|v| pick_lrclib(&v))
         }
         "netease" => {
-            let q = format!("{title} {first_artist}");
+            let q = format!("{} {first_artist}", search_title(title));
             let u = with_query("https://music.163.com/api/search/get", &[("s", &q), ("type", "1"), ("limit", "5")])?;
             let id = pick_netease_song(&get_json(ua(http.get(u))).await?, duration_ms)?;
             let u = with_query("https://music.163.com/api/song/lyric", &[("id", &id.to_string()), ("lv", "1")])?;
@@ -405,6 +424,13 @@ mod tests {
     }
 
     #[test]
+    fn search_titles_drop_apostrophes_and_extras() {
+        assert_eq!(search_title("Prettiest Thing I’ve Ever Seen"), "Prettiest Thing Ive Ever Seen");
+        assert_eq!(search_title("Don't Go (feat. Someone) [Remastered]"), "Dont Go");
+        assert_eq!(search_title("Stuck - Live"), "Stuck - Live");
+    }
+
+    #[test]
     fn auto_tries_word_timed_sources_first() {
         assert_eq!(order("auto"), vec!["simpmusic", "betterlyrics", "lrcred", "lrclib", "netease"]);
         assert_eq!(order("lrclib"), vec!["lrclib"]);
@@ -439,7 +465,10 @@ mod tests {
         assert_eq!(l.source, "SimpMusic");
         assert_eq!(l.lines[0].words.len(), 1, "word-synced preferred");
         assert_eq!(l.plain.as_deref(), Some("Take a deep breath"));
-        assert!(pick_simpmusic(&v, 120_000).is_none(), "nothing within 10 s");
+        assert!(pick_simpmusic(&json!({"data": [{"durationSeconds": 240, "syncedLyrics": "[03:30.00] too long"}]}), 120_000).is_none(), "lyrics that outlast the song");
+        // Same video, wrong length on file (SimpMusic said 105 s for a 249 s song): the lyrics fit, so use them.
+        let off = json!({"data": [{"durationSeconds": 105, "syncedLyrics": "[00:14.84] I couldn't\n[04:05.02] ", "richSyncLyrics": "[00:14.84] <00:15.06>I <00:15.34>couldn't"}]});
+        assert_eq!(pick_simpmusic(&off, 249_000).unwrap().lines[0].words.len(), 2);
         let synced = json!({"data": [{"durationSeconds": 184, "syncedLyrics": "[00:11.04] a", "richSyncLyrics": ""}]});
         assert!(pick_simpmusic(&synced, 184_000).unwrap().lines[0].words.is_empty());
         let plain = json!({"data": [{"plainLyric": "just words"}]});
@@ -471,4 +500,5 @@ mod live {
             }
         }
     }
+
 }

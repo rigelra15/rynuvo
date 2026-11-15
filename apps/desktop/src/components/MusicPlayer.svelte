@@ -6,7 +6,7 @@
   import LyricsView from './LyricsView.svelte'
   import { store } from '../lib/state.svelte'
   import { frameClock, lyricsOf } from '../lib/lyrics.svelte'
-  import { clock, LYRICS_SOURCES, mayControl, positionMs, type MusicState } from '../lib/music'
+  import { clock, LYRICS_SOURCES, lyricsStatus, mayControl, positionMs, type MusicState } from '../lib/music'
   import { membersOf } from '../lib/voice'
 
   let { music }: { music: { state: MusicState; receivedAt: number } } = $props()
@@ -89,8 +89,17 @@
         <div class="menu" role="menu" aria-label="Lyrics source">
           <div class="mhead">Lyrics from{source === 'auto' && lyrics?.source ? ` · now ${lyrics.source}` : ''}</div>
           {#each LYRICS_SOURCES as o (o.id)}
+            <!-- Asking every source while the menu is open shows which ones know this song. -->
+            {@const got = lyricsOf(now, o.id)}
+            {@const st = lyricsStatus(got)}
+            {@const inUse = o.id === source || (source === 'auto' && o.id !== 'auto' && lyrics?.source === o.name)}
             <button role="menuitemradio" aria-checked={o.id === source} class:on={o.id === source} disabled={!canPick && o.id !== source} onclick={() => canPick && pickSource(o.id)}>
-              <span>{o.name}</span>{#if o.id === source}<Icon name="check" size={14} />{/if}
+              <span class="dot {st.tone}" aria-hidden="true"></span>
+              <span class="nm">
+                <b>{o.name}{#if inUse}<em>In use</em>{/if}</b>
+                <small>{o.id === 'auto' && got ? `${got.source} · ` : ''}{st.label}</small>
+              </span>
+              {#if o.id === source}<Icon name="check" size={14} />{/if}
             </button>
           {/each}
           {#if !canPick}<div class="mnote">Only the channel's owner or an admin can change this</div>{/if}
@@ -178,7 +187,7 @@
   .src { position: relative; }
   .scrim { position: fixed; inset: 0; z-index: 4; }
   .menu {
-    position: absolute; top: calc(100% + 6px); right: -60px; z-index: 5; min-width: 200px; padding: 4px; border-radius: 10px;
+    position: absolute; top: calc(100% + 6px); right: -60px; z-index: 5; min-width: 240px; padding: 4px; border-radius: 10px;
     background: rgba(20, 20, 28, 0.92); backdrop-filter: blur(18px); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   }
   .src .menu button { width: 100%; height: auto; background: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 7px; font-size: 13px; color: #fff; text-align: left; }
@@ -188,7 +197,18 @@
   .mnote { padding: 6px 10px; font-size: 11.5px; color: rgba(255, 255, 255, 0.6); border-top: 1px solid rgba(255, 255, 255, 0.08); margin-top: 4px; }
   .add { margin-bottom: 10px; }
   .add :global(ul) { max-height: 220px; }
-  .menu button.on { color: #fff; font-weight: 600; }
+  .menu button.on { background: rgba(255, 255, 255, 0.06); }
+  .src .menu button { justify-content: flex-start; gap: 10px; }
+  .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: rgba(255, 255, 255, 0.35); }
+  .dot.good { background: #3ba55d; box-shadow: 0 0 0 3px rgba(59, 165, 93, 0.25); }
+  .dot.meh { background: #e3a53b; box-shadow: 0 0 0 3px rgba(227, 165, 59, 0.22); }
+  .dot.bad { background: #ed4245; box-shadow: 0 0 0 3px rgba(237, 66, 69, 0.22); }
+  .dot.wait { animation: wait 1s ease-in-out infinite; }
+  @keyframes wait { 50% { opacity: 0.3; } }
+  .nm { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .nm b { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .nm em { font-style: normal; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 999px; color: #b8f5cb; background: rgba(59, 165, 93, 0.25); }
+  .nm small { font-size: 11px; color: rgba(255, 255, 255, 0.6); }
   .below { flex: 1; min-height: 0; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 6px; }
   .plain { height: 100%; overflow: hidden; mask-image: linear-gradient(transparent, #000 15%, #000 85%, transparent); }
   .plain pre { margin: 0; font: inherit; font-size: 15px; font-weight: 600; white-space: pre-wrap; color: rgba(255, 255, 255, 0.75); animation: crawl 240s linear infinite; }
@@ -213,6 +233,6 @@
   .queue button:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
   .empty { color: rgba(255, 255, 255, 0.6); font-size: 13px; }
   @media (prefers-reduced-motion: reduce) {
-    .disc, .plain pre { animation: none; }
+    .disc, .plain pre, .dot.wait { animation: none; }
   }
 </style>
