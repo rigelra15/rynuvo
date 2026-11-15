@@ -26,7 +26,7 @@
 
 <style>
   .overlay { position: fixed; inset: 0; background: rgba(8, 8, 12, 0.6); display: grid; place-items: center; z-index: 100; }
-  .box { width: min(400px, 90vw); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  .box { width: min(400px, 90vw); background: var(--bg); border: 1px solid var(--line); border-radius: 20px; padding: 22px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5); }
   p { margin: 0 0 18px; line-height: 1.45; }
   .actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

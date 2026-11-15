@@ -170,7 +170,7 @@
   .txt small { color: var(--sub); font-size: 12px; }
   .len { font-size: 12px; color: var(--sub); font-variant-numeric: tabular-nums; }
   .go { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--chip); color: var(--fg); opacity: 0; transition: opacity 120ms, background 120ms; }
-  li button.on .go, .go.done { opacity: 1; background: var(--accent); color: #fff; }
+  li button.on .go, .go.done { opacity: 1; background: var(--accent); color: var(--on-accent); }
   .hint { margin: 8px; font-size: 13px; color: var(--sub); }
   .hint.err { color: var(--danger); }
   .foot { margin: 6px 8px 2px; font-size: 11.5px; color: var(--faint); }

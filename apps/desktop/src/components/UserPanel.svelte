@@ -34,17 +34,17 @@
 </footer>
 
 <style>
-  .me { display: flex; align-items: center; gap: 8px; padding: 10px 10px; background: var(--panel-2); }
+  .me { display: flex; align-items: center; gap: 8px; margin: 0 10px 10px; padding: 8px 8px 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
   .av { position: relative; display: inline-flex; }
-  .dot { position: absolute; right: -2px; bottom: -2px; z-index: 2; width: 12px; height: 12px; border-radius: 50%; background: var(--speaking); border: 3px solid var(--panel-2); box-sizing: border-box; }
+  .dot { position: absolute; right: -2px; bottom: -2px; z-index: 2; width: 12px; height: 12px; border-radius: 50%; background: var(--speaking); border: 3px solid var(--panel); box-sizing: border-box; }
   .who { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
-  .nick { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nick { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .status { font-size: 11.5px; color: var(--muted); }
-  .gear { color: var(--muted); padding: 4px; border-radius: 6px; display: grid; place-items: center; }
+  .gear { color: var(--muted); padding: 6px; border-radius: 9px; display: grid; place-items: center; }
   .gear:hover { color: var(--text); background: var(--elev); }
   .gear.off { color: var(--danger); }
-  .vc { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+  .vc { display: flex; align-items: center; gap: 8px; margin: 0 10px 6px; padding: 8px 8px 8px 12px; border-radius: 14px; background: var(--accent-soft); border: 1px solid rgba(244, 184, 96, 0.25); }
   .vct { flex: 1; display: flex; flex-direction: column; font-size: 12px; min-width: 0; }
   .vct .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ok { color: var(--speaking); font-weight: 600; }
+  .ok { color: var(--accent); font-weight: 700; }
 </style>

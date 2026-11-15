@@ -104,7 +104,7 @@
 {#if viewing && m.image}<ImageViewer image={m.image} onclose={() => (viewing = false)} />{/if}
 
 <style>
-  .row { display: flex; align-items: flex-end; gap: 8px; padding: 1px 18px; }
+  .row { display: flex; align-items: flex-end; gap: 8px; padding: 1px 22px; }
   .row.head { margin-top: 10px; align-items: flex-start; }
   .row.mine { flex-direction: row-reverse; }
   .side { width: 32px; flex-shrink: 0; }
@@ -115,44 +115,44 @@
   @media (prefers-reduced-motion: reduce) { .fresh { animation: none; } }
 
   .bubble {
-    position: relative; min-width: 0; max-width: 70%; padding: 6px 10px 5px;
-    background: var(--elev); color: var(--text); border-radius: 14px;
-    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+    position: relative; min-width: 0; max-width: 68%; padding: 7px 12px 6px;
+    background: var(--elev); color: var(--text); border-radius: 18px;
   }
-  .head:not(.mine) .bubble { border-top-left-radius: 4px; }
-  .mine .bubble { background: var(--bubble-mine); color: #fff; }
-  .mine.head .bubble { border-top-right-radius: 4px; }
+  .head:not(.mine) .bubble { border-top-left-radius: 6px; }
+  .mine .bubble { background: var(--bubble-mine); color: var(--on-accent); }
+  .mine.head .bubble { border-top-right-radius: 6px; }
   .bubble.has-img { padding-top: 4px; }
   .bubble.editing { width: min(70%, 420px); max-width: none; }
 
-  .bubble.mentioned { background: #3a3424; box-shadow: inset 3px 0 0 #f0b232, 0 1px 1px rgba(0, 0, 0, 0.18); }
-  .text :global(.mention) { padding: 0 3px; border-radius: 4px; font-weight: 600; background: rgba(139, 124, 246, 0.24); color: #d9d3ff; }
-  .text :global(.mention.me) { background: rgba(240, 178, 50, 0.22); color: #ffd98a; }
-  .mine .text :global(.mention), .mine .text :global(.mention.me) { background: rgba(255, 255, 255, 0.2); color: #fff; }
-  .who { font-size: 13px; font-weight: 600; margin-bottom: 1px; }
+  /* Someone called you: the bubble catches the lamp's light. */
+  .bubble.mentioned { background: #3a2c22; box-shadow: 0 0 0 1.5px var(--accent); }
+  .text :global(.mention) { padding: 0 4px; border-radius: 6px; font-weight: 650; background: rgba(196, 181, 255, 0.16); color: var(--lilac); }
+  .text :global(.mention.me) { background: rgba(244, 184, 96, 0.2); color: #ffd79a; }
+  .mine .text :global(.mention), .mine .text :global(.mention.me) { background: rgba(42, 26, 5, 0.14); color: var(--on-accent); }
+  .who { font-size: 13px; font-weight: 700; margin-bottom: 1px; }
 
   .content { display: flex; flex-wrap: wrap; align-items: flex-end; column-gap: 10px; }
   .text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; word-break: break-word; line-height: 1.4; }
   .stamp { margin-left: auto; font-size: 10.5px; line-height: 1; padding-bottom: 1px; white-space: nowrap; color: var(--muted); }
-  .mine .stamp { color: rgba(255, 255, 255, 0.86); }
+  .mine .stamp { color: rgba(42, 26, 5, 0.66); }
 
   .text :global(p) { margin: 0; }
   .text :global(code) { font-family: var(--mono); background: rgba(0, 0, 0, 0.25); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
   .text :global(pre) { background: rgba(0, 0, 0, 0.28); padding: 8px 10px; border-radius: 8px; overflow-x: auto; margin: 4px 0; max-width: 100%; }
   .text :global(pre code) { background: none; padding: 0; }
-  .text :global(a) { color: #b4a9ff; }
-  .mine .text :global(a) { color: #fff; text-decoration: underline; }
+  .text :global(a) { color: var(--lilac); }
+  .mine .text :global(a) { color: var(--on-accent); text-decoration: underline; }
 
   .img { display: block; max-width: 100%; margin: 0 -6px 4px; padding: 0; border-radius: 10px; overflow: hidden; background: var(--panel-2); cursor: zoom-in; }
   .img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
   textarea { width: 100%; resize: none; }
   .hint { font-size: 11px; color: var(--faint); }
-  .mine .hint { color: rgba(255, 255, 255, 0.86); }
+  .mine .hint { color: rgba(42, 26, 5, 0.7); }
   .err { color: #fca5a5; font-size: 12px; }
-  .mine .err { color: #fff; font-weight: 600; }
+  .mine .err { color: #6b1010; font-weight: 600; }
 
-  .actions { display: flex; align-self: center; visibility: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+  .actions { display: flex; align-self: center; visibility: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .row:hover .actions { visibility: visible; }
   .actions button { padding: 4px 6px; color: var(--muted); display: grid; place-items: center; }
   .actions button:hover { color: var(--text); background: var(--elev); }

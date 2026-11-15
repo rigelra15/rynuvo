@@ -24,25 +24,25 @@
 </script>
 
 <header class="top">
-  <span class="ico"><Icon name="users" size={20} /></span>
-  <span class="name">Friends</span>
-  <span class="sep"></span>
-  <button class="tab" class:on={tab === 'online'} onclick={() => (tab = 'online')}>Online</button>
-  <button class="tab" class:on={tab === 'all'} onclick={() => (tab = 'all')}>All</button>
+  <h1 class="title-xl">Friends</h1>
+  <div class="tabs" role="tablist" aria-label="Which friends">
+    <button role="tab" aria-selected={tab === 'online'} class="tab" class:on={tab === 'online'} onclick={() => (tab = 'online')}>Online</button>
+    <button role="tab" aria-selected={tab === 'all'} class="tab" class:on={tab === 'all'} onclick={() => (tab = 'all')}>Everyone</button>
+  </div>
 </header>
 
 <div class="body">
   <section class="friends">
-    <h4>{tab === 'online' ? 'Online' : 'All friends'} — {list.length}</h4>
+    <h4>{tab === 'online' ? 'Online now' : 'Everyone'} <b>{list.length}</b></h4>
     {#each list as u (u.id)}
       {@render friend(u)}
     {:else}
-      <p class="empty muted">{tab === 'online' ? 'No friends online right now. Check back later!' : 'Nobody else is in the circle yet. Invite your friends from Settings.'}</p>
+      <p class="empty muted">{tab === 'online' ? 'No friends online right now. Check back later!' : 'Nobody else is here yet. Invite your friends from Settings.'}</p>
     {/each}
   </section>
 
   <aside class="active">
-    <h3>Active Now</h3>
+    <h3>Happening now</h3>
     {#each cards as c (c.channelId)}
       <div class="card">
         <div class="stack">
@@ -50,14 +50,14 @@
         </div>
         <div class="ct">
           <span class="title">{c.title}</span>
-          <span class="sub">{#if c.live.length}<span class="live">LIVE</span>{/if}<Icon name="volume" size={12} /> {c.channel}</span>
+          <span class="sub">{#if c.live.length}<span class="live">Live</span>{/if}<Icon name="volume" size={12} /> {c.channel}</span>
         </div>
         {#if store.myVoice.channelId !== c.channelId}<button class="btn primary join" onclick={() => join(c.channelId)}>Join</button>{:else}<span class="here">You're here</span>{/if}
       </div>
     {:else}
       <div class="quiet">
-        <strong>It's quiet for now…</strong>
-        <span>When a friend joins a voice channel or goes live, it shows up here.</span>
+        <strong>Nobody's in a room</strong>
+        <span>When a friend joins a room or goes live, you'll see it here.</span>
       </div>
     {/each}
   </aside>
@@ -80,45 +80,44 @@
 {/snippet}
 
 <style>
-  .top { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--line); min-height: 49px; }
-  .ico { color: var(--faint); display: inline-flex; }
-  .name { font-weight: 600; }
-  .sep { width: 4px; height: 4px; border-radius: 50%; background: var(--faint); margin: 0 4px; }
-  .tab { padding: 3px 10px; border-radius: 6px; color: var(--muted); font-weight: 500; }
-  .tab:hover { background: var(--elev-2); color: var(--text); }
-  .tab.on { background: var(--elev); color: #fff; }
+  .top { display: flex; align-items: center; gap: 16px; padding: 18px 22px 12px; min-height: 64px; }
+  h1 { margin: 0; }
+  .tabs { display: flex; padding: 3px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
+  .tab { padding: 4px 14px; border-radius: 9px; color: var(--muted); font-weight: 600; font-size: 13.5px; }
+  .tab:hover { color: var(--text); }
+  .tab.on { background: var(--elev); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
   .body { flex: 1; display: flex; min-height: 0; }
-  .friends { flex: 1; min-width: 0; overflow-y: auto; padding: 14px 20px; }
-  h4 { margin: 4px 0 8px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-  .row { display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-top: 1px solid var(--line); border-radius: 8px; }
-  .row:hover { background: var(--elev-2); border-top-color: transparent; }
-  .row:hover + .row { border-top-color: transparent; }
+  .friends { flex: 1; min-width: 0; overflow-y: auto; padding: 8px 22px 16px; }
+  h4 { display: flex; gap: 8px; align-items: baseline; margin: 4px 0 10px; font-size: 13px; font-weight: 650; color: var(--muted); }
+  h4 b { color: var(--faint); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .row { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 14px; transition: background 140ms; }
+  .row:hover { background: var(--elev-2); }
   .row.off { opacity: 0.5; }
   .av { position: relative; display: inline-flex; }
   .dot { position: absolute; right: -2px; bottom: -2px; z-index: 2; width: 13px; height: 13px; border-radius: 50%; background: var(--faint); border: 3px solid var(--bg); box-sizing: border-box; }
   .row:hover .dot { border-color: var(--elev-2); }
   .dot.on { background: var(--speaking); }
   .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .nick { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nick { font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .status { font-size: 12.5px; color: var(--muted); }
-  .act { width: 36px; height: 36px; border-radius: 50%; background: var(--panel); color: var(--muted); display: grid; place-items: center; }
-  .act:hover { color: var(--text); background: var(--elev); }
+  .act { width: 38px; height: 38px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; }
+  .act:hover { background: var(--accent); color: var(--on-accent); }
   .empty { text-align: center; margin-top: 18vh; }
 
-  .active { width: 300px; flex-shrink: 0; overflow-y: auto; border-left: 1px solid var(--line); padding: 16px; }
-  h3 { margin: 0 0 12px; font-size: 18px; font-weight: 700; }
-  .card { display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; animation: card-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .active { width: 300px; flex-shrink: 0; overflow-y: auto; padding: 8px 18px 18px 6px; }
+  h3 { margin: 0 0 12px; font-size: 15px; font-weight: 700; color: var(--muted); }
+  .card { display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; margin-bottom: 8px; animation: card-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
   @keyframes card-in { from { opacity: 0; transform: translateY(6px); } }
   .stack { display: flex; }
   .sa + .sa { margin-left: -10px; }
   .sa { display: inline-flex; border-radius: 50%; box-shadow: 0 0 0 2px var(--panel); }
   .ct { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .title { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .title { font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sub { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
-  .live { background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; padding: 0 5px; border-radius: 3px; margin-right: 2px; }
+  .live { background: var(--danger); color: #fff; font-size: 10.5px; font-weight: 700; padding: 0 6px; border-radius: 5px; margin-right: 2px; }
   .join { padding: 5px 12px; font-size: 13px; }
-  .here { font-size: 12px; color: var(--speaking); white-space: nowrap; }
-  .quiet { text-align: center; padding: 22px 12px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; }
+  .here { font-size: 12px; color: var(--accent); white-space: nowrap; font-weight: 600; }
+  .quiet { padding: 18px 16px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; border: 1px dashed var(--line); border-radius: 16px; }
   .quiet strong { color: var(--text); font-size: 15px; }
-  @media (prefers-reduced-motion: reduce) { .card { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .card { animation: none; } .row { transition: none; } }
 </style>

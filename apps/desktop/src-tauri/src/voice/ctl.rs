@@ -148,8 +148,20 @@ impl VoiceCtl {
         if was.is_some() {
             self.send(WsClientMsg::VoiceLeave);
         }
-        self.stop_engine();
+        self.stop_engine_after(Some(Tone::Leave));
         self.notify();
+    }
+
+    /// Send my mute/deafen state on, with the sound for what changed (`before`: as it was).
+    fn push_state_from(&self, before: (bool, bool)) {
+        let after = {
+            let s = self.st.lock().unwrap();
+            (s.muted, s.deafened)
+        };
+        self.push_state();
+        if let (Some(t), Some(e)) = (toggle_tone(before, after), self.st.lock().unwrap().engine.clone()) {
+            e.play_tone(t);
+        }
     }
 
     fn push_state(&self) {
@@ -168,22 +180,25 @@ impl VoiceCtl {
 
     /// Unmuting while deafened also undeafens.
     pub fn set_muted(&self, muted: bool) -> MyVoice {
-        {
+        let before = {
             let mut s = self.st.lock().unwrap();
+            let before = (s.muted, s.deafened);
             s.muted = muted;
             if !muted {
                 s.deafened = false;
             }
-        }
-        self.push_state();
+            before
+        };
+        self.push_state_from(before);
         self.notify();
         self.state()
     }
 
     /// Deafening mutes too; undeafening restores the mute state from before.
     pub fn set_deafened(&self, deafened: bool) -> MyVoice {
-        {
+        let before = {
             let mut s = self.st.lock().unwrap();
+            let before = (s.muted, s.deafened);
             if deafened && !s.deafened {
                 s.muted_before_deafen = s.muted;
                 s.muted = true;
@@ -191,8 +206,9 @@ impl VoiceCtl {
                 s.muted = s.muted_before_deafen;
             }
             s.deafened = deafened;
-        }
-        self.push_state();
+            before
+        };
+        self.push_state_from(before);
         self.notify();
         self.state()
     }
@@ -345,6 +361,11 @@ impl VoiceCtl {
     }
 
     fn stop_engine(&self) {
+        self.stop_engine_after(None);
+    }
+
+    /// Stop the engine; with a `farewell` sound, play it first and stop once it has rung out.
+    fn stop_engine_after(&self, farewell: Option<Tone>) {
         let (engine, session) = {
             let mut s = self.st.lock().unwrap();
             s.engine_channel = None;
@@ -355,7 +376,16 @@ impl VoiceCtl {
         }
         if let Some(e) = engine {
             tracing::info!("voice: stopping engine");
-            e.stop_detached();
+            match farewell {
+                Some(t) => {
+                    e.play_tone(t);
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(650));
+                        e.stop_detached();
+                    });
+                }
+                None => e.stop_detached(),
+            }
         }
     }
 
@@ -475,6 +505,15 @@ impl VoiceCtl {
                     }
                 }
             }
+            WsServerMsg::StreamStarted(info) => {
+                let (engine, engine_ch) = {
+                    let s = self.st.lock().unwrap();
+                    (s.engine.clone(), s.engine_channel)
+                };
+                if let Some(e) = engine.filter(|_| engine_ch == Some(info.channel_id)) {
+                    e.play_tone(Tone::Live);
+                }
+            }
             WsServerMsg::VoiceMemberUpdated(m) => {
                 let (fresh, me, engine, engine_ch) = {
                     let mut s = self.st.lock().unwrap();
@@ -491,5 +530,34 @@ impl VoiceCtl {
             }
             _ => {}
         }
+    }
+}
+
+/// The sound for going from `(muted, deafened)` to the next: deafening wins (it mutes too).
+fn toggle_tone(before: (bool, bool), after: (bool, bool)) -> Option<Tone> {
+    if before.1 != after.1 {
+        Some(if after.1 { Tone::Deafen } else { Tone::Undeafen })
+    } else if before.0 != after.0 {
+        Some(if after.0 { Tone::Mute } else { Tone::Unmute })
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_sound_for_a_mute_or_deafen_change() {
+        // (muted, deafened) before → after
+        assert_eq!(toggle_tone((false, false), (true, false)), Some(Tone::Mute));
+        assert_eq!(toggle_tone((true, false), (false, false)), Some(Tone::Unmute));
+        // Deafening also mutes: one sound, the deafen one.
+        assert_eq!(toggle_tone((false, false), (true, true)), Some(Tone::Deafen));
+        assert_eq!(toggle_tone((true, true), (false, false)), Some(Tone::Undeafen));
+        // Unmuting while deafened undeafens too.
+        assert_eq!(toggle_tone((true, true), (false, false)), Some(Tone::Undeafen));
+        assert_eq!(toggle_tone((true, false), (true, false)), None, "nothing changed, no sound");
     }
 }

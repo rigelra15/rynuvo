@@ -45,8 +45,8 @@
 
 <style>
   .overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: grid; place-items: center; z-index: 50; }
-  .dlg { width: 380px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
-  h2 { margin: 0; font-size: 17px; }
+  .dlg { width: 380px; background: var(--bg); border: 1px solid var(--line); border-radius: 20px; padding: 22px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5); display: flex; flex-direction: column; gap: 12px; }
+  h2 { margin: 0; font-size: 22px; font-weight: 750; font-stretch: 80%; font-variation-settings: 'opsz' 36; }
   .row { display: flex; justify-content: flex-end; gap: 8px; }
   .err { color: var(--danger); margin: 0; font-size: 13px; }
 </style>

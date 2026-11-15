@@ -67,7 +67,7 @@
   {:else if list === undefined}
     <div class="empty muted">Loading…</div>
   {:else if list.length === 0}
-    <div class="empty muted">No messages yet. Say hi to your friends!</div>
+    <div class="empty muted">Nothing here yet. Say something to get it going.</div>
   {:else}
     {#if store.hasMore.get(channel) === false}<div class="start muted">This is the start of the channel</div>{/if}
     {#each days as d (new Date(d.at).toDateString())}
@@ -86,5 +86,5 @@
   .empty { height: 100%; display: grid; place-items: center; }
   .start { padding: 16px 18px 0; font-size: 12px; text-align: center; }
   .day { display: flex; justify-content: center; margin: 14px 0 4px; position: sticky; top: 6px; z-index: 3; pointer-events: none; }
-  .day span { font-size: 11.5px; font-weight: 600; color: var(--muted); background: var(--elev-2); border: 1px solid var(--line); padding: 3px 10px; border-radius: 999px; }
+  .day span { font-size: 12px; font-weight: 650; color: var(--muted); background: rgba(26, 21, 33, 0.85); backdrop-filter: blur(8px); border: 1px solid var(--line); padding: 3px 12px; border-radius: 999px; }
 </style>

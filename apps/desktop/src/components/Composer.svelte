@@ -208,23 +208,24 @@
 </div>
 
 <style>
-  .composer { padding: 0 18px 18px; }
-  .box { position: relative; background: var(--elev-2); border-radius: 10px; }
-  textarea { width: 100%; resize: none; background: transparent; border: 0; padding: 12px 48px 12px 14px; max-height: 200px; field-sizing: content; }
+  .composer { padding: 0 18px 16px; }
+  .box { position: relative; background: var(--elev-2); border: 1px solid var(--line); border-radius: 18px; transition: border-color 140ms, box-shadow 140ms; }
+  .box:focus-within { border-color: rgba(244, 184, 96, 0.55); box-shadow: 0 0 0 4px var(--accent-soft); }
+  textarea { width: 100%; resize: none; background: transparent; border: 0; border-radius: 18px; padding: 13px 52px 13px 16px; max-height: 200px; field-sizing: content; }
   .box.drag { outline: 2px dashed var(--accent); }
   .att { position: relative; display: inline-block; margin: 10px 12px 0; }
   .att img { max-height: 120px; max-width: 240px; border-radius: 6px; display: block; }
   .x { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; border-radius: 50%; background: var(--danger); color: #fff; font-size: 11px; display: grid; place-items: center; }
   .busy { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.55); color: #fff; font-size: 12px; border-radius: 6px; }
-  .song { position: absolute; right: 8px; bottom: 6px; width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); transition: color 120ms, background 120ms; }
+  .song { position: absolute; right: 8px; bottom: 7px; width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; color: var(--muted); transition: color 120ms, background 120ms; }
   .song:hover, .song.on { color: var(--text); background: var(--elev); }
   .song.on { color: var(--accent); }
   .count { position: absolute; right: 48px; bottom: 8px; font-size: 11px; color: var(--muted); }
   .count.over { color: var(--danger); }
-  .typedplay { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 5; max-width: 520px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
-  .mentions { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
-  .mh { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); padding: 4px 8px 6px; }
-  .mentions button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border-radius: 6px; text-align: left; color: var(--text); }
+  .typedplay { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 5; max-width: 520px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+  .mentions { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+  .mh { font-size: 12.5px; font-weight: 650; color: var(--muted); padding: 4px 8px 6px; }
+  .mentions button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border-radius: 10px; text-align: left; color: var(--text); }
   .mentions button.on { background: var(--elev); }
   .all { width: 22px; height: 22px; border-radius: 50%; background: var(--elev); display: grid; place-items: center; font-weight: 700; color: var(--muted); }
   .hint { margin-left: auto; font-size: 12px; color: var(--muted); }

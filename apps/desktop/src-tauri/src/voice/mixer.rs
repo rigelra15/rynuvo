@@ -28,6 +28,8 @@ pub struct Mixer {
     streams: HashMap<Id, std::collections::VecDeque<f32>>,
     stream_volumes: HashMap<Id, f32>,
     music: MusicPlayer,
+    /// Deafened: nobody else is heard, but the app's own sounds (chimes, mic test) still are.
+    deaf: bool,
 }
 
 impl Default for Mixer {
@@ -45,6 +47,7 @@ impl Mixer {
             streams: HashMap::new(),
             stream_volumes: HashMap::new(),
             music: MusicPlayer::new(),
+            deaf: false,
         }
     }
 
@@ -98,6 +101,10 @@ impl Mixer {
     }
 
     /// Queue a locally generated sound (join/leave tones, mic test).
+    pub fn set_deafened(&mut self, v: bool) {
+        self.deaf = v;
+    }
+
     pub fn play_local(&mut self, samples: Vec<f32>) {
         self.local.extend(samples);
     }
@@ -130,6 +137,9 @@ impl Mixer {
         }
         let talking = self.peers.values().any(|p| p.quiet < SPEAKING_HOLD);
         self.music.mix(out, talking);
+        if self.deaf {
+            out.fill(0.0);
+        }
         for o in out.iter_mut() {
             match self.local.pop_front() {
                 Some(s) => *o += s,
@@ -156,6 +166,30 @@ mod tests {
 
     fn loud() -> [f32; FRAME] {
         std::array::from_fn(|i| 0.3 * (2.0 * std::f32::consts::PI * 300.0 * i as f32 / 48_000.0).sin())
+    }
+
+    #[test]
+    fn deafened_hears_its_own_sounds_but_nobody_else() {
+        let mut m = Mixer::new();
+        let mut enc = Encoder::new().unwrap();
+        m.set_deafened(true);
+        feed(&mut m, &mut enc, 7, 10);
+        let mut out = [0f32; FRAME];
+        for _ in 0..5 {
+            m.mix(&mut out);
+            assert_eq!(energy(&out), 0.0, "other people are silent while deafened");
+        }
+        m.play_local(vec![0.2; FRAME]);
+        m.mix(&mut out);
+        assert!(energy(&out) > 1.0, "the app's own sounds still play");
+        m.set_deafened(false);
+        feed(&mut m, &mut enc, 7, 10);
+        let mut heard = 0.0;
+        for _ in 0..8 {
+            m.mix(&mut out);
+            heard += energy(&out);
+        }
+        assert!(heard > 0.0, "undeafened: people are heard again");
     }
 
     fn feed(m: &mut Mixer, enc: &mut Encoder, from: Id, frames: u32) {

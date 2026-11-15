@@ -32,19 +32,20 @@
 {/snippet}
 
 <aside class="members" aria-label="Members">
-  <h4>Online — {groups.online.length}</h4>
+  <h4>Online <b>{groups.online.length}</b></h4>
   {#each groups.online as u (u.id)}{@render row(u, true)}{/each}
   {#if groups.offline.length}
-    <h4>Offline — {groups.offline.length}</h4>
+    <h4>Offline <b>{groups.offline.length}</b></h4>
     {#each groups.offline as u (u.id)}{@render row(u, false)}{/each}
   {/if}
 </aside>
 
 <style>
-  .members { width: 220px; flex-shrink: 0; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line); padding: 12px 8px; }
-  h4 { margin: 12px 8px 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .members { width: 240px; flex-shrink: 0; overflow-y: auto; background: var(--panel); padding: 12px 8px; }
+  h4 { display: flex; justify-content: space-between; margin: 12px 8px 6px; font-size: 13px; font-weight: 650; color: var(--muted); }
+  h4 b { font-weight: 600; color: var(--faint); font-variant-numeric: tabular-nums; }
   h4:first-child { margin-top: 4px; }
-  .member { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 6px; cursor: default; }
+  .member { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; cursor: default; }
   .member:hover { background: var(--elev-2); }
   .member.off { opacity: 0.45; }
   .member.off:hover { opacity: 0.8; }
@@ -54,6 +55,6 @@
   .member:hover .dot { border-color: var(--elev-2); }
   .text { display: flex; flex-direction: column; min-width: 0; }
   .nick { font-size: 14px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .you { color: var(--muted); font-weight: 400; }
+  .you { color: var(--muted); font-weight: 400; margin-left: 4px; }
   .sub { display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 </style>

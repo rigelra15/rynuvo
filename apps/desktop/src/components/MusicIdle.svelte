@@ -12,7 +12,6 @@
       <div class="cover"><span>♪</span></div>
     </div>
     <div class="info">
-      <div class="kicker">Music</div>
       <div class="title">Nothing playing</div>
       <div class="sub">Put a song on. Everyone in {channelName} hears it together.</div>
     </div>
@@ -25,7 +24,7 @@
 
 <style>
   .idle {
-    flex: none; width: clamp(320px, 34%, 460px); min-height: 0; display: flex; flex-direction: column; gap: 16px; color: #fff;
+    flex: 1; width: 100%; min-height: 0; display: flex; flex-direction: column; gap: 16px; color: #fff;
     padding: 18px; border-radius: 16px; background: rgba(10, 10, 16, 0.32); backdrop-filter: blur(18px);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
   }
@@ -45,7 +44,6 @@
   .label { position: relative; width: 40px; height: 40px; border-radius: 50%; background: var(--accent); opacity: 0.85; }
   .label::after { content: ''; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%; background: #111; }
   .info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-  .kicker { text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; color: rgba(255, 255, 255, 0.7); }
   .title { font-weight: 800; font-size: 22px; line-height: 1.15; }
   .sub { color: rgba(255, 255, 255, 0.75); font-size: 13px; line-height: 1.4; }
   .find { flex: 1; min-height: 0; display: flex; flex-direction: column; }

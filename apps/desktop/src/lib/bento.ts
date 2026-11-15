@@ -1,24 +1,17 @@
-/** Voice "bento" grid: the column count whose 16:9 tiles come out biggest in a `W×H` stage. */
-export interface Bento { cols: number; rows: number; w: number; h: number }
+/** Voice room seats: round avatars with a name under each, as big as the room allows (up to `max`,
+ *  never under `min`). Ties go to fewer rows, then fewer columns, so a few people sit in one line. */
+export interface Seats { cols: number; size: number }
+const LABEL = 28
 
-export function bento(n: number, W: number, H: number, gap: number, ratio = 16 / 9): Bento {
-  if (n <= 0) return { cols: 1, rows: 0, w: 0, h: 0 }
-  let best: Bento = { cols: 1, rows: n, w: 0, h: 0 }
+export function seats(n: number, W: number, H: number, gap: number, max = 168, min = 48): Seats {
+  if (n <= 0) return { cols: 1, size: 0 }
+  let best = { cols: 1, rows: n, size: -1 }
   for (let cols = 1; cols <= n; cols++) {
     const rows = Math.ceil(n / cols)
-    const maxW = (W - gap * (cols - 1)) / cols
-    const maxH = (H - gap * (rows - 1)) / rows
-    if (maxW <= 0 || maxH <= 0) continue
-    const w = Math.min(maxW, maxH * ratio)
-    if (w > best.w) best = { cols, rows, w, h: w / ratio }
+    const byW = (W - gap * (cols - 1)) / cols
+    const byH = (H - gap * (rows - 1)) / rows - LABEL
+    const size = Math.floor(Math.max(min, Math.min(max, byW, byH)))
+    if (size > best.size || (size === best.size && rows < best.rows)) best = { cols, rows, size }
   }
-  return { ...best, w: Math.floor(best.w), h: Math.floor(best.h) }
-}
-
-/** The same columns and rows, stretched to fill the whole `W×H` area (tiles lose the 16:9 shape). */
-export function fill(b: Bento, W: number, H: number, gap: number): Bento {
-  if (b.rows === 0) return b
-  const w = Math.floor((W - gap * (b.cols - 1)) / b.cols)
-  const h = Math.floor((H - gap * (b.rows - 1)) / b.rows)
-  return { ...b, w: Math.max(0, w), h: Math.max(0, h) }
+  return { cols: best.cols, size: best.size }
 }

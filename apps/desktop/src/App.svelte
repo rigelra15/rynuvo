@@ -1,6 +1,4 @@
 <script lang="ts">
-  import ServerRail from './components/ServerRail.svelte'
-  import HomeSidebar from './components/HomeSidebar.svelte'
   import HomeView from './components/HomeView.svelte'
   import Splash from './components/Splash.svelte'
   import { onMount } from 'svelte'
@@ -68,7 +66,7 @@
 
   async function del(c: Channel) {
     menu = null
-    if (!(await dialog.ask(`Delete channel "${c.name}" and all of its messages?`, 'Delete'))) return
+    if (!(await dialog.ask(`Delete "${c.name}"${c.kind === 'text' ? ' and all of its messages' : ''}?`, 'Delete'))) return
     try {
       await api.deleteChannel(c.id)
     } catch (e) {
@@ -87,16 +85,13 @@
   <div class="app">
     <ConnBanner />
     <div class="shell">
-      <ServerRail />
-      {#if store.view === 'home'}
-        <HomeSidebar me={store.me} onSettings={() => (settingsOpen = true)} />
-      {:else}
       <Sidebar
         channels={store.sortedChannels()}
         selectedId={store.selectedId}
         me={store.me}
         canManage={store.canManage}
         onSelect={(c) => {
+          store.view = 'circle'
           store.select(c.id)
           if (c.kind === 'voice') store.joinVoice(c.id)
         }}
@@ -105,7 +100,6 @@
         onChannelMenu={(c, e) => (menu = { c, x: e.clientX, y: e.clientY })}
         onSettings={() => (settingsOpen = true)}
       />
-      {/if}
       <main class="main">
         {#if store.view === 'home'}
           <HomeView onMemberMenu={(userId, e) => (memberMenu = { userId, x: e.clientX, y: e.clientY })} />
@@ -114,7 +108,7 @@
             <ChannelView channel={store.selected} onMemberMenu={(userId, e) => (memberMenu = { userId, x: e.clientX, y: e.clientY })} />
           {/key}
         {:else}
-          <div class="none muted">No channels yet. Click + next to "Text" to create one.</div>
+          <div class="none muted">No chats yet. Click + next to "Chats" to start one.</div>
         {/if}
       </main>
     </div>
@@ -125,7 +119,7 @@
 
 {#if creating}
   <CreateChannelDialog
-    title={creating === 'text' ? 'Create text channel' : 'Create voice channel'}
+    title={creating === 'text' ? 'New chat' : 'New room'}
     confirm="Create"
     onSubmit={create}
     onClose={() => (creating = null)}
@@ -134,7 +128,7 @@
 {#if renaming}
   {@const c = renaming}
   <CreateChannelDialog
-    title="Rename channel"
+    title="Rename"
     initial={c.name}
     onSubmit={async (name) => void (await api.updateChannel(c.id, { name }))}
     onClose={() => (renaming = null)}
@@ -156,7 +150,13 @@
 
 <style>
   .app { height: 100%; display: flex; flex-direction: column; }
-  .shell { flex: 1; display: grid; grid-template-columns: 64px 240px 1fr; min-height: 0; }
-  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+  .app { background: var(--desk); }
+  .shell { flex: 1; display: grid; grid-template-columns: 272px 1fr; min-height: 0; }
+  /* The page you're on: a sheet on the desk, warmed from the top-left by the lamp. */
+  .main {
+    position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; margin: 8px 8px 8px 0; border-radius: 16px; overflow: hidden;
+    background: radial-gradient(120% 70% at 0% 0%, rgba(244, 184, 96, 0.07), transparent 55%), var(--bg);
+    box-shadow: 0 0 0 1px var(--line), 0 18px 50px rgba(0, 0, 0, 0.35);
+  }
   .none { flex: 1; display: grid; place-items: center; }
 </style>

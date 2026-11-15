@@ -26,7 +26,7 @@
 
 <div class="wrap">
   <form class="card" onsubmit={submit}>
-    <div class="logo"><Icon name="logo" size={40} /></div>
+    <div class="logo"><Icon name="logo" size={30} /></div>
     <h1>Sign in to Rynuvo</h1>
     {#if store.notice}<p class="notice">{store.notice}</p>{/if}
 
@@ -47,13 +47,14 @@
 </div>
 
 <style>
-  .wrap { height: 100%; display: grid; place-items: center; background: radial-gradient(circle at 30% 20%, #2b2350, var(--bg) 60%); }
-  .card { width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 28px; display: flex; flex-direction: column; gap: 14px; }
-  .logo { color: var(--accent); display: flex; justify-content: center; }
-  h1 { margin: 0 0 4px; font-size: 20px; }
-  label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-  label input { text-transform: none; letter-spacing: normal; font-weight: 400; font-size: 14px; }
+  .wrap { height: 100%; display: grid; place-items: center; background: radial-gradient(70% 60% at 20% 10%, rgba(244, 184, 96, 0.12), transparent 60%), var(--desk); }
+  .card { width: 380px; background: var(--bg); border: 1px solid var(--line); border-radius: 22px; padding: 30px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5); }
+  .logo { color: var(--accent); display: flex; }
+  h1 { margin: 2px 0 6px; font-size: 30px; font-weight: 750; font-stretch: 78%; letter-spacing: -0.01em; line-height: 1.05; font-variation-settings: 'opsz' 48; }
+  label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 650; color: var(--muted); }
+  label input { font-weight: 400; font-size: 14.5px; padding: 11px 13px; }
   .err { color: var(--danger); margin: 0; font-size: 13px; }
-  .notice { margin: 0; padding: 8px 10px; border-radius: 8px; background: rgba(239, 68, 68, 0.12); color: #fca5a5; font-size: 13px; }
+  .notice { margin: 0; padding: 8px 10px; border-radius: 10px; background: rgba(242, 84, 91, 0.12); color: #fca5a5; font-size: 13px; }
+  .btn.primary { padding: 11px 14px; margin-top: 4px; }
   .link { color: var(--accent); font-size: 13px; }
 </style>

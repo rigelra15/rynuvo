@@ -73,7 +73,9 @@ impl Playing {
 
 pub struct MusicPlayer {
     cur: Option<Playing>,
+    /// Where the volume is going, and where it is now (it glides there over one frame).
     volume: f32,
+    gain: f32,
     duck: f32,
 }
 
@@ -85,7 +87,7 @@ impl Default for MusicPlayer {
 
 impl MusicPlayer {
     pub fn new() -> Self {
-        MusicPlayer { cur: None, volume: 0.5, duck: 1.0 }
+        MusicPlayer { cur: None, volume: 0.5, gain: 0.5, duck: 1.0 }
     }
 
     /// Play `entry` (its decoded `song`) from `at_ms`, or keep playing it if it already is and is
@@ -128,18 +130,23 @@ impl MusicPlayer {
     pub fn mix(&mut self, out: &mut [f32; FRAME], ducked: bool) {
         let Some(c) = self.cur.as_mut() else { return };
         if c.paused {
+            self.gain = self.volume;
             return;
         }
         while c.buf.len() < FRAME && c.decode_next() {}
         let target = if ducked { DUCKED } else { 1.0 };
         // Glide towards the target over ~100 ms so the change isn't heard as a click.
         let step = (target - self.duck).clamp(-0.2, 0.2) / FRAME as f32;
+        // A new volume slides in across this frame instead of jumping (no zipper noise while dragging).
+        let gstep = (self.volume - self.gain) / FRAME as f32;
         for o in out.iter_mut() {
             let Some(s) = c.buf.pop_front() else { break };
             self.duck += step;
-            *o += s * self.volume * self.duck;
+            self.gain += gstep;
+            *o += s * self.gain * self.duck;
             c.pos += 1;
         }
+        self.gain = self.volume;
         if (self.duck - target).abs() < 1e-3 {
             self.duck = target;
         }
@@ -219,7 +226,20 @@ mod tests {
         let ratio = ducked / full;
         assert!((ratio - DUCKED * DUCKED).abs() < 0.08, "ducked to {ratio}");
         p.set_volume(0.0);
+        energy(&mut p, 1, false); // the change glides in over one frame
         assert_eq!(energy(&mut p, 3, false), 0.0);
+    }
+
+    #[test]
+    fn a_volume_change_glides_instead_of_jumping() {
+        let mut p = MusicPlayer::new();
+        p.set(1, song(), 200, false);
+        energy(&mut p, 2, false);
+        p.set_volume(0.0);
+        // Not a cliff: the frame after the change still carries some sound, fading out…
+        assert!(energy(&mut p, 1, false) > 0.0, "fades out rather than cutting off");
+        // …and then it has arrived.
+        assert_eq!(energy(&mut p, 2, false), 0.0);
     }
 
     #[test]
