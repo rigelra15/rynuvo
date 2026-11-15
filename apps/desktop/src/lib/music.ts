@@ -76,6 +76,15 @@ export interface LyricLine {
 }
 export interface Lyrics { lines: LyricLine[]; plain: string | null; source: string }
 
+/** How well a source knows the song, for the lyrics source menu. */
+export function lyricsStatus(l: Lyrics | null | undefined): { label: string; tone: 'good' | 'meh' | 'bad' | 'wait' } {
+  if (l === undefined) return { label: 'Checking…', tone: 'wait' }
+  if (l === null) return { label: 'Not found', tone: 'bad' }
+  if (l.lines.some((x) => x.words.length)) return { label: 'Word synced', tone: 'good' }
+  if (l.lines.length) return { label: 'Line synced', tone: 'good' }
+  return { label: 'Plain text', tone: 'meh' }
+}
+
 /** This app's progress fetching a song. */
 export interface MusicStatus { videoId: string; status: 'loading' | 'ready' | 'error'; message: string | null }
 
