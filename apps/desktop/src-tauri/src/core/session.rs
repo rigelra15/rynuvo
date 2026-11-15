@@ -247,8 +247,10 @@ async fn run(
     }
 }
 
-/// A send that cannot complete within this time means the route is dead (the socket's buffer is full).
-const SEND_TIMEOUT: Duration = Duration::from_secs(2);
+/// A send that cannot complete within this time means the route is dead (the socket's buffer stays
+/// full). Generous on purpose: an uplink busy with Go Live video can hold a send for seconds, and
+/// reconnecting then would end the stream. A half-open socket is caught by the read deadline.
+const SEND_TIMEOUT: Duration = Duration::from_secs(8);
 
 async fn send_in_time<S>(ws: &mut S, m: WsMsg) -> bool
 where
@@ -390,6 +392,42 @@ async fn catch_up(api: &Api, emit: &Emit, shared: &Arc<Mutex<Shared>>) {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
+    /// A socket whose send buffer frees up only after `stall` (an uplink saturated by Go Live video).
+    struct SlowSocket(Pin<Box<tokio::time::Sleep>>);
+
+    impl futures_util::Sink<super::WsMsg> for SlowSocket {
+        type Error = ();
+        fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            self.0.as_mut().poll(cx).map(Ok)
+        }
+        fn start_send(self: Pin<&mut Self>, _: super::WsMsg) -> Result<(), ()> {
+            Ok(())
+        }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            Poll::Ready(Ok(()))
+        }
+        fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    async fn sent_after(stall: std::time::Duration) -> bool {
+        let mut s = SlowSocket(Box::pin(tokio::time::sleep(stall)));
+        super::send_in_time(&mut s, super::WsMsg::text("x")).await
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_uplink_is_not_a_dead_connection() {
+        assert!(sent_after(std::time::Duration::from_secs(4)).await, "a send that takes a few seconds still counts");
+        assert!(!sent_after(std::time::Duration::from_secs(60)).await, "a socket stuck for a minute is dead");
+    }
+
     #[test]
     fn video_is_dropped_when_the_socket_falls_behind_but_voice_is_not() {
         use rynuvo_proto::voice_wire::{UP_AUDIO, UP_VIDEO};

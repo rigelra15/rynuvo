@@ -184,7 +184,8 @@ async fn session_routes_binary_frames() {
 }
 
 /// The server stops reading (dead route after a network switch): once the socket's send buffer fills,
-/// a blocked send must not freeze the session until TCP gives up — it reconnects within seconds.
+/// a blocked send must not freeze the session until TCP gives up — it reconnects within ~10 s (a slow
+/// uplink busy with Go Live video must not count as dead, so the limit is not tighter).
 #[tokio::test]
 async fn blocked_send_triggers_reconnect() {
     use rynuvo_desktop_lib::core::session::Timing;
@@ -198,7 +199,7 @@ async fn blocked_send_triggers_reconnect() {
         h.send_binary(vec![0u8; 64 * 1024]);
     }
     let t = std::time::Instant::now();
-    while t.elapsed() < Duration::from_secs(8) {
+    while t.elapsed() < Duration::from_secs(12) {
         if ev.lock().unwrap().iter().any(|x| matches!(x, SessionEvent::Conn(ConnState::Reconnecting { .. }))) {
             h.stop();
             return;
