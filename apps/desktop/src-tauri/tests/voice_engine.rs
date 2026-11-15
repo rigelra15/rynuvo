@@ -53,7 +53,7 @@ async fn rig(threshold: f32, with_link: bool) -> Rig {
     } else {
         (None, None)
     };
-    let opts = EngineOpts { me: 1, input: Some("Mic A".into()), output: None, threshold, volumes: HashMap::new() };
+    let opts = EngineOpts { me: 1, input: Some("Mic A".into()), output: None, threshold, volumes: HashMap::new(), music_volume: 0.5 };
     let engine = VoiceEngine::start(
         Box::new(FakeBackend(shared.clone())),
         opts,

@@ -9,6 +9,7 @@ fn prefs_default_on_missing() {
     assert_eq!(p, Prefs::default());
     assert_eq!(p.vad_threshold, 0.5);
     assert_eq!(p.shortcut_mute, "CmdOrCtrl+Shift+M");
+    assert_eq!(p.music_volume, 0.5, "music starts at half volume");
     assert_eq!(p.shortcut_deafen, "CmdOrCtrl+Shift+D");
     assert!(!p.autostart);
 }
@@ -34,6 +35,7 @@ fn prefs_roundtrip() {
         shortcut_deafen: "Alt+D".into(),
         autostart: true,
         stream_preset: "1440p60".into(),
+        music_volume: 0.3,
     };
     prefs::save(&f, &p).unwrap();
     assert_eq!(prefs::load(&f), p);

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use rynuvo_proto::Id;
 
-use super::{FRAME, codec::Decoder, jitter::JitterBuffer};
+use super::{FRAME, codec::Decoder, jitter::JitterBuffer, music::MusicPlayer};
 
 /// RMS above which a decoded frame counts as someone speaking.
 pub const SPEAKING_RMS: f32 = 0.003;
@@ -27,6 +27,7 @@ pub struct Mixer {
     /// Decoded Go Live audio per streamer (mono, 48 kHz).
     streams: HashMap<Id, std::collections::VecDeque<f32>>,
     stream_volumes: HashMap<Id, f32>,
+    music: MusicPlayer,
 }
 
 impl Default for Mixer {
@@ -43,6 +44,7 @@ impl Mixer {
             local: Default::default(),
             streams: HashMap::new(),
             stream_volumes: HashMap::new(),
+            music: MusicPlayer::new(),
         }
     }
 
@@ -90,6 +92,11 @@ impl Mixer {
         self.streams.get(&user).map_or(0, |q| q.len())
     }
 
+    /// The listen-together song.
+    pub fn music(&mut self) -> &mut MusicPlayer {
+        &mut self.music
+    }
+
     /// Queue a locally generated sound (join/leave tones, mic test).
     pub fn play_local(&mut self, samples: Vec<f32>) {
         self.local.extend(samples);
@@ -121,6 +128,8 @@ impl Mixer {
                 }
             }
         }
+        let talking = self.peers.values().any(|p| p.quiet < SPEAKING_HOLD);
+        self.music.mix(out, talking);
         for o in out.iter_mut() {
             match self.local.pop_front() {
                 Some(s) => *o += s,
@@ -209,6 +218,32 @@ mod tests {
         m.remove_stream(9);
         m.mix(&mut out);
         assert_eq!(out[10], 0.0);
+    }
+
+    #[test]
+    fn music_is_mixed_and_ducks_under_voice() {
+        let song = crate::music::webm::demux(include_bytes!("../../tests/fixtures/tone.webm")).unwrap();
+        let mut m = Mixer::new();
+        m.music().set(1, song, 200, false);
+        let mut out = [0f32; FRAME];
+        let mut alone = 0.0;
+        for _ in 0..10 {
+            m.mix(&mut out);
+            alone += energy(&out);
+        }
+        assert!(alone > 1.0, "music is heard");
+        let mut enc = Encoder::new().unwrap();
+        m.set_volume(7, 0.0); // a talker we don't hear still ducks the music
+        feed(&mut m, &mut enc, 7, 30);
+        for _ in 0..15 {
+            m.mix(&mut out);
+        }
+        let mut under = 0.0;
+        for _ in 0..10 {
+            m.mix(&mut out);
+            under += energy(&out);
+        }
+        assert!(under < alone * 0.5, "ducked: {under} vs {alone}");
     }
 
     #[test]

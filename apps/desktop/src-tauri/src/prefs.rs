@@ -16,6 +16,8 @@ pub struct Prefs {
     pub autostart: bool,
     /// Default Go Live quality: 720p30, 1080p60, 1440p60 or native.
     pub stream_preset: String,
+    /// Listen-together music level, 0–1.
+    pub music_volume: f32,
 }
 
 impl Default for Prefs {
@@ -29,6 +31,7 @@ impl Default for Prefs {
             shortcut_deafen: "CmdOrCtrl+Shift+D".into(),
             autostart: false,
             stream_preset: "1080p60".into(),
+            music_volume: 0.5,
         }
     }
 }
@@ -81,6 +84,7 @@ impl Prefs {
             output: self.output_device.clone(),
             threshold: self.vad_threshold,
             volumes: self.volumes.clone(),
+            music_volume: self.music_volume,
         }
     }
 }

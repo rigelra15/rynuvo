@@ -24,11 +24,12 @@ pub struct AudioPrefs {
     pub output: Option<String>,
     pub threshold: f32,
     pub volumes: HashMap<Id, f32>,
+    pub music_volume: f32,
 }
 
 impl Default for AudioPrefs {
     fn default() -> Self {
-        AudioPrefs { input: None, output: None, threshold: 0.5, volumes: HashMap::new() }
+        AudioPrefs { input: None, output: None, threshold: 0.5, volumes: HashMap::new(), music_volume: 0.5 }
     }
 }
 
@@ -117,6 +118,7 @@ impl VoiceCtl {
         for (u, v) in p.volumes {
             self.set_volume(u, v);
         }
+        self.set_music_volume(p.music_volume);
     }
 
     pub fn channel(&self) -> Option<Id> {
@@ -225,6 +227,32 @@ impl VoiceCtl {
         }
     }
 
+    /// Play (or keep in time) the listen-together song in the voice engine, if I'm in voice.
+    pub fn music_set(&self, entry: u64, song: Arc<crate::music::webm::Song>, at_ms: u32, paused: bool) {
+        let e = self.st.lock().unwrap().engine.clone();
+        if let Some(e) = e {
+            e.music_set(entry, song, at_ms, paused);
+        }
+    }
+
+    pub fn music_clear(&self) {
+        let e = self.st.lock().unwrap().engine.clone();
+        if let Some(e) = e {
+            e.music_clear();
+        }
+    }
+
+    pub fn set_music_volume(&self, v: f32) {
+        let e = {
+            let mut s = self.st.lock().unwrap();
+            s.prefs.music_volume = v.clamp(0.0, 1.0);
+            s.engine.clone()
+        };
+        if let Some(e) = e {
+            e.set_music_volume(v);
+        }
+    }
+
     pub fn remove_stream(&self, user: Id) {
         let e = self.st.lock().unwrap().engine.clone();
         if let Some(e) = e {
@@ -312,6 +340,7 @@ impl VoiceCtl {
             output: s.prefs.output.clone(),
             threshold: s.prefs.threshold,
             volumes: s.prefs.volumes.clone(),
+            music_volume: s.prefs.music_volume,
         }
     }
 

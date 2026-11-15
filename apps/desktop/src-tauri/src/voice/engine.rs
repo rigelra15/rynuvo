@@ -47,6 +47,8 @@ pub struct EngineOpts {
     /// Voice-activity threshold, 0–1.
     pub threshold: f32,
     pub volumes: HashMap<Id, f32>,
+    /// Listen-together music level, 0–1.
+    pub music_volume: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -74,6 +76,9 @@ enum Cmd {
     StreamAudio(Id, Vec<f32>),
     StreamVolume(Id, f32),
     RemoveStream(Id),
+    MusicSet { entry: u64, song: Arc<crate::music::webm::Song>, at_ms: u32, paused: bool },
+    MusicClear,
+    MusicVolume(f32),
     Stop,
 }
 
@@ -135,6 +140,16 @@ impl VoiceEngine {
     }
     pub fn remove_stream(&self, user: Id) {
         self.send(Cmd::RemoveStream(user));
+    }
+    /// Play (or keep in time) the listen-together song: where it should be now, and whether paused.
+    pub fn music_set(&self, entry: u64, song: Arc<crate::music::webm::Song>, at_ms: u32, paused: bool) {
+        self.send(Cmd::MusicSet { entry, song, at_ms, paused });
+    }
+    pub fn music_clear(&self) {
+        self.send(Cmd::MusicClear);
+    }
+    pub fn set_music_volume(&self, v: f32) {
+        self.send(Cmd::MusicVolume(v));
     }
     pub fn link(&self) -> Option<VoiceLink> {
         self.link.clone()
@@ -220,6 +235,7 @@ impl Worker {
         for (u, v) in &o.volumes {
             mixer.set_volume(*u, *v);
         }
+        mixer.music().set_volume(o.music_volume);
         let enc = match Encoder::new() {
             Ok(e) => Some(e),
             Err(e) => {
@@ -325,6 +341,9 @@ impl Worker {
             Cmd::StreamAudio(u, pcm) => self.mixer.push_stream(u, &pcm),
             Cmd::StreamVolume(u, v) => self.mixer.set_stream_volume(u, v),
             Cmd::RemoveStream(u) => self.mixer.remove_stream(u),
+            Cmd::MusicSet { entry, song, at_ms, paused } => self.mixer.music().set(entry, song, at_ms, paused),
+            Cmd::MusicClear => self.mixer.music().clear(),
+            Cmd::MusicVolume(v) => self.mixer.music().set_volume(v),
             Cmd::Stop => return false,
         }
         true
