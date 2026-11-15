@@ -3,7 +3,7 @@
 //! for the webview decoder and plays the stream's sound through the voice mixer.
 //!
 //! Pair messages (inside the encrypted peer/relay packet), first byte is the type:
-//! `VIDEO` + fragment · `AUDIO` + seq u32 + Opus (stereo) · `REPORT` + loss f32 · `KEYREQ`.
+//! `VIDEO` + fragment · `AUDIO` + seq u32 + Opus (stereo) · `REPORT` + loss f32 · `KEYREQ` · `FEC` + spare.
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -31,6 +31,8 @@ pub const T_VIDEO: u8 = 1;
 pub const T_AUDIO: u8 = 2;
 pub const T_REPORT: u8 = 3;
 pub const T_KEYREQ: u8 = 4;
+/// A spare that rebuilds one lost video fragment (see `frag`). Older viewers ignore it.
+pub const T_FEC: u8 = 5;
 
 /// Relay streams are capped (server bandwidth): 1080p30, ~4 Mbps.
 pub const RELAY_KBPS: u32 = 4000;
@@ -494,7 +496,8 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
                 frame_no = frame_no.wrapping_add(1);
                 let ts = started.elapsed().as_millis() as u16;
                 let flags = if out.key { frag::KEY } else { 0 };
-                let msgs: Vec<Vec<u8>> = frag::split(frame_no, &out.data, flags, e.codec() as u8, ts).iter().map(|f| with_type(T_VIDEO, f)).collect();
+                let mut msgs: Vec<Vec<u8>> = frag::split(frame_no, &out.data, flags, e.codec() as u8, ts).iter().map(|f| with_type(T_VIDEO, f)).collect();
+                msgs.extend(frag::fec(frame_no, &out.data, flags, e.codec() as u8, ts).iter().map(|f| with_type(T_FEC, f)));
                 // 1.5× the target bitrate per viewer, so frames still leave well within their slot.
                 let n = ids.len() as u64;
                 pacer.set_rate(kbps as u64 * 1000 / 8 * 3 / 2 * n);
@@ -603,9 +606,16 @@ async fn receive(
             m = rx.recv() => {
                 let Some(m) = m else { break };
                 match m.first() {
-                    Some(&T_VIDEO) => {
+                    Some(&t @ (T_VIDEO | T_FEC)) => {
                         bytes += m.len();
-                        for a in reasm.push(&m[1..]) {
+                        let broken = reasm.needs_keyframe();
+                        let ready = if t == T_VIDEO { reasm.push(&m[1..]) } else { reasm.push_fec(&m[1..]) };
+                        // Just broke (a fragment no spare could rebuild): ask for a key frame now
+                        // rather than at the next report.
+                        if !broken && reasm.needs_keyframe() {
+                            link.send(&[T_KEYREQ]);
+                        }
+                        for a in ready {
                             last_video = Instant::now();
                             frames += 1;
                             codec = a.codec;
