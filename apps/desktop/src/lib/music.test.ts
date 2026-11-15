@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clock, lyricAt, mayControl, parseCommand, positionMs, type MusicState } from './music'
+import { clock, lyricAt, mayControl, parseCommand, positionMs, type MusicState, wordFill } from './music'
 
 describe('music commands', () => {
   it('play aliases take the rest as the query', () => {
@@ -64,5 +64,19 @@ describe('lyrics', () => {
     expect(lyricAt(lines, 4999)).toBe(1)
     expect(lyricAt(lines, 99_000)).toBe(2)
     expect(lyricAt([], 5)).toBe(-1)
+  })
+})
+
+describe('wordFill', () => {
+  const line = { ms: 1000, text: 'a b c', words: [{ ms: 1000, text: 'a' }, { ms: 1400, text: 'b' }, { ms: 2000, text: 'c' }] }
+  it('fills each word over its own time', () => {
+    expect(wordFill(line, 0, 900, 3000)).toBe(0)
+    expect(wordFill(line, 0, 1200, 3000)).toBeCloseTo(0.5)
+    expect(wordFill(line, 0, 1500, 3000)).toBe(1)
+    expect(wordFill(line, 1, 1700, 3000)).toBeCloseTo(0.5)
+  })
+  it('lets the last word run to the next line, at most 1.5 s', () => {
+    expect(wordFill(line, 2, 2500, 3000)).toBeCloseTo(0.5)
+    expect(wordFill(line, 2, 2750, 99_000)).toBeCloseTo(0.5)
   })
 })

@@ -19,9 +19,9 @@
   const watching = $derived(store.watching !== null && list.some((m) => m.userId === store.watching) ? store.watching : null)
   let picking = $state(false)
   const music = $derived(store.musicIn(channel.id))
-  /** The record player takes the stage, unless a stream is open (the stream wins). */
+  /** The music panel sits on the right, unless a stream is open (the stream wins). */
   const playerUp = $derived(joined && music !== null && watching === null)
-  const strip = $derived((watching !== null || playerUp) && joined)
+  const strip = $derived(watching !== null && joined)
   const anyoneSpeaking = $derived(list.some((m) => store.speaking.has(m.userId)))
   // Background glow colours: the first two members' avatar colours, else the accent.
   const glow = $derived(
@@ -68,12 +68,7 @@
       <button class="joinbtn" onclick={() => store.joinVoice(channel.id)}>Join Voice</button>
     </div>
   {:else}
-    {#if watching !== null}
-      {#key watching}<StreamView userId={watching} />{/key}
-      {#if music}<p class="np"><Icon name="music" size={14} /> {music.state.now!.title} — {music.state.now!.artist}</p>{/if}
-    {:else if playerUp && music}
-      <MusicPlayer {music} />
-    {/if}
+    {#snippet people()}
     <div class="area" class:strip bind:clientWidth={gw} bind:clientHeight={gh}>
       <div class="grid" class:strip style={strip ? '' : `width:${layout.cols * layout.w + (layout.cols - 1) * GAP}px`}>
         {#each list as m (m.userId)}
@@ -114,6 +109,20 @@
         {/each}
       </div>
     </div>
+
+    {/snippet}
+    {#if watching !== null}
+      {#key watching}<StreamView userId={watching} />{/key}
+      {#if music}<p class="np"><Icon name="music" size={14} /> {music.state.now!.title} — {music.state.now!.artist}</p>{/if}
+      {@render people()}
+    {:else if playerUp && music}
+      <div class="split">
+        {@render people()}
+        <MusicPlayer {music} />
+      </div>
+    {:else}
+      {@render people()}
+    {/if}
 
     {#if store.voicePath === 'ws'}<p class="path muted">via server (WebSocket)</p>{/if}
     {#if store.live}
@@ -164,7 +173,8 @@
   .joinbtn { background: #fff; color: #16171c; font-weight: 600; padding: 9px 18px; border-radius: 8px; transition: transform 120ms, box-shadow 120ms; }
   .joinbtn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 
-  .area { flex: 1; min-height: 0; display: grid; place-items: center; }
+  .area { flex: 1; min-height: 0; min-width: 0; display: grid; place-items: center; }
+  .split { flex: 1; min-height: 0; display: flex; gap: 16px; }
   .grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
   .tile {
     position: relative; border-radius: 12px; overflow: hidden; display: grid; place-items: center;

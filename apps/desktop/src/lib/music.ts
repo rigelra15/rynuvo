@@ -96,3 +96,12 @@ export function lyricAt(lines: LyricLine[], ms: number): number {
   }
   return lo - 1
 }
+
+/** How far (0–1) word `j` of `line` has been sung at `ms`; the last word runs until the next line
+ *  starts (`nextMs`), but no longer than 1.5 s. */
+export function wordFill(line: LyricLine, j: number, ms: number, nextMs: number): number {
+  const w = line.words[j]
+  const end = line.words[j + 1]?.ms ?? Math.min(nextMs, w.ms + 1500)
+  if (end <= w.ms) return ms >= w.ms ? 1 : 0
+  return Math.max(0, Math.min(1, (ms - w.ms) / (end - w.ms)))
+}
