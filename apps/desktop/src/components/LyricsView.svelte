@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { activeLines, wordFill, type LyricLine, type Word } from '../lib/music'
+  import { activeLines, withInterludes, wordFill, type LyricLine, type Word } from '../lib/music'
 
   /** `pos`: where the song is now (ms), updated every frame while playing. */
-  let { lines, pos }: { lines: LyricLine[]; pos: number } = $props()
+  let { lines: sungLines, pos }: { lines: LyricLine[]; pos: number } = $props()
+  // Dots stand in for the intro and long breaks.
+  const lines = $derived(withInterludes(sungLines))
 
   // Lines come in a touch early, the way a singer's breath does.
   const at = $derived(pos + 150)
@@ -37,12 +39,19 @@
       {@const d = away(i)}
       {@const now = d === 0}
       <!-- Lines away from the ones being sung blur a little, more the further they are. -->
+      {#if l.gap}
+        {@const p = Math.max(0, Math.min(1, (at - l.ms) / ((l.end ?? l.ms + 1) - l.ms)))}
+        <div data-i={i} class="gap" class:now class:ending={now && p > 0.92} aria-hidden="true" style="--d:{Math.min(d, 4)}">
+          {#each [0, 1, 2] as k (k)}<i style="--f:{Math.max(0, Math.min(1, p * 3 - k)).toFixed(2)}"></i>{/each}
+        </div>
+      {:else}
       <p data-i={i} class:now class:past={i < lo} class:duet={l.duet} style="--d:{Math.min(d, 4)};filter:{d > 0 && d <= 9 ? `blur(${Math.min(0.4 + d * 0.45, 2.2).toFixed(2)}px)` : 'none'}">
         <span class="main">{#if now && l.words.length}{@render sung(l.words, l, endOf(i))}{:else}{l.text || '♪'}{/if}</span>
         {#if l.bg?.length}
           <span class="bg">{#if now}{@render sung(l.bg, l, endOf(i))}{:else}{l.bg.map((w) => w.text).join(' ')}{/if}</span>
         {/if}
       </p>
+      {/if}
     {/each}
   </div>
 </div>
@@ -70,6 +79,16 @@
   .main, .bg { display: block; }
   /* Backing vocals: smaller, under the line, filling with it. */
   .bg { margin-top: 2px; font-size: 15px; font-weight: 600; opacity: 0.75; }
+  /* An intro or a break: three dots that light one by one and breathe, then shrink away as the
+     singing comes back. */
+  .gap {
+    display: flex; gap: 9px; align-items: center; height: 44px; padding: 0 2px; transform-origin: left center;
+    opacity: calc(0.35 - var(--d) * 0.06); transform: scale(0.9); transition: opacity 400ms, transform 400ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .gap.now { opacity: 1; transform: scale(1); animation: breathe 2.4s ease-in-out infinite; }
+  .gap.ending { transform: scale(0.6); opacity: 0; animation: none; }
+  .gap i { width: 11px; height: 11px; border-radius: 50%; background: #fff; opacity: calc(0.3 + var(--f) * 0.7); }
+  @keyframes breathe { 50% { transform: scale(1.14); } }
   /* Word by word: each word fills with white as it is sung. */
   .w {
     display: inline-block; transition: transform 200ms ease-out; transition-delay: calc(var(--i) * 12ms);
@@ -79,7 +98,8 @@
   .w.sung { transform: translateY(-3px); }
   .bg .w.sung { transform: translateY(-2px); }
   @media (prefers-reduced-motion: reduce) {
-    .list, p, .w { transition: none; }
+    .list, p, .w, .gap { transition: none; }
+    .gap.now { animation: none; }
     .w.sung { transform: none; }
   }
 </style>

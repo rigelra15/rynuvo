@@ -71,6 +71,8 @@ export interface LyricLine {
   bg?: Word[]
   /** Sung by the duet's second voice. */
   duet?: boolean
+  /** No one sings here: the breathing dots of an intro or a break. */
+  gap?: boolean
 }
 export interface Lyrics { lines: LyricLine[]; plain: string | null; source: string }
 
@@ -156,6 +158,22 @@ export function activeLines(lines: LyricLine[], ms: number): number[] {
     if (ms < end) out.push(i)
   }
   out.push(last)
+  return out
+}
+
+const OPENING_MS = 3000
+const BREAK_MS = 5000
+
+/** `lines` with dots for the wait before the first line and for long breaks (when the source says
+ *  when lines end), the way Apple Music shows them. */
+export function withInterludes(lines: LyricLine[]): LyricLine[] {
+  const out: LyricLine[] = []
+  if (lines.length && lines[0].ms >= OPENING_MS) out.push({ ms: 0, end: lines[0].ms, text: '', words: [], gap: true })
+  lines.forEach((l, i) => {
+    out.push(l)
+    const next = lines[i + 1]
+    if (next && l.end != null && next.ms - l.end >= BREAK_MS) out.push({ ms: l.end, end: next.ms, text: '', words: [], gap: true })
+  })
   return out
 }
 

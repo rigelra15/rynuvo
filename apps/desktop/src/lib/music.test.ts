@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeLines, clock, lyricAt, mayControl, parseCommand, playQuery, positionMs, type MusicState, wordFill } from './music'
+import { activeLines, clock, withInterludes, lyricAt, mayControl, parseCommand, playQuery, positionMs, type MusicState, wordFill } from './music'
 
 describe('music commands', () => {
   it('play aliases take the rest as the query', () => {
@@ -108,5 +108,22 @@ describe('lines sung together', () => {
     expect(activeLines(lines, 5500)).toEqual([1])
     expect(activeLines(lines, 7000)).toEqual([2])
     expect(activeLines(lines, 99000)).toEqual([3])
+  })
+})
+
+describe('interludes', () => {
+  const L = (ms: number, end?: number) => ({ ms, end, text: 'x', words: [] })
+  it('the wait before the first line gets dots', () => {
+    const out = withInterludes([L(12000, 15000), L(15000)])
+    expect(out[0]).toMatchObject({ ms: 0, end: 12000, gap: true })
+    expect(out.length).toBe(3)
+  })
+  it('a long break between lines gets dots, a short one does not', () => {
+    const out = withInterludes([L(1000, 4000), L(5000, 8000), L(20000)])
+    expect(out.map((l) => !!l.gap)).toEqual([false, false, true, false])
+    expect(out[2]).toMatchObject({ ms: 8000, end: 20000 })
+  })
+  it('lines without end times only get the opening dots', () => {
+    expect(withInterludes([L(500), L(30000)]).some((l) => l.gap)).toBe(false)
   })
 })

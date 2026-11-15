@@ -1,6 +1,7 @@
 <script lang="ts">
   import Slider from './Slider.svelte'
   import Avatar from './Avatar.svelte'
+  import SongSearch from './SongSearch.svelte'
   import Icon from './Icon.svelte'
   import LyricsView from './LyricsView.svelte'
   import { store } from '../lib/state.svelte'
@@ -74,6 +75,28 @@
       onclick={() => store.musicCmd({ op: 'repeat', mode: null })}
     ><Icon name={repeat === 'song' ? 'repeatOne' : 'repeat'} /></button>
     <button class:on={store.queueOpen} title="Queue" onclick={() => (store.queueOpen = !store.queueOpen)}><Icon name="queue" /></button>
+    <div class="src">
+      <button
+        class:on={picking}
+        aria-haspopup="menu"
+        aria-expanded={picking}
+        title="Lyrics: {sourceName(source)}{source === 'auto' && lyrics?.source ? ` (${lyrics.source})` : ''}"
+        onclick={() => (picking = !picking)}
+      ><Icon name="lyrics" /></button>
+      {#if picking}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="scrim" onmousedown={() => (picking = false)}></div>
+        <div class="menu" role="menu" aria-label="Lyrics source">
+          <div class="mhead">Lyrics from{source === 'auto' && lyrics?.source ? ` · now ${lyrics.source}` : ''}</div>
+          {#each LYRICS_SOURCES as o (o.id)}
+            <button role="menuitemradio" aria-checked={o.id === source} class:on={o.id === source} disabled={!canPick && o.id !== source} onclick={() => canPick && pickSource(o.id)}>
+              <span>{o.name}</span>{#if o.id === source}<Icon name="check" size={14} />{/if}
+            </button>
+          {/each}
+          {#if !canPick}<div class="mnote">Only the channel's owner or an admin can change this</div>{/if}
+        </div>
+      {/if}
+    </div>
     <label class="vol" title="Music volume (only for you)">
       <Icon name="volume" size={16} />
       <Slider value={store.musicVolume} step={0.05} tone="light" label="Music volume" oninput={(v) => store.setMusicVolume(v)} />
@@ -83,35 +106,10 @@
     <div class="next">Up next: {s.queue[0].artist} — {s.queue[0].title}{s.queue.length > 1 ? ` · ${s.queue.length - 1} more` : ''}</div>
   {/if}
 
-  {#if !store.queueOpen}
-    <div class="src">
-      <button
-        class="chip"
-        disabled={!canPick}
-        aria-haspopup="menu"
-        aria-expanded={picking}
-        title={canPick ? 'Change where lyrics come from (for everyone here)' : "Only the channel's owner or an admin can change the lyrics source"}
-        onclick={() => (picking = !picking)}
-      >
-        Lyrics · {sourceName(source)}{source === 'auto' && lyrics?.source ? ` (${sourceName(lyrics.source)})` : ''}
-        {#if canPick}<span class="caret" aria-hidden="true">▾</span>{/if}
-      </button>
-      {#if picking}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="scrim" onmousedown={() => (picking = false)}></div>
-        <div class="menu" role="menu">
-          {#each LYRICS_SOURCES as o (o.id)}
-            <button role="menuitemradio" aria-checked={o.id === source} class:on={o.id === source} onclick={() => pickSource(o.id)}>
-              <span>{o.name}</span>{#if o.id === source}<Icon name="check" size={14} />{/if}
-            </button>
-          {/each}
-        </div>
-      {/if}
-    </div>
-  {/if}
   <div class="below">
     {#if store.queueOpen}
       <div class="queue">
+        <div class="add"><SongSearch glass autofocus={false} /></div>
         <h3>Queue</h3>
         {#if !s.queue.length}<p class="empty">The queue is empty</p>{/if}
         <ol>
@@ -177,21 +175,19 @@
   .vol { flex: 1; display: flex; align-items: center; gap: 6px; margin-left: 4px; color: rgba(255, 255, 255, 0.8); min-width: 0; }
   .vol :global(.slider) { flex: 1; min-width: 40px; max-width: 120px; }
   .next { font-size: 12px; color: rgba(255, 255, 255, 0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .src { position: relative; display: flex; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
-    color: rgba(255, 255, 255, 0.85); background: rgba(255, 255, 255, 0.1); transition: background 120ms;
-  }
-  .chip:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
-  .chip:disabled { cursor: default; color: rgba(255, 255, 255, 0.6); }
-  .caret { font-size: 9px; opacity: 0.7; }
+  .src { position: relative; }
   .scrim { position: fixed; inset: 0; z-index: 4; }
   .menu {
-    position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; min-width: 180px; padding: 4px; border-radius: 10px;
+    position: absolute; top: calc(100% + 6px); right: -60px; z-index: 5; min-width: 200px; padding: 4px; border-radius: 10px;
     background: rgba(20, 20, 28, 0.92); backdrop-filter: blur(18px); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   }
-  .menu button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 7px; font-size: 13px; color: #fff; text-align: left; }
-  .menu button:hover { background: rgba(255, 255, 255, 0.1); }
+  .src .menu button { width: 100%; height: auto; background: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 7px; font-size: 13px; color: #fff; text-align: left; }
+  .menu button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
+  .menu button:disabled { opacity: 0.45; cursor: default; }
+  .mhead { padding: 6px 10px 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255, 255, 255, 0.6); }
+  .mnote { padding: 6px 10px; font-size: 11.5px; color: rgba(255, 255, 255, 0.6); border-top: 1px solid rgba(255, 255, 255, 0.08); margin-top: 4px; }
+  .add { margin-bottom: 10px; }
+  .add :global(ul) { max-height: 220px; }
   .menu button.on { color: #fff; font-weight: 600; }
   .below { flex: 1; min-height: 0; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 6px; }
   .plain { height: 100%; overflow: hidden; mask-image: linear-gradient(transparent, #000 15%, #000 85%, transparent); }

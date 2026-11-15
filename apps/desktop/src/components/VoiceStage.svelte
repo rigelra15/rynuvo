@@ -13,7 +13,6 @@
   import MusicPlayer from './MusicPlayer.svelte'
   import MusicBackdrop from './MusicBackdrop.svelte'
   import MusicIdle from './MusicIdle.svelte'
-  import CallTimer from './CallTimer.svelte'
 
   let { channel, onMenu }: { channel: Channel; onMenu: (userId: Id, e: MouseEvent) => void } = $props()
   const list = $derived(membersOf(store.voice, channel.id))
@@ -71,7 +70,6 @@
       <button class="joinbtn" onclick={() => store.joinVoice(channel.id)}>Join Voice</button>
     </div>
   {:else}
-    {#if list.length}<span class="since" aria-label="Call length"><i></i><CallTimer channelId={channel.id} /></span>{/if}
     {#snippet people()}
     <div class="area" class:strip bind:clientWidth={gw} bind:clientHeight={gh}>
       <div class="grid" class:strip style={strip ? '' : `width:${layout.cols * layout.w + (layout.cols - 1) * GAP}px`}>
@@ -179,12 +177,6 @@
   .joinbtn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 
   .area { flex: 1; min-height: 0; min-width: 0; display: grid; place-items: center; }
-  /* How long the call has been going, top left. */
-  .since {
-    position: absolute; top: 14px; left: 18px; z-index: 3; display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px;
-    border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; background: rgba(10, 10, 16, 0.35); backdrop-filter: blur(10px);
-  }
-  .since i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok, #3ba55d); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok, #3ba55d) 30%, transparent); }
   .split .area { align-self: stretch; }
   .split { flex: 1; min-height: 0; display: flex; gap: 16px; }
   .grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }

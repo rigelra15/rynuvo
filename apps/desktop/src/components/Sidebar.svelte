@@ -3,6 +3,7 @@
   import type { Channel, Id, User } from '../lib/types'
   import Icon from './Icon.svelte'
   import VoiceMembers from './VoiceMembers.svelte'
+  import CallTimer from './CallTimer.svelte'
   import UserPanel from './UserPanel.svelte'
 
   let {
@@ -57,6 +58,7 @@
         >
           <span class="ico"><Icon name={c.kind === 'text' ? 'hash' : 'volume'} size={16} /></span>
           <span class="name">{c.name}</span>
+          {#if c.kind === 'voice'}<span class="len" title="How long this call has been going"><CallTimer channelId={c.id} /></span>{/if}
         </button>
         {#if c.kind === 'voice'}<VoiceMembers channelId={c.id} onMenu={onMemberMenu} />{/if}
       {/each}
@@ -78,5 +80,6 @@
   .ch:hover { background: var(--elev-2); color: var(--text); }
   .ch.on { background: var(--elev); color: #fff; }
   .ico { width: 16px; display: inline-flex; opacity: 0.8; }
+  .len { margin-left: auto; flex: none; font-size: 12px; color: var(--faint, var(--muted)); }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
