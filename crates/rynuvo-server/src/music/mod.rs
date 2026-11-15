@@ -27,13 +27,49 @@ pub struct Session {
     pub queue: VecDeque<MusicEntry>,
     /// Text channel the bot answers in when a control comes from a button.
     pub reply_to: Option<Id>,
+    /// The channel's lyrics source (an id from `LYRICS_SOURCES`), "auto" until someone picks.
+    pub lyrics: Option<String>,
+    pub repeat: Repeat,
     next_id: u64,
+}
+
+/// Loop mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Repeat {
+    #[default]
+    Off,
+    /// The song plays again when it ends (skip still moves on).
+    Song,
+    /// Finished and skipped songs go to the back of the queue.
+    Queue,
+}
+
+impl Repeat {
+    pub fn id(self) -> &'static str {
+        match self {
+            Repeat::Off => "off",
+            Repeat::Song => "song",
+            Repeat::Queue => "queue",
+        }
+    }
+
+    /// "song"/"track"/"one", "queue"/"all", "off"/"none".
+    pub fn parse(s: &str) -> Option<Repeat> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "off" | "none" => Some(Repeat::Off),
+            "song" | "track" | "one" | "single" => Some(Repeat::Song),
+            "queue" | "all" => Some(Repeat::Queue),
+            _ => None,
+        }
+    }
 }
 
 /// Who acts, and what the room looks like, for permission checks.
 pub struct Actor<'a> {
     pub id: Id,
     pub admin: bool,
+    /// Owns the voice channel, or is an admin: may pick the lyrics source.
+    pub manager: bool,
     /// Is this user in the voice channel right now?
     pub present: &'a dyn Fn(Id) -> bool,
     pub nick: &'a dyn Fn(Id) -> String,
@@ -42,6 +78,9 @@ pub struct Actor<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Cmd {
     Add(MusicEntryReq),
+    Lyrics(String),
+    /// None = the next mode.
+    Repeat(Option<String>),
     Skip,
     Pause,
     Resume,
@@ -106,8 +145,16 @@ impl Session {
         self.playing.as_ref().is_some_and(|p| p.paused_at.is_none() && now >= p.started_at + p.entry.duration_ms as i64 + END_GRACE_MS)
     }
 
-    /// Start the next queued song (or stop). Returns the song now playing.
-    pub fn advance(&mut self, now: i64) -> Option<&MusicEntry> {
+    /// Start the next song (or stop), following the loop mode. `ended`: the song finished on its own
+    /// (a looped song plays again); false for a skip. Returns the song now playing.
+    pub fn advance(&mut self, now: i64, ended: bool) -> Option<&MusicEntry> {
+        if let Some(p) = self.playing.take() {
+            match self.repeat {
+                Repeat::Song if ended => self.queue.push_front(p.entry),
+                Repeat::Queue => self.queue.push_back(p.entry),
+                _ => {}
+            }
+        }
         self.playing = self.queue.pop_front().map(|entry| Playing { entry, started_at: now, paused_at: None });
         self.playing.as_ref().map(|p| &p.entry)
     }
@@ -120,6 +167,8 @@ impl Session {
             paused_at: self.playing.as_ref().and_then(|p| p.paused_at),
             queue: self.queue.iter().cloned().collect(),
             server_time: now,
+            lyrics: self.lyrics.clone().unwrap_or_else(|| "auto".into()),
+            repeat: self.repeat.id().into(),
         }
     }
 
@@ -135,6 +184,41 @@ impl Session {
         let did = |s: String| Outcome { changed: true, reply: Some(s) };
         let nick = |id: Id| (a.nick)(id);
         match cmd {
+            Cmd::Lyrics(src) => {
+                let Some((id, name)) = rynuvo_proto::LYRICS_SOURCES.iter().find(|(id, _)| *id == src) else {
+                    return Outcome::default();
+                };
+                if !a.manager {
+                    return say("Only the channel's owner or an admin can change the lyrics source".into());
+                }
+                self.lyrics = Some(id.to_string());
+                did(format!("{} switched lyrics to {name}", nick(a.id)))
+            }
+            Cmd::Repeat(mode) => {
+                let next = match mode {
+                    None => match self.repeat {
+                        Repeat::Off => Repeat::Queue,
+                        Repeat::Queue => Repeat::Song,
+                        Repeat::Song => Repeat::Off,
+                    },
+                    Some(m) => match Repeat::parse(&m) {
+                        Some(r) => r,
+                        None => return say("Loop can be: off, song or queue".into()),
+                    },
+                };
+                if next == self.repeat {
+                    return say(match next {
+                        Repeat::Off => "Loop is already off".into(),
+                        r => format!("Loop is already on: {}", r.id()),
+                    });
+                }
+                self.repeat = next;
+                did(match next {
+                    Repeat::Off => format!("{} turned loop off", nick(a.id)),
+                    Repeat::Song => format!("🔂 {} turned on loop: song", nick(a.id)),
+                    Repeat::Queue => format!("🔁 {} turned on loop: queue", nick(a.id)),
+                })
+            }
             Cmd::NotFound(q) => say(format!("Nothing found for \"{}\"", q.chars().take(100).collect::<String>())),
             Cmd::Add(req) => {
                 if !valid(&req) {
@@ -222,7 +306,7 @@ impl Session {
                     Cmd::Skip => {
                         let title = p.entry.title.clone();
                         let mut text = format!("⏭ {} skipped {title}", nick(a.id));
-                        if self.advance(now).is_some() {
+                        if self.advance(now, false).is_some() {
                             text.push('\n');
                             text.push_str(&self.now_playing_line());
                             text.push_str(&format!(" · requested by {}", nick(self.playing.as_ref().unwrap().entry.requested_by)));
@@ -279,7 +363,23 @@ mod tests {
     fn run(s: &mut Session, cmd: Cmd, who: Id, present: &[Id], now: i64) -> Outcome {
         let present = present.to_vec();
         let p = move |id: Id| present.contains(&id);
-        s.handle(cmd, &Actor { id: who, admin: who == ADMIN, present: &p, nick: &nick }, now)
+        s.handle(cmd, &Actor { id: who, admin: who == ADMIN, manager: who == ADMIN, present: &p, nick: &nick }, now)
+    }
+
+    #[test]
+    fn only_the_channel_manager_picks_the_lyrics_source() {
+        let mut s = Session::default();
+        assert_eq!(s.state(5, 0).lyrics, "auto");
+        let o = run(&mut s, Cmd::Lyrics("lrclib".into()), XENO, &[XENO], 0);
+        assert!(!o.changed);
+        assert_eq!(o.reply.unwrap(), "Only the channel's owner or an admin can change the lyrics source");
+        let o = run(&mut s, Cmd::Lyrics("betterlyrics".into()), ADMIN, &[ADMIN], 0);
+        assert!(o.changed);
+        assert_eq!(o.reply.unwrap(), "Admin switched lyrics to BetterLyrics");
+        assert_eq!(s.state(5, 0).lyrics, "betterlyrics");
+        let o = run(&mut s, Cmd::Lyrics("nope".into()), ADMIN, &[ADMIN], 0);
+        assert!(!o.changed, "unknown sources are ignored");
+        assert_eq!(s.state(5, 0).lyrics, "betterlyrics");
     }
 
     #[test]
@@ -382,5 +482,46 @@ mod tests {
             "▶ Now playing: LANY — Stuck (3:20)\n1. LANY — A (3:20) · Xeno"
         );
         assert_eq!(run(&mut s, Cmd::NowPlaying, XENO, &[POKY], 76_000).reply.unwrap(), "▶ LANY — Stuck · 1:16 / 3:20 · requested by PokyVL");
+    }
+    #[test]
+    fn loop_cycles_off_queue_song_and_takes_a_mode() {
+        let mut s = Session::default();
+        assert_eq!(s.state(5, 0).repeat, "off");
+        let o = run(&mut s, Cmd::Repeat(None), XENO, &[XENO], 0);
+        assert!(o.changed);
+        assert_eq!(o.reply.unwrap(), "🔁 Xeno turned on loop: queue");
+        assert_eq!(run(&mut s, Cmd::Repeat(None), XENO, &[XENO], 0).reply.unwrap(), "🔂 Xeno turned on loop: song");
+        assert_eq!(run(&mut s, Cmd::Repeat(None), XENO, &[XENO], 0).reply.unwrap(), "Xeno turned loop off");
+        assert_eq!(run(&mut s, Cmd::Repeat(Some("song".into())), POKY, &[POKY], 0).reply.unwrap(), "🔂 PokyVL turned on loop: song");
+        assert_eq!(s.state(5, 0).repeat, "song");
+        let o = run(&mut s, Cmd::Repeat(Some("song".into())), POKY, &[POKY], 0);
+        assert!(!o.changed);
+        assert_eq!(o.reply.unwrap(), "Loop is already on: song");
+    }
+
+    #[test]
+    fn looping_a_song_plays_it_again_but_skip_moves_on() {
+        let mut s = Session::default();
+        run(&mut s, Cmd::Add(req("Stuck")), POKY, &[POKY], 0);
+        run(&mut s, Cmd::Add(req("A")), POKY, &[POKY], 0);
+        run(&mut s, Cmd::Repeat(Some("song".into())), POKY, &[POKY], 0);
+        assert_eq!(s.advance(300_000, true).unwrap().title, "Stuck");
+        assert_eq!(s.playing.as_ref().unwrap().started_at, 300_000, "from the top");
+        assert_eq!(s.queue.len(), 1);
+        run(&mut s, Cmd::Skip, POKY, &[POKY], 310_000);
+        assert_eq!(s.playing.as_ref().unwrap().entry.title, "A");
+    }
+
+    #[test]
+    fn looping_the_queue_sends_each_song_to_the_back() {
+        let mut s = Session::default();
+        run(&mut s, Cmd::Add(req("Stuck")), POKY, &[POKY], 0);
+        run(&mut s, Cmd::Add(req("A")), POKY, &[POKY], 0);
+        run(&mut s, Cmd::Repeat(Some("queue".into())), POKY, &[POKY], 0);
+        assert_eq!(s.advance(300_000, true).unwrap().title, "A");
+        assert_eq!(s.queue.iter().map(|e| e.title.as_str()).collect::<Vec<_>>(), ["Stuck"]);
+        run(&mut s, Cmd::Skip, POKY, &[POKY], 310_000);
+        assert_eq!(s.playing.as_ref().unwrap().entry.title, "Stuck", "skipping keeps it in the loop too");
+        assert_eq!(s.queue.len(), 1);
     }
 }

@@ -12,6 +12,8 @@
   import StreamView from './StreamView.svelte'
   import MusicPlayer from './MusicPlayer.svelte'
   import MusicBackdrop from './MusicBackdrop.svelte'
+  import MusicIdle from './MusicIdle.svelte'
+  import CallTimer from './CallTimer.svelte'
 
   let { channel, onMenu }: { channel: Channel; onMenu: (userId: Id, e: MouseEvent) => void } = $props()
   const list = $derived(membersOf(store.voice, channel.id))
@@ -19,8 +21,8 @@
   const watching = $derived(store.watching !== null && list.some((m) => m.userId === store.watching) ? store.watching : null)
   let picking = $state(false)
   const music = $derived(store.musicIn(channel.id))
-  /** The music panel sits on the right, unless a stream is open (the stream wins). */
-  const playerUp = $derived(joined && music !== null && watching === null)
+  /** The music panel sits on the right (empty when nothing plays), unless a stream is open (the stream wins). */
+  const playerUp = $derived(joined && watching === null)
   const strip = $derived(watching !== null && joined)
   const anyoneSpeaking = $derived(list.some((m) => store.speaking.has(m.userId)))
   // Background glow colours: the first two members' avatar colours, else the accent.
@@ -69,6 +71,7 @@
       <button class="joinbtn" onclick={() => store.joinVoice(channel.id)}>Join Voice</button>
     </div>
   {:else}
+    {#if list.length}<span class="since" aria-label="Call length"><i></i><CallTimer channelId={channel.id} /></span>{/if}
     {#snippet people()}
     <div class="area" class:strip bind:clientWidth={gw} bind:clientHeight={gh}>
       <div class="grid" class:strip style={strip ? '' : `width:${layout.cols * layout.w + (layout.cols - 1) * GAP}px`}>
@@ -116,10 +119,10 @@
       {#key watching}<StreamView userId={watching} />{/key}
       {#if music}<p class="np"><Icon name="music" size={14} /> {music.state.now!.title} — {music.state.now!.artist}</p>{/if}
       {@render people()}
-    {:else if playerUp && music}
+    {:else if playerUp}
       <div class="split">
         {@render people()}
-        <MusicPlayer {music} />
+        {#if music}<MusicPlayer {music} />{:else}<MusicIdle channelName={channel.name} />{/if}
       </div>
     {:else}
       {@render people()}
@@ -176,6 +179,12 @@
   .joinbtn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 
   .area { flex: 1; min-height: 0; min-width: 0; display: grid; place-items: center; }
+  /* How long the call has been going, top left. */
+  .since {
+    position: absolute; top: 14px; left: 18px; z-index: 3; display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px;
+    border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; background: rgba(10, 10, 16, 0.35); backdrop-filter: blur(10px);
+  }
+  .since i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok, #3ba55d); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok, #3ba55d) 30%, transparent); }
   .split .area { align-self: stretch; }
   .split { flex: 1; min-height: 0; display: flex; gap: 16px; }
   .grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }

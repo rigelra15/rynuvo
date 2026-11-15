@@ -64,7 +64,8 @@ async fn join_broadcasts_member_and_returns_key() {
     assert!(VoiceKey::from_b64(&key).is_some());
     assert_eq!(port, app.state.cfg.stun_ports[0]);
     let m = member_update(&mut wb, a.user.id).await;
-    assert_eq!(m, VoiceMember { user_id: a.user.id, channel_id: v.id, muted: false, deafened: false });
+    assert!(m.joined_at > 0, "members carry when they joined, for the call timer");
+    assert_eq!(m, VoiceMember { user_id: a.user.id, channel_id: v.id, muted: false, deafened: false, joined_at: m.joined_at, call_since: m.joined_at });
 }
 
 #[tokio::test]

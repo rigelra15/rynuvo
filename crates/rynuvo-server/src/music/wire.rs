@@ -62,6 +62,8 @@ pub async fn say(st: &AppState, channel: Id, text: &str) {
 fn to_cmd(c: MusicCmd) -> Cmd {
     match c {
         MusicCmd::Add { entry } => Cmd::Add(entry),
+        MusicCmd::Lyrics { source } => Cmd::Lyrics(source),
+        MusicCmd::Repeat { mode } => Cmd::Repeat(mode),
         MusicCmd::Skip => Cmd::Skip,
         MusicCmd::Pause => Cmd::Pause,
         MusicCmd::Resume => Cmd::Resume,
@@ -87,6 +89,8 @@ pub async fn command(st: &AppState, user_id: Id, is_admin: bool, cmd: MusicCmd, 
     };
     let ch = me.channel_id;
     let names = nicks(st).await;
+    let owner = sqlx::query_scalar::<_, Option<Id>>("SELECT owner_id FROM channels WHERE id = ?").bind(ch).fetch_optional(&st.db).await.ok().flatten().flatten();
+    let manager = is_admin || owner == Some(user_id);
     let voice = st.voice.clone();
     let present = move |id: Id| voice.member(id).is_some_and(|m| m.channel_id == ch);
     let nick = |id: Id| names.get(&id).cloned().unwrap_or_else(|| "Someone".into());
@@ -97,7 +101,7 @@ pub async fn command(st: &AppState, user_id: Id, is_admin: bool, cmd: MusicCmd, 
         if text_channel.is_some() {
             s.reply_to = text_channel;
         }
-        let out = s.handle(to_cmd(cmd), &Actor { id: user_id, admin: is_admin, present: &present, nick: &nick }, now);
+        let out = s.handle(to_cmd(cmd), &Actor { id: user_id, admin: is_admin, manager, present: &present, nick: &nick }, now);
         (out, s.state(ch, now), text_channel.or(s.reply_to))
     };
     if out.changed {
@@ -131,7 +135,9 @@ pub fn spawn(st: AppState) {
                 g.iter_mut()
                     .filter(|(_, s)| s.finished(now))
                     .map(|(ch, s)| {
-                        let next = s.advance(now).cloned();
+                        let was = s.playing.as_ref().map(|p| p.entry.id);
+                        // A looped song coming round again needs no announcement.
+                        let next = s.advance(now, true).filter(|e| Some(e.id) != was).cloned();
                         (s.state(*ch, now), s.reply_to.zip(next))
                     })
                     .collect()

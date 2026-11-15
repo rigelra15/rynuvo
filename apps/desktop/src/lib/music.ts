@@ -19,7 +19,23 @@ export interface MusicState {
   pausedAt: number | null
   queue: MusicEntry[]
   serverTime: number
+  /** The channel's lyrics source (an id from LYRICS_SOURCES); missing from servers before 0.5.1. */
+  lyrics?: string
+  /** Loop mode; missing from servers before 0.5.1. */
+  repeat?: Repeat
 }
+
+export type Repeat = 'off' | 'song' | 'queue'
+
+/** Lyrics sources a voice channel can pick, as the server knows them. */
+export const LYRICS_SOURCES = [
+  { id: 'auto', name: 'Auto' },
+  { id: 'betterlyrics', name: 'BetterLyrics' },
+  { id: 'lrcred', name: 'LrcRed' },
+  { id: 'simpmusic', name: 'SimpMusic' },
+  { id: 'lrclib', name: 'LRCLIB' },
+  { id: 'netease', name: 'NetEase' },
+] as const
 
 /** A song found on YouTube Music, before it is queued. */
 export interface SongResult {
@@ -33,6 +49,8 @@ export interface SongResult {
 
 export type MusicCmd =
   | { op: 'add'; entry: SongResult }
+  | { op: 'lyrics'; source: string }
+  | { op: 'repeat'; mode: Repeat | null }
   | { op: 'skip' }
   | { op: 'pause' }
   | { op: 'resume' }
@@ -43,7 +61,17 @@ export type MusicCmd =
   | { op: 'nowPlaying' }
 
 export interface Word { ms: number; text: string }
-export interface LyricLine { ms: number; text: string; words: Word[] }
+export interface LyricLine {
+  ms: number
+  /** When the line ends, if the source says; lines may overlap (duets, backing vocals). */
+  end?: number | null
+  text: string
+  words: Word[]
+  /** Backing vocals sung with the line. */
+  bg?: Word[]
+  /** Sung by the duet's second voice. */
+  duet?: boolean
+}
 export interface Lyrics { lines: LyricLine[]; plain: string | null; source: string }
 
 /** This app's progress fetching a song. */
@@ -72,8 +100,16 @@ export function parseCommand(text: string): Parsed | null {
   const rest = (m[2] ?? '').trim()
   if (PLAY.has(word)) return { kind: 'play', query: rest }
   if (word in SIMPLE) return { kind: 'cmd', cmd: SIMPLE[word] }
+  if (word === '!loop' || word === '!repeat') return { kind: 'cmd', cmd: { op: 'repeat', mode: (rest.toLowerCase() || null) as Repeat | null } }
   if (word === '!remove' && /^\d+$/.test(rest)) return { kind: 'cmd', cmd: { op: 'remove', index: Number(rest) } }
   return null
+}
+
+/** The search typed so far after a play command ("!p stuck" → "stuck"), once its space is typed;
+ *  null when the text isn't a play command. */
+export function playQuery(text: string): string | null {
+  const m = /^(\S+) (.*)$/.exec(text.trimStart())
+  return m && PLAY.has(m[1].toLowerCase()) ? m[2] : null
 }
 
 /** Where the song is (ms), from a state that arrived when the local clock read `receivedAt`. */
@@ -106,6 +142,21 @@ export function lyricAt(lines: LyricLine[], ms: number): number {
     else hi = mid
   }
   return lo - 1
+}
+
+/** Indexes of the lines being sung at `ms`: the newest line started, plus any earlier line whose end
+ *  hasn't come yet (a duet partner or backing line still going). A line without an end lasts until
+ *  the next one starts. */
+export function activeLines(lines: LyricLine[], ms: number): number[] {
+  const last = lyricAt(lines, ms)
+  if (last < 0) return []
+  const out: number[] = []
+  for (let i = 0; i < last; i++) {
+    const end = lines[i].end ?? lines[i + 1].ms
+    if (ms < end) out.push(i)
+  }
+  out.push(last)
+  return out
 }
 
 /** How far (0–1) word `j` of `line` has been sung at `ms`; the last word runs until the next line

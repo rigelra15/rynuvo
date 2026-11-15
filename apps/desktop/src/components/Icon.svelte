@@ -2,7 +2,7 @@
   export type IconName =
     | 'mic' | 'micOff' | 'headphones' | 'headphonesOff' | 'screen' | 'leave'
     | 'hash' | 'volume' | 'plus' | 'settings' | 'edit' | 'trash' | 'close' | 'check' | 'logo' | 'users' | 'home'
-    | 'play' | 'pause' | 'skip' | 'queue' | 'music'
+    | 'play' | 'pause' | 'skip' | 'queue' | 'music' | 'repeat' | 'repeatOne'
 </script>
 
 <script lang="ts">
@@ -24,6 +24,9 @@
     <path d="M8 5v14M16 5v14" />
   {:else if name === 'skip'}
     <path d="M5 5l10 7-10 7zM19 5v14" />
+  {:else if name === 'repeat' || name === 'repeatOne'}
+    <path d="M17 2l3 3-3 3" /><path d="M4 11V9a4 4 0 0 1 4-4h12" /><path d="M7 22l-3-3 3-3" /><path d="M20 13v2a4 4 0 0 1-4 4H4" />
+    {#if name === 'repeatOne'}<path d="M11 10h1v4" />{/if}
   {:else if name === 'queue'}
     <path d="M4 6h16M4 12h10M4 18h10M18 14v6l4-3z" />
   {:else if name === 'music'}

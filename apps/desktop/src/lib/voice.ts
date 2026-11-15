@@ -1,6 +1,6 @@
 import type { Id, WsServerMsg } from './types'
 
-export interface VoiceMember { userId: Id; channelId: Id; muted: boolean; deafened: boolean }
+export interface VoiceMember { userId: Id; channelId: Id; muted: boolean; deafened: boolean; /** Server ms; missing from servers before 0.5.1. */ joinedAt?: number; /** When the call in the channel began (server ms); missing from older servers. */ callSince?: number }
 export interface MyVoice { channelId: Id | null; muted: boolean; deafened: boolean }
 export type VoiceEvent =
   | { kind: 'speaking'; userIds: Id[] }

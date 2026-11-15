@@ -46,6 +46,8 @@ pub struct Member {
     pub muted: bool,
     pub deafened: bool,
     pub joined_at: i64,
+    /// When the call in this channel began (shared by everyone in it).
+    pub call_since: i64,
     pub route: Route,
     /// Next sequence number for packets sent to this member.
     pub down_seq: u32,
@@ -65,7 +67,7 @@ impl Member {
     }
 
     pub fn public(&self) -> VoiceMember {
-        VoiceMember { user_id: self.user_id, channel_id: self.channel_id, muted: self.muted, deafened: self.deafened }
+        VoiceMember { user_id: self.user_id, channel_id: self.channel_id, muted: self.muted, deafened: self.deafened, joined_at: self.joined_at, call_since: self.call_since }
     }
 }
 
@@ -105,6 +107,7 @@ impl VoiceRooms {
         }
         let previous = g.iter().position(|m| m.user_id == user_id).map(|i| g.remove(i));
         let (muted, deafened) = previous.as_ref().map_or((false, false), |p| (p.muted, p.deafened));
+        let call_since = g.iter().filter(|m| m.channel_id == channel_id).map(|m| m.call_since).min().unwrap_or(now_ms);
         let member = Member {
             user_id,
             conn_id,
@@ -114,6 +117,7 @@ impl VoiceRooms {
             muted,
             deafened,
             joined_at: now_ms,
+            call_since,
             route: Route::None,
             down_seq: 0,
             bytes_in: 0,
@@ -239,5 +243,26 @@ impl VoiceRooms {
     /// Run `f` with the member list locked (used by the relay hot path).
     pub fn with<R>(&self, f: impl FnOnce(&mut Vec<Member>) -> R) -> R {
         f(&mut self.inner.lock().unwrap())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_call_keeps_its_start_while_anyone_stays() {
+        let r = VoiceRooms::default();
+        let a = r.join(1, 1, 7, 1_000).unwrap().member;
+        assert_eq!(a.call_since, 1_000, "the first one in starts the call");
+        let b = r.join(2, 2, 7, 5_000).unwrap().member;
+        assert_eq!(b.call_since, 1_000, "later joiners share the call's start");
+        r.leave_user(1);
+        let c = r.join(3, 3, 7, 9_000).unwrap().member;
+        assert_eq!(c.call_since, 1_000, "the first one leaving doesn't restart it");
+        r.leave_user(2);
+        r.leave_user(3);
+        let d = r.join(4, 4, 7, 20_000).unwrap().member;
+        assert_eq!(d.call_since, 20_000, "an empty channel starts a new call");
     }
 }

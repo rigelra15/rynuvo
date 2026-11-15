@@ -195,7 +195,7 @@ mod tests {
     }
 
     fn state(now: Option<MusicEntry>, queue: Vec<MusicEntry>, started_at: i64, paused_at: Option<u32>, server_time: i64) -> MusicState {
-        MusicState { channel_id: 5, now, started_at, paused_at, queue, server_time }
+        MusicState { channel_id: 5, now, started_at, paused_at, queue, server_time, lyrics: "auto".into(), repeat: "off".into() }
     }
 
     #[test]

@@ -6,9 +6,10 @@
   import Avatar from './Avatar.svelte'
   import { store } from '../lib/state.svelte'
   import { mentionQuery, suggest } from '../lib/mention'
-  import { parseCommand } from '../lib/music'
+  import { parseCommand, playQuery } from '../lib/music'
   import { fly } from 'svelte/transition'
   import SongPicker from './SongPicker.svelte'
+  import SongSearch from './SongSearch.svelte'
 
   let { channel }: { channel: Channel } = $props()
   const MAX = 4000
@@ -21,6 +22,21 @@
   let dragging = $state(false)
   let songs = $state(false)
   let area: HTMLTextAreaElement | undefined = $state()
+
+  // "!p something" being typed: its search results show above the box. Esc hides them until the
+  // command word changes.
+  const typedPlay = $derived(file ? null : playQuery(text))
+  let hushed = $state(false)
+  $effect(() => {
+    if (typedPlay === null) hushed = false
+  })
+  const playing = $derived(typedPlay !== null && !hushed && !songs)
+  let typedSearch: SongSearch | undefined = $state()
+
+  function playedFromChat() {
+    text = ''
+    area?.focus()
+  }
 
   // @mention autocomplete
   let query = $state<{ start: number; query: string } | null>(null)
@@ -100,6 +116,7 @@
   }
 
   function onKey(e: KeyboardEvent) {
+    if (playing && !e.isComposing && typedSearch?.key(e)) return
     if (options.length && !e.isComposing) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
@@ -181,6 +198,11 @@
     ></textarea>
     <button class="song" class:on={songs} title="Play a song" aria-label="Play a song" onclick={() => (songs = !songs)}><Icon name="music" size={18} /></button>
     {#if left < 200}<span class="count" class:over={left < 0}>{left}</span>{/if}
+    {#if playing}
+      <div class="typedplay" transition:fly={{ y: 6, duration: 140 }}>
+        <SongSearch bind:this={typedSearch} query={typedPlay} textChannelId={channel.id} autofocus={false} onPlayed={playedFromChat} onEscape={() => (hushed = true)} />
+      </div>
+    {/if}
     {#if songs}<SongPicker textChannelId={channel.id} onClose={() => { songs = false; area?.focus() }} />{/if}
   </div>
 </div>
@@ -199,6 +221,7 @@
   .song.on { color: var(--accent); }
   .count { position: absolute; right: 48px; bottom: 8px; font-size: 11px; color: var(--muted); }
   .count.over { color: var(--danger); }
+  .typedplay { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 5; max-width: 520px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
   .mentions { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
   .mh { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); padding: 4px 8px 6px; }
   .mentions button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border-radius: 6px; text-align: left; color: var(--text); }

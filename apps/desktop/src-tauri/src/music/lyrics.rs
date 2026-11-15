@@ -1,5 +1,6 @@
-//! Lyrics for the playing song: SimpMusic first (by video id, word-synced when it has them), then
-//! LRCLIB (by title, artist and length).
+//! Lyrics for the playing song, from the source the voice channel picked: SimpMusic (by video id),
+//! BetterLyrics and LrcRed (Apple Music style TTML, often word-synced), LRCLIB, NetEase; "auto" tries
+//! them in that order and takes the first with timed lines.
 use serde::Serialize;
 use serde_json::Value;
 
@@ -17,9 +18,15 @@ pub struct Word {
 #[serde(rename_all = "camelCase")]
 pub struct Line {
     pub ms: u32,
+    /// When the line ends, when the source says; lines can overlap (duets, backing vocals).
+    pub end: Option<u32>,
     pub text: String,
     /// Per-word timing, when the source has it.
     pub words: Vec<Word>,
+    /// Backing vocals sung with this line, shown smaller under it.
+    pub bg: Vec<Word>,
+    /// Sung by the second voice of a duet (shown on the other side).
+    pub duet: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -102,7 +109,7 @@ pub fn parse_lrc(text: &str) -> Vec<Line> {
         } else {
             plain.push_str(&unescape(body.trim()));
         }
-        lines.push(Line { ms, text: plain, words });
+        lines.push(Line { ms, end: None, text: plain, words, bg: Vec::new(), duet: false });
     }
     lines.sort_by_key(|l| l.ms);
     lines
@@ -153,28 +160,256 @@ async fn get_json(req: reqwest::RequestBuilder) -> Option<Value> {
     r.json().await.ok()
 }
 
-pub async fn fetch(http: &reqwest::Client, video_id: &str, title: &str, artist: &str, duration_ms: u32) -> Option<Lyrics> {
-    let simp = http
-        .get(format!("https://api-lyrics.simpmusic.org/v1/{video_id}"))
-        .header("User-Agent", "SimpMusicLyrics/1.0")
-        .header("Accept", "application/json");
-    if let Some(l) = get_json(simp).await.and_then(|v| pick_simpmusic(&v, duration_ms)) {
-        return Some(l);
+/// TTML clock ("h:mm:ss.fff", "m:ss.fff", "ss.fff" or "12.3s") → ms.
+fn ttml_time(s: &str) -> Option<u32> {
+    let mut parts: Vec<&str> = s.trim().trim_end_matches('s').split(':').collect();
+    let mut total: f64 = parts.pop()?.parse().ok()?;
+    let mut unit = 60.0;
+    while let Some(p) = parts.pop() {
+        total += p.parse::<f64>().ok()? * unit;
+        unit *= 60.0;
     }
+    (total >= 0.0).then(|| (total * 1000.0).round() as u32)
+}
+
+fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let key = format!(" {name}=\"");
+    let i = tag.find(&key)? + key.len();
+    Some(&tag[i..i + tag[i..].find('"')?])
+}
+
+/// The line without its backing vocals (`x-bg` spans), and the backing vocals' inner markup.
+fn split_backing(s: &str) -> (String, String) {
+    let mut out = String::new();
+    let mut bg = String::new();
+    let mut rest = s;
+    while let Some(i) = rest.find("<span").filter(|_| rest.contains("x-bg")) {
+        let end = rest[i..].find('>').map_or(rest.len(), |e| i + e + 1);
+        if !rest[i..end].contains("x-bg") {
+            out.push_str(&rest[..end]);
+            rest = &rest[end..];
+            continue;
+        }
+        out.push_str(&rest[..i]);
+        let (mut depth, mut j) = (1, end);
+        while depth > 0 && j < rest.len() {
+            let open = rest[j..].find("<span").map(|k| j + k);
+            let close = rest[j..].find("</span>").map(|k| j + k);
+            match (open, close) {
+                (Some(o), Some(c)) if o < c => { depth += 1; j = o + 5; }
+                (_, Some(c)) => { depth -= 1; j = c + 7; }
+                _ => j = rest.len(),
+            }
+        }
+        // Inside the x-bg span, up to its own closing tag.
+        bg.push_str(rest.get(end..j.saturating_sub(7)).unwrap_or(""));
+        bg.push(' ');
+        rest = &rest[j..];
+    }
+    out.push_str(rest);
+    (out, bg)
+}
+
+/// `<span begin>` words; syllables written without a space between them join into one word.
+fn spans(body: &str) -> Vec<Word> {
+    let mut words: Vec<Word> = Vec::new();
+    let mut b = body;
+    let mut glued = false;
+    while let Some(si) = b.find("<span") {
+        let gap = &b[..si];
+        let Some(te) = b[si..].find('>').map(|e| si + e) else { break };
+        let Some(ce) = b[te..].find("</span>").map(|e| te + e) else { break };
+        let text = unescape(b[te + 1..ce].trim());
+        let begin = attr(&b[si..te], "begin").and_then(ttml_time);
+        let spaced = !gap.is_empty() && gap.chars().all(char::is_whitespace) || words.is_empty();
+        if let (Some(wms), false) = (begin, text.is_empty() || text.contains('<')) {
+            match words.last_mut() {
+                Some(last) if glued && !spaced => last.text.push_str(&text),
+                _ => words.push(Word { ms: wms, text }),
+            }
+            glued = true;
+        }
+        b = &b[ce + 7..];
+    }
+    words
+}
+
+fn strip_tags(s: &str) -> String {
+    let mut out = String::new();
+    let mut inside = false;
+    for c in s.chars() {
+        match c {
+            '<' => inside = true,
+            '>' => inside = false,
+            _ if !inside => out.push(c),
+            _ => {}
+        }
+    }
+    unescape(&out.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
+/// Apple Music style TTML (BetterLyrics, LrcRed): `<p begin>` lines, `<span begin>` words. Syllables
+/// written without a space between them join into one word.
+pub fn parse_ttml(t: &str) -> Vec<Line> {
+    let mut lines = Vec::new();
+    let mut rest = t;
+    while let Some(i) = rest.find("<p ") {
+        let Some(open_end) = rest[i..].find('>').map(|e| i + e) else { break };
+        let Some(close) = rest[open_end..].find("</p>").map(|e| open_end + e) else { break };
+        let tag = &rest[i..open_end];
+        let (body, backing) = split_backing(&rest[open_end + 1..close]);
+        rest = &rest[close + 4..];
+        let Some(ms) = attr(tag, "begin").and_then(ttml_time) else { continue };
+        let end = attr(tag, "end").and_then(ttml_time);
+        // Apple's agents: v1 the main voice, v2 the duet partner, v1000 everyone.
+        let duet = attr(tag, "ttm:agent").is_some_and(|a| a != "v1" && a != "v1000");
+        let words = spans(&body);
+        let bg = spans(&backing);
+        let text = if words.is_empty() { strip_tags(&body) } else { words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ") };
+        if !text.is_empty() {
+            lines.push(Line { ms, end, text, words, bg, duet });
+        }
+    }
+    lines.sort_by_key(|l| l.ms);
+    lines
+}
+
+fn timed(lines: Vec<Line>, source: &'static str) -> Option<Lyrics> {
+    (!lines.is_empty()).then(|| Lyrics { plain: Some(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n")), lines, source })
+}
+
+/// The LrcRed hit for this recording (within 10 s of its length): its ISRC.
+pub fn pick_lrcred(v: &Value, duration_ms: u32) -> Option<String> {
+    v.get("hits")?.as_array()?.iter().find_map(|h| {
+        let secs = h.get("duration")?.as_f64()?;
+        (((secs * 1000.0) as i64 - duration_ms as i64).abs() <= MAX_SKEW_MS).then(|| nonempty(h, "isrc")).flatten()
+    })
+}
+
+pub fn pick_netease_song(v: &Value, duration_ms: u32) -> Option<i64> {
+    v.get("result")?.get("songs")?.as_array()?.iter().find_map(|s| {
+        let d = s.get("duration")?.as_i64()?;
+        ((d - duration_ms as i64).abs() <= MAX_SKEW_MS).then(|| s.get("id")?.as_i64()).flatten()
+    })
+}
+
+pub fn pick_netease(v: &Value) -> Option<Lyrics> {
+    timed(parse_lrc(&nonempty(v.get("lrc")?, "lyric")?), "NetEase")
+}
+
+/// Sources to ask, in order, for a channel's choice.
+pub fn order(source: &str) -> Vec<&'static str> {
+    const AUTO: [&str; 5] = ["simpmusic", "betterlyrics", "lrcred", "lrclib", "netease"];
+    AUTO.iter().find(|s| **s == source).map_or_else(|| AUTO.to_vec(), |s| vec![*s])
+}
+
+fn ua(r: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    r.header("User-Agent", concat!("Rynuvo/", env!("CARGO_PKG_VERSION")))
+}
+
+fn with_query(base: &str, q: &[(&str, &str)]) -> Option<String> {
+    url::Url::parse_with_params(base, q).ok().map(String::from)
+}
+
+async fn from_source(http: &reqwest::Client, src: &str, video_id: &str, title: &str, artist: &str, duration_ms: u32) -> Option<Lyrics> {
     let first_artist = artist.split(',').next().unwrap_or(artist).trim();
-    let url = url::Url::parse_with_params(
-        "https://lrclib.net/api/get",
-        &[("track_name", title), ("artist_name", first_artist), ("duration", &(duration_ms / 1000).to_string())],
-    )
-    .ok()?;
-    let lrclib = http.get(url.as_str()).header("User-Agent", concat!("Rynuvo/", env!("CARGO_PKG_VERSION")));
-    get_json(lrclib).await.and_then(|v| pick_lrclib(&v))
+    let secs = (duration_ms / 1000).to_string();
+    match src {
+        "simpmusic" => {
+            let r = http
+                .get(format!("https://api-lyrics.simpmusic.org/v1/{video_id}"))
+                .header("User-Agent", "SimpMusicLyrics/1.0")
+                .header("Accept", "application/json");
+            get_json(r).await.and_then(|v| pick_simpmusic(&v, duration_ms))
+        }
+        "betterlyrics" => {
+            let u = with_query("https://lyrics-api.boidu.dev/getLyrics", &[("s", title), ("a", first_artist), ("d", &secs)])?;
+            let v = get_json(ua(http.get(u))).await?;
+            timed(parse_ttml(v.get("ttml")?.as_str()?), "BetterLyrics")
+        }
+        "lrcred" => {
+            let q = format!("{title} {first_artist}");
+            let u = with_query("https://lrc.red/search.json", &[("q", &q)])?;
+            let isrc = pick_lrcred(&get_json(ua(http.get(u))).await?, duration_ms)?;
+            let t = ua(http.get(format!("https://lrc.red/s/{isrc}.ttml"))).send().await.ok()?.error_for_status().ok()?.text().await.ok()?;
+            timed(parse_ttml(&t), "LrcRed")
+        }
+        "lrclib" => {
+            let u = with_query("https://lrclib.net/api/get", &[("track_name", title), ("artist_name", first_artist), ("duration", &secs)])?;
+            get_json(ua(http.get(u))).await.and_then(|v| pick_lrclib(&v))
+        }
+        "netease" => {
+            let q = format!("{title} {first_artist}");
+            let u = with_query("https://music.163.com/api/search/get", &[("s", &q), ("type", "1"), ("limit", "5")])?;
+            let id = pick_netease_song(&get_json(ua(http.get(u))).await?, duration_ms)?;
+            let u = with_query("https://music.163.com/api/song/lyric", &[("id", &id.to_string()), ("lv", "1")])?;
+            get_json(ua(http.get(u))).await.and_then(|v| pick_netease(&v))
+        }
+        _ => None,
+    }
+}
+
+/// Lyrics from the channel's `source`; with "auto", the first source that has timed lines (plain
+/// lyrics only when none does).
+pub async fn fetch(http: &reqwest::Client, source: &str, video_id: &str, title: &str, artist: &str, duration_ms: u32) -> Option<Lyrics> {
+    let mut plain_only = None;
+    for src in order(source) {
+        match from_source(http, src, video_id, title, artist, duration_ms).await {
+            Some(l) if !l.lines.is_empty() => return Some(l),
+            Some(l) => plain_only = plain_only.or(Some(l)),
+            None => {}
+        }
+    }
+    plain_only
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn ttml_word_and_line_timing() {
+        let t = r#"<tt><body dur="3:03.8"><div begin="0:10.963"><p begin="0:10.963" end="0:15.2"><span begin="0:10.963" end="0:11.323">Take</span> <span begin="0:11.323" end="0:11.5">a</span> <span ttm:role="x-bg"><span begin="0:12.0" end="0:12.4">(oh)</span></span></p><p begin="15.5" end="20">Line two &amp; more</p><p begin="1:02:03.5">Late</p></div></body></tt>"#;
+        let lines = parse_ttml(t);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].ms, 10_963);
+        assert_eq!(lines[0].text, "Take a");
+        assert_eq!(lines[0].words, vec![Word { ms: 10_963, text: "Take".into() }, Word { ms: 11_323, text: "a".into() }], "backing vocals kept apart");
+        assert_eq!(lines[0].bg, vec![Word { ms: 12_000, text: "(oh)".into() }], "backing vocals under the line");
+        assert_eq!(lines[0].end, Some(15_200));
+        assert_eq!(lines[1], Line { ms: 15_500, end: Some(20_000), text: "Line two & more".into(), words: vec![], bg: vec![], duet: false });
+        assert_eq!(lines[2].ms, 3_723_500);
+    }
+
+    #[test]
+    fn ttml_duets_sing_on_the_other_side() {
+        let t = r#"<tt><body><div><p begin="1" end="4" ttm:agent="v1"><span begin="1">Me</span></p><p begin="2" end="5" ttm:agent="v2"><span begin="2">You</span></p><p begin="6" ttm:agent="v1000"><span begin="6">Both</span></p></div></body></tt>"#;
+        let l = parse_ttml(t);
+        assert_eq!(l.iter().map(|l| l.duet).collect::<Vec<_>>(), [false, true, false]);
+        assert_eq!((l[0].end, l[1].ms), (Some(4_000), 2_000), "the lines overlap: both are sung at 3 s");
+    }
+
+    #[test]
+    fn lrcred_and_netease_match_the_song_length() {
+        let hits = serde_json::json!({"hits":[{"isrc":"FAR","duration":120.0},{"isrc":"USA2P2536902","duration":183.803}]});
+        assert_eq!(pick_lrcred(&hits, 184_000).as_deref(), Some("USA2P2536902"));
+        assert_eq!(pick_lrcred(&hits, 300_000), None);
+        let songs = serde_json::json!({"result":{"songs":[{"id":1,"duration":90_000},{"id":279275012,"duration":183803}]}});
+        assert_eq!(pick_netease_song(&songs, 184_000), Some(279275012));
+        let lyric = serde_json::json!({"lrc":{"lyric":"[00:10.80]Take a deep breath\n[00:16.10]Sun in my eyes"}});
+        let l = pick_netease(&lyric).unwrap();
+        assert_eq!(l.source, "NetEase");
+        assert_eq!(l.lines.len(), 2);
+        assert_eq!(pick_netease(&serde_json::json!({"lrc":{"lyric":""}})), None);
+    }
+
+    #[test]
+    fn auto_tries_word_timed_sources_first() {
+        assert_eq!(order("auto"), vec!["simpmusic", "betterlyrics", "lrcred", "lrclib", "netease"]);
+        assert_eq!(order("lrclib"), vec!["lrclib"]);
+        assert_eq!(order("bogus"), order("auto"));
+    }
 
     #[test]
     fn html_entities_are_decoded() {
@@ -228,9 +463,12 @@ mod live {
     #[tokio::test]
     #[ignore]
     async fn fetches_stuck() {
-        let l = super::fetch(&crate::music::ytm::client(), "EjvAa0RxDLo", "Stuck", "LANY", 184_000).await.unwrap();
-        println!("{} lines from {}, first: {:?}", l.lines.len(), l.source, l.lines.first());
-        let l = super::fetch(&crate::music::ytm::client(), "xxxxxxxxxxx", "Stuck", "LANY", 184_000).await.unwrap();
-        println!("fallback: {} lines from {}", l.lines.len(), l.source);
+        let http = crate::music::ytm::client();
+        for src in ["auto", "simpmusic", "betterlyrics", "lrcred", "lrclib", "netease"] {
+            match super::fetch(&http, src, "EjvAa0RxDLo", "Stuck", "LANY", 184_000).await {
+                Some(l) => println!("{src}: {} lines ({} word-timed) from {}", l.lines.len(), l.lines.iter().filter(|x| !x.words.is_empty()).count(), l.source),
+                None => println!("{src}: none"),
+            }
+        }
     }
 }
