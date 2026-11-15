@@ -284,7 +284,7 @@
   .toggle input:checked { background: #3ba55d; }
   .toggle input:checked::after { transform: translateX(12px); }
   .add { margin-bottom: 10px; }
-  .add :global(ul) { max-height: 220px; }
+  .add :global(.lists) { max-height: 260px; flex: none; }
   .menu button.on { background: rgba(255, 255, 255, 0.06); }
   .src .menu button { justify-content: flex-start; gap: 10px; }
   .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: rgba(255, 255, 255, 0.35); }
