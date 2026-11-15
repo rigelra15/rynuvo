@@ -145,7 +145,7 @@
       {#each lyrics.lines as l, i (i)}
         <p data-i={i} class:now={i === line} class:past={i < line}>
           {#if i === line && l.words.length}
-            {#each l.words as w (w.ms)}<span class:sung={w.ms <= pos + 150}>{w.text} </span>{/each}
+            {#each l.words as w, j (j)}{#if j}{' '}{/if}<span class:sung={w.ms <= pos + 150}>{w.text}</span>{/each}
           {:else}{l.text || '♪'}{/if}
         </p>
       {/each}

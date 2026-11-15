@@ -43,6 +43,44 @@ fn stamp(s: &str) -> Option<u32> {
     Some(m.trim().parse::<u32>().ok()? * 60_000 + sec.parse::<u32>().ok()? * 1000 + frac_ms)
 }
 
+/// Undo HTML escaping (SimpMusic sends `don&#x27;t`).
+fn unescape(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        let decoded = rest.find(';').filter(|e| *e <= 10).and_then(|e| {
+            let c = match &rest[1..e] {
+                "amp" => Some('&'),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                n if n.starts_with("#x") || n.starts_with("#X") => u32::from_str_radix(&n[2..], 16).ok().and_then(char::from_u32),
+                n if n.starts_with('#') => n[1..].parse().ok().and_then(char::from_u32),
+                _ => None,
+            }?;
+            Some((c, e + 1))
+        });
+        match decoded {
+            Some((c, len)) => {
+                out.push(c);
+                rest = &rest[len..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// LRC text, with optional `<mm:ss.xx>` word stamps (SimpMusic's rich sync).
 pub fn parse_lrc(text: &str) -> Vec<Line> {
     let mut lines = Vec::new();
@@ -57,12 +95,12 @@ pub fn parse_lrc(text: &str) -> Vec<Line> {
                 let Some((t, w)) = seg.split_once('>') else { continue };
                 let w = w.trim();
                 if let (Some(t), false) = (stamp(t), w.is_empty()) {
-                    words.push(Word { ms: t, text: w.to_string() });
+                    words.push(Word { ms: t, text: unescape(w) });
                 }
             }
             plain = words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
         } else {
-            plain.push_str(body.trim());
+            plain.push_str(&unescape(body.trim()));
         }
         lines.push(Line { ms, text: plain, words });
     }
@@ -86,7 +124,7 @@ pub fn pick_simpmusic(v: &Value, duration_ms: u32) -> Option<Lyrics> {
         })
         .min_by_key(|(skew, _)| *skew)?
         .1;
-    let plain = nonempty(best, "plainLyric");
+    let plain = nonempty(best, "plainLyric").map(|p| unescape(&p));
     for key in ["richSyncLyrics", "syncedLyrics"] {
         if let Some(t) = nonempty(best, key) {
             let lines = parse_lrc(&t);
@@ -137,6 +175,13 @@ pub async fn fetch(http: &reqwest::Client, video_id: &str, title: &str, artist: 
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn html_entities_are_decoded() {
+        let l = parse_lrc("[00:01.00] But you don&#x27;t &amp; I &quot;won&#39;t&quot; &lt;3\n[00:02.00] <00:02.00> don&#x27;t <00:02.50>");
+        assert_eq!(l[0].text, "But you don't & I \"won't\" <3");
+        assert_eq!(l[1].words[0].text, "don't");
+    }
 
     #[test]
     fn lrc_lines_and_rich_words() {
