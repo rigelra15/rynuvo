@@ -4,6 +4,7 @@ mod diag;
 #[cfg(target_os = "macos")]
 mod mac_notify;
 mod media;
+pub mod music;
 mod notify;
 pub mod prefs;
 pub mod stream;
