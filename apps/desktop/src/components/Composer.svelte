@@ -6,6 +6,7 @@
   import Avatar from './Avatar.svelte'
   import { store } from '../lib/state.svelte'
   import { mentionQuery, suggest } from '../lib/mention'
+  import { parseCommand } from '../lib/music'
   import { fly } from 'svelte/transition'
 
   let { channel }: { channel: Channel } = $props()
@@ -22,7 +23,7 @@
   // @mention autocomplete
   let query = $state<{ start: number; query: string } | null>(null)
   let pick = $state(0)
-  const options = $derived(query ? suggest(query.query, [...store.users.values()], store.me?.id) : [])
+  const options = $derived(query ? suggest(query.query, store.people(), store.me?.id) : [])
 
   function updateQuery() {
     query = area ? mentionQuery(text, area.selectionStart) : null
@@ -86,6 +87,9 @@
       }
       text = ''
       error = null
+      const c = file ? null : parseCommand(content)
+      if (c?.kind === 'play') await api.musicPlay(c.query, cid)
+      else if (c?.kind === 'cmd') await api.musicCmd(c.cmd, cid)
     } catch (e) {
       error = errText(e)
     } finally {

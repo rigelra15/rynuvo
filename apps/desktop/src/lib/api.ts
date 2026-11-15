@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { Channel, ChannelKind, Id, ImageRef, Message, User, WsServerMsg } from './types'
 import type { MyVoice, Prefs, VoiceEvent } from './voice'
 import type { SelfCheck, Source, StreamEvent } from './stream'
+import type { Lyrics, MusicCmd, MusicStatus } from './music'
 
 export type ConnState = { state: 'connecting' } | { state: 'online' } | { state: 'reconnecting'; inMs: number }
 
@@ -72,12 +73,22 @@ export const api = {
   streamUnwatch: (userId: Id) => invoke<void>('stream_unwatch', { userId }),
   streamRequestKey: (userId: Id) => invoke<void>('stream_request_key', { userId }),
   streamSetVolume: (userId: Id, volume: number) => invoke<void>('stream_set_volume', { userId, volume }),
+  musicPlay: (query: string, textChannelId: Id | null) => invoke<void>('music_play', { query, textChannelId }),
+  musicCmd: (cmd: MusicCmd, textChannelId: Id | null) => invoke<void>('music_cmd', { cmd, textChannelId }),
+  musicLyrics: (videoId: string, title: string, artist: string, durationMs: number) =>
+    invoke<Lyrics | null>('music_lyrics', { videoId, title, artist, durationMs }),
+  musicStatus: (videoId: string) => invoke<MusicStatus | null>('music_status', { videoId }),
+  musicSetVolume: (volume: number) => invoke<void>('music_set_volume', { volume }),
   prefsGet: () => invoke<Prefs>('prefs_get'),
   prefsSet: (next: Prefs) => invoke<Prefs>('prefs_set', { next }),
 }
 
 export function onVoiceEvent(cb: (e: VoiceEvent) => void): Promise<UnlistenFn> {
   return listen<VoiceEvent>('rynuvo://voice', (e) => cb(e.payload))
+}
+
+export function onMusicEvent(cb: (e: MusicStatus) => void): Promise<UnlistenFn> {
+  return listen<MusicStatus>('rynuvo://music', (e) => cb(e.payload))
 }
 
 export function onStreamEvent(cb: (e: StreamEvent) => void): Promise<UnlistenFn> {

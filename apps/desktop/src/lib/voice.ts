@@ -18,6 +18,7 @@ export interface Prefs {
   shortcutDeafen: string
   autostart: boolean
   streamPreset: string
+  musicVolume: number
 }
 
 /** Who is in which voice channel, after one server message. Returns the same array when nothing changed. */

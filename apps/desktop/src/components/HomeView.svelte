@@ -10,7 +10,7 @@
 
   let tab = $state<'online' | 'all'>('online')
   const live = $derived(new Set(store.streams.map((s) => s.userId)))
-  const groups = $derived(memberGroups([...store.users.values()].filter((u) => u.id !== store.me?.id), store.online))
+  const groups = $derived(memberGroups(store.people().filter((u) => u.id !== store.me?.id), store.online))
   const list = $derived(tab === 'online' ? groups.online : [...groups.online, ...groups.offline])
   const cards = $derived(activeNow(store.voice, store.channels, (id) => store.nick(id), live))
 

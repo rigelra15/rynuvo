@@ -13,7 +13,7 @@
   let openReport = $state<Id | null>(null)
   let error = $state<string | null>(null)
 
-  const members = $derived([...store.users.values()].sort((a, b) => a.nickname.localeCompare(b.nickname)))
+  const members = $derived(store.people().sort((a, b) => a.nickname.localeCompare(b.nickname)))
 
   onMount(() => void loadReports())
 

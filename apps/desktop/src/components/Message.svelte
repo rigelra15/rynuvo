@@ -26,7 +26,7 @@
 
   const mine = $derived(store.me?.id === m.authorId)
   const canDelete = $derived(mine || (store.selected ? store.canManage(store.selected) : false))
-  const members = $derived([...store.users.values()])
+  const members = $derived(store.people())
   const html = $derived(render(m.content, { users: members, me: store.me?.id }))
   // Someone else @mentioned me (or @everyone): the bubble gets a gold edge.
   const mentioned = $derived(!mine && !!store.me && mentionsMe(m.content, members, store.me.id))
