@@ -10,13 +10,18 @@
   import Icon from './Icon.svelte'
   import GoLiveDialog from './GoLiveDialog.svelte'
   import StreamView from './StreamView.svelte'
+  import MusicPlayer from './MusicPlayer.svelte'
+  import MusicBackdrop from './MusicBackdrop.svelte'
 
   let { channel, onMenu }: { channel: Channel; onMenu: (userId: Id, e: MouseEvent) => void } = $props()
   const list = $derived(membersOf(store.voice, channel.id))
   const joined = $derived(store.inVoice(channel.id))
   const watching = $derived(store.watching !== null && list.some((m) => m.userId === store.watching) ? store.watching : null)
   let picking = $state(false)
-  const strip = $derived(watching !== null && joined)
+  const music = $derived(store.musicIn(channel.id))
+  /** The record player takes the stage, unless a stream is open (the stream wins). */
+  const playerUp = $derived(joined && music !== null && watching === null)
+  const strip = $derived((watching !== null || playerUp) && joined)
   const anyoneSpeaking = $derived(list.some((m) => store.speaking.has(m.userId)))
   // Background glow colours: the first two members' avatar colours, else the accent.
   const glow = $derived(
@@ -45,7 +50,7 @@
 </script>
 
 <section class="stage" class:anyone-speaking={anyoneSpeaking} style="--g2:{glow[0] ?? 'var(--accent)'};--g3:{glow[1] ?? glow[0] ?? 'var(--accent)'}">
-  <div class="glow" aria-hidden="true"></div>
+  {#if music}<MusicBackdrop url={music.state.now!.artUrl} />{:else}<div class="glow" aria-hidden="true"></div>{/if}
   {#if !joined}
     <!-- Before joining: who's in here, and one big button. -->
     <div class="prejoin">
@@ -59,11 +64,15 @@
       {/if}
       <h2>{channel.name}</h2>
       <p>{list.length ? `${who} ${list.length === 1 ? 'is' : 'are'} currently in voice` : 'No one is here yet. Be the first!'}</p>
+      {#if music}<p class="np"><Icon name="music" size={14} /> {music.state.now!.title} — {music.state.now!.artist}</p>{/if}
       <button class="joinbtn" onclick={() => store.joinVoice(channel.id)}>Join Voice</button>
     </div>
   {:else}
     {#if watching !== null}
       {#key watching}<StreamView userId={watching} />{/key}
+      {#if music}<p class="np"><Icon name="music" size={14} /> {music.state.now!.title} — {music.state.now!.artist}</p>{/if}
+    {:else if playerUp && music}
+      <MusicPlayer {music} />
     {/if}
     <div class="area" class:strip bind:clientWidth={gw} bind:clientHeight={gh}>
       <div class="grid" class:strip style={strip ? '' : `width:${layout.cols * layout.w + (layout.cols - 1) * GAP}px`}>
@@ -176,6 +185,8 @@
   .self { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.45); color: #fff; font-weight: 600; font-size: 13px; }
   .sub { color: rgba(255, 255, 255, 0.78); font-size: 12px; }
   .area.strip { flex: 0 0 auto; display: block; }
+  .np { margin: 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: rgba(255, 255, 255, 0.85); font-size: 13px; }
+  .prejoin .np { margin: -8px 0 14px; }
   .grid.strip { flex-wrap: wrap; }
   .grid.strip .tile { width: 150px; height: 84px; }
   .n {

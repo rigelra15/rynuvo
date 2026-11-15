@@ -7,8 +7,12 @@
 
   let { channelId, onMenu }: { channelId: Id; onMenu: (userId: Id, e: MouseEvent) => void } = $props()
   const list = $derived(membersOf(store.voice, channelId))
+  const music = $derived(store.musicIn(channelId))
 </script>
 
+{#if music}
+  <p class="np" title="{music.state.now!.title} — {music.state.now!.artist}"><Icon name="music" size={12} /> {music.state.now!.title} — {music.state.now!.artist}</p>
+{/if}
 {#if list.length}
   <ul class="vm">
     {#each list as m (m.userId)}
@@ -23,6 +27,7 @@
 {/if}
 
 <style>
+  .np { margin: 0 0 2px; padding: 0 8px 0 34px; display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--accent); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .vm { list-style: none; margin: 0 0 4px; padding: 0 0 0 28px; }
   li { display: flex; align-items: center; gap: 7px; padding: 3px 6px; border-radius: 6px; color: var(--muted); font-size: 13px; }
   li:hover { background: var(--elev-2); color: var(--text); }
