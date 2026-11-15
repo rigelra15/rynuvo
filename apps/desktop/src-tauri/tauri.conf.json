@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Rynuvo",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "identifier": "id.hypertopia.rynuvo",
   "build": {
     "frontendDist": "../dist",
