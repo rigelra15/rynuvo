@@ -122,6 +122,12 @@ pub fn needs_restart_for_cap(p: Preset) -> bool {
     p.width > RELAY_MAX.0 || p.height > RELAY_MAX.1
 }
 
+/// A new frame came sooner than `max_fps` allows, counting from when the last sent frame was taken
+/// (not from when it finished sending: that would drop every other frame of a 60 fps source).
+pub fn too_soon(since_last_taken: Option<Duration>, max_fps: u32) -> bool {
+    since_last_taken.is_some_and(|d| d < Duration::from_micros(900_000 / max_fps.max(1) as u64))
+}
+
 /// The relay state must hold this long before the cap switches.
 const CAP_SETTLE: Duration = Duration::from_secs(2);
 
@@ -386,6 +392,7 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
     let mut last: Option<Frame> = None;
     let mut last_new = Instant::now();
     let mut last_sent: Option<Instant> = None;
+    let mut last_taken: Option<Instant> = None;
     let mut last_report = Instant::now();
     let mut capped = false;
     let mut last_live: Option<StreamEvent> = None;
@@ -451,9 +458,10 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
             continue;
         }
         let max_fps = if relay { inner.preset.fps.min(RELAY_FPS) } else { inner.preset.fps };
-        if fresh && !force && last_sent.is_some_and(|t| t.elapsed() < Duration::from_millis(900 / max_fps as u64)) {
+        if fresh && !force && too_soon(last_taken.map(|t| t.elapsed()), max_fps) {
             continue;
         }
+        let taken = Instant::now();
         let Some(frame) = last.as_ref() else { continue };
         let refs: Vec<&[Codec]> = codecs.iter().map(|c| c.as_slice()).collect();
         let codec = encode::negotiate(&encode::available(), &refs);
@@ -499,6 +507,7 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
                     inner.fan_out(chunk);
                 }
                 last_sent = Some(Instant::now());
+                last_taken = Some(taken);
             }
             Ok(None) => {}
             Err(err) => {
@@ -655,6 +664,21 @@ async fn receive(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_60fps_source_is_not_halved_by_the_frame_gate() {
+        let at = |ms: f64| Duration::from_micros((ms * 1000.0) as u64);
+        // Frames every 16.7 ms; the previous one took 4 ms to encode and send.
+        assert!(!too_soon(Some(at(16.7)), 60), "measured from when the last frame was taken");
+        assert!(!too_soon(None, 60));
+        // A 120 fps source is thinned to about 60.
+        assert!(too_soon(Some(at(8.3)), 60));
+        assert!(!too_soon(Some(at(16.6)), 60));
+        // Relay: 30 fps.
+        assert!(too_soon(Some(at(16.7)), 30));
+        assert!(!too_soon(Some(at(33.3)), 30));
+    }
+
     use super::*;
 
     #[test]

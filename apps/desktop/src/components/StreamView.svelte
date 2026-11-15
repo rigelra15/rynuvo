@@ -120,7 +120,9 @@
   .view { flex: 1; display: flex; flex-direction: column; min-height: 0; background: #000; border-radius: 12px; overflow: hidden; }
   .view:fullscreen { border-radius: 0; }
   .screen { flex: 1; min-height: 0; display: grid; place-items: center; position: relative; }
-  canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; }
+  /* Fills the area and letterboxes: the whole frame always shows, whatever its shape (a grid row
+     sized by its content let tall frames spill out and get clipped). */
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   .wait { position: absolute; }
   .bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--panel); }
   .who { font-weight: 600; display: flex; align-items: center; gap: 6px; }

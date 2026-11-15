@@ -5,8 +5,9 @@ use serde_json::{Value, json};
 
 const BASE: &str = "https://music.youtube.com";
 const REMIX_VERSION: &str = "1.20260707.12.00";
-/// The search filter for "Songs".
+/// The search filters for "Songs" and "Videos".
 const SONG_FILTER: &str = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D";
+const VIDEO_FILTER: &str = "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D";
 
 /// The audio stream chosen for a song.
 #[derive(Debug, Clone, PartialEq)]
@@ -28,7 +29,7 @@ fn text(v: &Value) -> &str {
     v.get("text").and_then(Value::as_str).unwrap_or("")
 }
 
-fn row(r: &Value) -> Option<MusicEntryReq> {
+fn row(r: &Value, video: bool) -> Option<MusicEntryReq> {
     let video_id = r.pointer("/playlistItemData/videoId")?.as_str()?.to_string();
     let col = |i: usize| r.pointer(&format!("/flexColumns/{i}/musicResponsiveListItemFlexColumnRenderer/text/runs")).and_then(Value::as_array);
     let title = text(col(0)?.first()?).to_string();
@@ -52,7 +53,7 @@ fn row(r: &Value) -> Option<MusicEntryReq> {
         .and_then(Value::as_str)
         .map(big_art)
         .unwrap_or_default();
-    Some(MusicEntryReq { video_id, title, artist, album, art_url, duration_ms })
+    Some(MusicEntryReq { video_id, title, artist, album, art_url, duration_ms, video })
 }
 
 /// Thumbnails come as small squares (`=w120-h120-…`); ask for a large one for the backdrop.
@@ -65,6 +66,15 @@ fn big_art(url: &str) -> String {
 
 /// Songs in a search response, best first.
 pub fn parse_search(v: &Value) -> Vec<MusicEntryReq> {
+    parse_shelf(v, false)
+}
+
+/// Music videos in a search response, best first.
+pub fn parse_videos(v: &Value) -> Vec<MusicEntryReq> {
+    parse_shelf(v, true)
+}
+
+fn parse_shelf(v: &Value, video: bool) -> Vec<MusicEntryReq> {
     let sections = v
         .pointer("/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
         .and_then(Value::as_array);
@@ -72,7 +82,7 @@ pub fn parse_search(v: &Value) -> Vec<MusicEntryReq> {
     shelf
         .get("contents")
         .and_then(Value::as_array)
-        .map(|rows| rows.iter().filter_map(|r| r.get("musicResponsiveListItemRenderer")).filter_map(row).collect())
+        .map(|rows| rows.iter().filter_map(|r| r.get("musicResponsiveListItemRenderer")).filter_map(|r| row(r, video)).collect())
         .unwrap_or_default()
 }
 
@@ -99,6 +109,22 @@ pub fn pick_stream(v: &Value) -> Result<Stream, String> {
         .ok_or_else(|| "No playable audio stream for this song".to_string())
 }
 
+/// A video stream for the player (no sound; the audio plays separately): H.264 in MP4, which every
+/// web view plays, at 720p if there is one (else the smallest larger one, else the largest).
+pub fn pick_video(v: &Value) -> Option<String> {
+    (v.pointer("/playabilityStatus/status")?.as_str()? == "OK").then_some(())?;
+    let mut list: Vec<(u64, String)> = v
+        .pointer("/streamingData/adaptiveFormats")?
+        .as_array()?
+        .iter()
+        .filter(|f| f.get("mimeType").and_then(Value::as_str).is_some_and(|m| m.starts_with("video/mp4") && m.contains("avc1")))
+        .filter_map(|f| Some((f.get("height")?.as_u64()?, f.get("url")?.as_str().filter(|u| u.starts_with("https://"))?.to_string())))
+        .collect();
+    list.sort_by_key(|(h, _)| *h);
+    let at_most = list.iter().rev().find(|(h, _)| *h <= 720).cloned();
+    at_most.or_else(|| list.first().cloned()).map(|(_, u)| u)
+}
+
 /// The visitor id from `sw.js_data` (needed by the player endpoint).
 pub fn parse_visitor(body: &str) -> Option<String> {
     let body = body.strip_prefix(")]}'").unwrap_or(body);
@@ -122,10 +148,18 @@ pub fn client() -> reqwest::Client {
 }
 
 pub async fn search(http: &reqwest::Client, query: &str) -> Result<Vec<MusicEntryReq>, String> {
+    Ok(parse_search(&search_raw(http, query, SONG_FILTER).await?))
+}
+
+pub async fn search_videos(http: &reqwest::Client, query: &str) -> Result<Vec<MusicEntryReq>, String> {
+    Ok(parse_videos(&search_raw(http, query, VIDEO_FILTER).await?))
+}
+
+async fn search_raw(http: &reqwest::Client, query: &str, filter: &str) -> Result<Value, String> {
     let body = json!({
         "context": {"client": {"clientName": "WEB_REMIX", "clientVersion": REMIX_VERSION, "gl": "ID", "hl": "en"}},
         "query": query,
-        "params": SONG_FILTER,
+        "params": filter,
     });
     let v: Value = http
         .post(format!("{BASE}/youtubei/v1/search?prettyPrint=false"))
@@ -142,10 +176,19 @@ pub async fn search(http: &reqwest::Client, query: &str) -> Result<Vec<MusicEntr
         .json()
         .await
         .map_err(|e| format!("YouTube Music sent something unexpected ({e})"))?;
-    Ok(parse_search(&v))
+    Ok(v)
 }
 
 pub async fn resolve(http: &reqwest::Client, video_id: &str) -> Result<Stream, String> {
+    pick_stream(&player(http, video_id).await?)
+}
+
+/// The URL of a music video's picture (see [`pick_video`]).
+pub async fn resolve_video(http: &reqwest::Client, video_id: &str) -> Result<String, String> {
+    pick_video(&player(http, video_id).await?).ok_or_else(|| "No video for this one".to_string())
+}
+
+async fn player(http: &reqwest::Client, video_id: &str) -> Result<Value, String> {
     let sw = http.get(format!("{BASE}/sw.js_data")).send().await.and_then(|r| r.error_for_status()).map_err(|e| format!("Couldn't reach YouTube Music ({e})"))?;
     let visitor = parse_visitor(&sw.text().await.map_err(|e| e.to_string())?).ok_or("YouTube Music changed its visitor data")?;
     let body = json!({
@@ -172,7 +215,7 @@ pub async fn resolve(http: &reqwest::Client, video_id: &str) -> Result<Stream, S
         .json()
         .await
         .map_err(|e| format!("YouTube Music sent something unexpected ({e})"))?;
-    pick_stream(&v)
+    Ok(v)
 }
 
 /// Download the whole audio stream (a few MB). A range request avoids YouTube's throttling.
@@ -225,6 +268,43 @@ mod tests {
         assert_eq!(e.duration_ms, 184_000);
         assert_eq!(e.art_url, "https://lh3.googleusercontent.com/abc=w544-h544-l90-rj");
         assert!(parse_search(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn video_rows_are_videos_with_wide_thumbnails() {
+        let item = json!({"musicResponsiveListItemRenderer": {
+            "playlistItemData": {"videoId": "RPvhItA3lIM"},
+            "thumbnail": {"musicThumbnailRenderer": {"thumbnail": {"thumbnails": [
+                {"url": "https://i.ytimg.com/vi/RPvhItA3lIM/hqdefault.jpg?sqp=x", "width": 400, "height": 225}]}}},
+            "flexColumns": [
+                {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [run("ILYSB (Official Lyric Video)")]}}},
+                {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [
+                    {"text": "LANY", "navigationEndpoint": {"browseEndpoint": {"browseId": "UC"}}},
+                    run(" • "), run("118M views"), run(" • "), run("3:30")]}}}]
+        }});
+        let v = json!({"contents": {"tabbedSearchResultsRenderer": {"tabs": [{"tabRenderer": {"content": {"sectionListRenderer": {"contents": [
+            {"musicShelfRenderer": {"contents": [item]}}]}}}}]}}});
+        let r = parse_videos(&v);
+        assert_eq!(r.len(), 1);
+        assert!(r[0].video);
+        assert_eq!(r[0].artist, "LANY");
+        assert_eq!(r[0].album, None, "views aren't an album");
+        assert_eq!(r[0].duration_ms, 210_000);
+        assert_eq!(r[0].art_url, "https://i.ytimg.com/vi/RPvhItA3lIM/hqdefault.jpg?sqp=x");
+        assert!(!parse_search(&search_fixture())[0].video, "songs aren't videos");
+    }
+
+    #[test]
+    fn picks_a_720p_h264_video_stream() {
+        let f = |itag: u32, mime: &str, h: u32| json!({"itag": itag, "mimeType": mime, "height": h, "url": format!("https://v/{itag}")});
+        let v = json!({"playabilityStatus": {"status": "OK"}, "streamingData": {"adaptiveFormats": [
+            f(137, "video/mp4; codecs=\"avc1.640028\"", 1080), f(248, "video/webm; codecs=\"vp9\"", 1080),
+            f(136, "video/mp4; codecs=\"avc1.4D401F\"", 720), f(135, "video/mp4; codecs=\"avc1.4D401E\"", 480),
+            f(251, "audio/webm; codecs=\"opus\"", 0)]}});
+        assert_eq!(pick_video(&v).as_deref(), Some("https://v/136"), "sharp enough, light on the network");
+        let small = json!({"playabilityStatus": {"status": "OK"}, "streamingData": {"adaptiveFormats": [f(1080, "video/mp4; codecs=\"avc1.640028\"", 1080)]}});
+        assert_eq!(pick_video(&small).as_deref(), Some("https://v/1080"), "else the smallest above");
+        assert_eq!(pick_video(&json!({"playabilityStatus": {"status": "ERROR"}})), None);
     }
 
     #[test]

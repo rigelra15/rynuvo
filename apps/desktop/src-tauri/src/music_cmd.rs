@@ -63,16 +63,25 @@ pub async fn music_play(core: State<'_, Core>, http: State<'_, MusicHttp>, query
     Ok(())
 }
 
-/// Songs matching `query` on YouTube Music, best first (for the song picker).
+/// Songs, then music videos, matching `query` on YouTube Music, best first (for the song picker).
+/// Videos are a bonus: if their search fails, the songs still come back.
 #[tauri::command]
 pub async fn music_search(http: State<'_, MusicHttp>, query: String) -> Result<Vec<rynuvo_proto::MusicEntryReq>, String> {
     let query = query.trim();
     if query.is_empty() {
         return Ok(vec![]);
     }
-    let mut found = ytm::search(&http.0, query).await?;
+    let (songs, videos) = tokio::join!(ytm::search(&http.0, query), ytm::search_videos(&http.0, query));
+    let mut found = songs?;
     found.truncate(6);
+    found.extend(videos.unwrap_or_default().into_iter().take(4));
     Ok(found)
+}
+
+/// Where to stream a music video's picture from (the sound comes through the music player).
+#[tauri::command]
+pub async fn music_video_url(http: State<'_, MusicHttp>, video_id: String) -> Result<String, String> {
+    ytm::resolve_video(&http.0, &video_id).await
 }
 
 /// Any other music command (skip, pause, seek, queue, …).
@@ -84,6 +93,12 @@ pub fn music_cmd(core: State<'_, Core>, cmd: MusicCmd, text_channel_id: Option<I
 #[tauri::command]
 pub async fn music_lyrics(http: State<'_, MusicHttp>, video_id: String, title: String, artist: String, duration_ms: u32, source: Option<String>) -> Result<Option<Lyrics>, String> {
     Ok(lyrics::fetch(&http.0, source.as_deref().unwrap_or("auto"), &video_id, &title, &artist, duration_ms).await)
+}
+
+/// English translation and romanization for each lyric line (same order).
+#[tauri::command]
+pub async fn music_annotate(http: State<'_, MusicHttp>, lines: Vec<String>) -> Result<Vec<crate::music::translate::Annotation>, String> {
+    Ok(crate::music::translate::annotate(&http.0, &lines).await)
 }
 
 #[tauri::command]

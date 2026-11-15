@@ -1,3 +1,8 @@
+<script lang="ts" module>
+  /** Where each music video streams from, asked once per video. */
+  const videoUrls = new Map<string, Promise<string>>()
+</script>
+
 <script lang="ts">
   import Slider from './Slider.svelte'
   import Avatar from './Avatar.svelte'
@@ -5,7 +10,8 @@
   import Icon from './Icon.svelte'
   import LyricsView from './LyricsView.svelte'
   import { store } from '../lib/state.svelte'
-  import { frameClock, lyricsOf } from '../lib/lyrics.svelte'
+  import { api } from '../lib/api'
+  import { annotationsOf, frameClock, lyricExtras, lyricsOf } from '../lib/lyrics.svelte'
   import { clock, LYRICS_SOURCES, lyricsStatus, mayControl, positionMs, type MusicState } from '../lib/music'
   import { membersOf } from '../lib/voice'
 
@@ -25,8 +31,46 @@
   const onlyWho = $derived(`Only ${store.nick(now.requestedBy)} can control this song`)
   const status = $derived(store.musicStatus.get(now.videoId))
   const repeat = $derived(s.repeat ?? 'off')
+  // Anyone may ask to skip; when the song isn't theirs it's a vote and half the room skips it.
+  const votes = $derived(s.skipVotes?.length ?? 0)
+  const voted = $derived(!!store.me && !!s.skipVotes?.includes(store.me.id))
   const source = $derived(s.lyrics ?? 'auto')
   const lyrics = $derived(lyricsOf(now, source))
+  // Romanization and translation, asked only when this app wants one of them.
+  const wantNotes = $derived(lyricExtras.roman || lyricExtras.translate)
+  const notesRaw = $derived(wantNotes && lyrics?.lines.length ? annotationsOf(`${now.videoId}|${lyrics.source}`, lyrics.lines.map((l) => l.text)) : null)
+  const notes = $derived(
+    notesRaw ? notesRaw.map((a) => ({ roman: lyricExtras.roman ? a.roman : null, translation: lyricExtras.translate ? a.translation : null })) : null,
+  )
+  // A music video plays silently above the title, kept in step with the song everyone hears.
+  let videoUrl = $state<string | null>(null)
+  let videoReady = $state(false)
+  let video: HTMLVideoElement | undefined = $state()
+  $effect(() => {
+    const id = now.video ? now.videoId : null
+    videoUrl = null
+    videoReady = false
+    if (!id) return
+    let live = true
+    const known = videoUrls.get(id)
+    const got = known ?? api.musicVideoUrl(id)
+    if (!known) videoUrls.set(id, got)
+    got.then((u) => { if (live) videoUrl = u }, () => videoUrls.delete(id))
+    return () => { live = false }
+  })
+  $effect(() => {
+    const v = video
+    if (!v || !videoReady) return
+    const want = pos / 1000
+    if (paused) { if (!v.paused) v.pause() }
+    else if (v.paused) void v.play().catch(() => {})
+    if (v.seeking) return
+    const drift = v.currentTime - want
+    // Far off (a seek, a late start): jump. A little off: run a touch faster or slower to catch up.
+    if (Math.abs(drift) > 0.6) v.currentTime = want
+    else v.playbackRate = Math.abs(drift) > 0.06 ? (drift > 0 ? 0.95 : 1.05) : 1
+  })
+
   const sourceName = (id: string) => LYRICS_SOURCES.find((x) => x.id === id)?.name ?? id
   // Only the channel's owner or an admin picks where lyrics come from; everyone in the call follows.
   const channel = $derived(store.channels.find((c) => c.id === s.channelId))
@@ -40,6 +84,23 @@
 </script>
 
 <aside class="player" class:paused>
+  {#if videoUrl}
+    <!-- Opens once the first frame is in, pushing the title down smoothly. -->
+    <div class="vid" class:ready={videoReady}>
+      <div class="vbox">
+        <video
+          bind:this={video}
+          src={videoUrl}
+          muted
+          playsinline
+          preload="auto"
+          disablepictureinpicture
+          onloadeddata={() => (videoReady = true)}
+          onerror={() => { videoUrl = null; videoReady = false }}
+        ></video>
+      </div>
+    </div>
+  {/if}
   <div class="head">
     <div class="sleeve">
       <div class="disc"><div class="label" style="background-image:url('{now.artUrl}')"></div></div>
@@ -67,7 +128,15 @@
     <button class="big" disabled={!canControl} title={canControl ? (paused ? 'Resume' : 'Pause') : onlyWho} onclick={() => store.musicCmd({ op: paused ? 'resume' : 'pause' })}>
       <Icon name={paused ? 'play' : 'pause'} />
     </button>
-    <button disabled={!canControl} title={canControl ? 'Skip' : onlyWho} onclick={() => store.musicCmd({ op: 'skip' })}><Icon name="skip" /></button>
+    <button
+      class="skip"
+      class:on={voted}
+      title={canControl ? 'Skip' : voted ? `You voted to skip (${votes}/${s.skipNeeded})` : votes ? `Vote to skip (${votes}/${s.skipNeeded})` : `Vote to skip (${store.nick(now.requestedBy)} added it)`}
+      onclick={() => store.musicCmd({ op: 'skip' })}
+    >
+      <Icon name="skip" />
+      {#if votes}<span class="votes">{votes}/{s.skipNeeded}</span>{/if}
+    </button>
     <button
       class:on={repeat !== 'off'}
       title={repeat === 'off' ? 'Loop: off (click for queue)' : repeat === 'queue' ? 'Loop: queue (click for song)' : 'Loop: this song (click to turn off)'}
@@ -103,6 +172,9 @@
             </button>
           {/each}
           {#if !canPick}<div class="mnote">Only the channel's owner or an admin can change this</div>{/if}
+          <div class="mhead extras">Under each line (just for you)</div>
+          <label class="toggle"><span>Romanization</span><input type="checkbox" bind:checked={lyricExtras.roman} /></label>
+          <label class="toggle"><span>Translate to English</span><input type="checkbox" bind:checked={lyricExtras.translate} /></label>
         </div>
       {/if}
     </div>
@@ -135,7 +207,7 @@
         </ol>
       </div>
     {:else if lyrics?.lines.length}
-      <LyricsView lines={lyrics.lines} {pos} />
+      <LyricsView lines={lyrics.lines} {pos} {notes} />
     {:else if lyrics?.plain}
       <div class="plain"><pre>{lyrics.plain}</pre></div>
     {:else}
@@ -150,6 +222,10 @@
     padding: 18px; border-radius: 16px; background: rgba(10, 10, 16, 0.32); backdrop-filter: blur(18px);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
   }
+  .vid { display: grid; grid-template-rows: 0fr; margin-bottom: -12px; opacity: 0; transition: grid-template-rows 650ms cubic-bezier(0.22, 1, 0.36, 1), margin 650ms cubic-bezier(0.22, 1, 0.36, 1), opacity 500ms ease-out; }
+  .vid.ready { grid-template-rows: 1fr; margin-bottom: 0; opacity: 1; }
+  .vbox { min-height: 0; overflow: hidden; border-radius: 12px; }
+  video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; border-radius: 12px; }
   .head { display: flex; gap: 16px; align-items: center; min-width: 0; }
   .sleeve { position: relative; flex: none; width: 112px; height: 112px; margin-right: 58px; }
   .cover, .label { background-size: cover; background-position: center; background-color: #2a2b35; }
@@ -181,6 +257,11 @@
   .ctl button.big { width: 44px; height: 44px; background: #fff; color: #16171c; }
   .ctl button.on { background: rgba(255, 255, 255, 0.34); }
   .ctl button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .ctl .skip { position: relative; }
+  .votes {
+    position: absolute; right: -6px; top: -6px; min-width: 22px; padding: 1px 5px; border-radius: 999px; font-size: 10px; font-weight: 800;
+    color: #16171c; background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4); font-variant-numeric: tabular-nums;
+  }
   .vol { flex: 1; display: flex; align-items: center; gap: 6px; margin-left: 4px; color: rgba(255, 255, 255, 0.8); min-width: 0; }
   .vol :global(.slider) { flex: 1; min-width: 40px; max-width: 120px; }
   .next { font-size: 12px; color: rgba(255, 255, 255, 0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -195,6 +276,13 @@
   .menu button:disabled { opacity: 0.45; cursor: default; }
   .mhead { padding: 6px 10px 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255, 255, 255, 0.6); }
   .mnote { padding: 6px 10px; font-size: 11.5px; color: rgba(255, 255, 255, 0.6); border-top: 1px solid rgba(255, 255, 255, 0.08); margin-top: 4px; }
+  .mhead.extras { margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 10px; }
+  .toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 10px; font-size: 13px; border-radius: 7px; cursor: pointer; }
+  .toggle:hover { background: rgba(255, 255, 255, 0.08); }
+  .toggle input { appearance: none; -webkit-appearance: none; width: 30px; height: 18px; border-radius: 999px; background: rgba(255, 255, 255, 0.2); position: relative; cursor: pointer; transition: background 150ms; margin: 0; }
+  .toggle input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform 150ms; }
+  .toggle input:checked { background: #3ba55d; }
+  .toggle input:checked::after { transform: translateX(12px); }
   .add { margin-bottom: 10px; }
   .add :global(ul) { max-height: 220px; }
   .menu button.on { background: rgba(255, 255, 255, 0.06); }
@@ -233,6 +321,7 @@
   .queue button:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
   .empty { color: rgba(255, 255, 255, 0.6); font-size: 13px; }
   @media (prefers-reduced-motion: reduce) {
+    .vid { transition: none; }
     .disc, .plain pre, .dot.wait { animation: none; }
   }
 </style>

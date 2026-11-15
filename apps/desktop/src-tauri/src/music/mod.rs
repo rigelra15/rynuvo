@@ -4,6 +4,7 @@ pub mod webm;
 pub mod ytm;
 pub mod ctl;
 pub mod lyrics;
+pub mod translate;
 
 /// Wall-clock ms (the server's clock is aligned to this through each state's `server_time`).
 pub fn now_ms() -> i64 {

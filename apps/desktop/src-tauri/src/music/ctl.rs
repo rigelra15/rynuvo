@@ -191,11 +191,11 @@ mod tests {
     use rynuvo_proto::MusicEntry;
 
     fn entry(id: u64, v: &str) -> MusicEntry {
-        MusicEntry { id, video_id: v.into(), title: v.into(), artist: "LANY".into(), album: None, art_url: String::new(), duration_ms: 180_000, requested_by: 1 }
+        MusicEntry { id, video_id: v.into(), title: v.into(), artist: "LANY".into(), album: None, art_url: String::new(), duration_ms: 180_000, requested_by: 1, video: false }
     }
 
     fn state(now: Option<MusicEntry>, queue: Vec<MusicEntry>, started_at: i64, paused_at: Option<u32>, server_time: i64) -> MusicState {
-        MusicState { channel_id: 5, now, started_at, paused_at, queue, server_time, lyrics: "auto".into(), repeat: "off".into() }
+        MusicState { channel_id: 5, now, started_at, paused_at, queue, server_time, lyrics: "auto".into(), repeat: "off".into(), skip_votes: vec![], skip_needed: 0 }
     }
 
     #[test]
