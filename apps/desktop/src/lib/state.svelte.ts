@@ -5,6 +5,7 @@ import { dialog } from './dialog.svelte'
 import type { Channel, Id, Message, User } from './types'
 import { applyVoice, type MyVoice, type VoiceEvent, type VoiceMember } from './voice'
 import { applyStreams, type StreamEvent, type StreamInfo } from './stream'
+import type { MusicCmd, MusicState, MusicStatus } from './music'
 
 export const TYPING_TTL_MS = 6000
 
@@ -50,6 +51,14 @@ class Store {
   streamStats = new SvelteMap<Id, { fps: number; codec: string; kbps: number; path: string }>()
   streamNotice = $state<string | null>(null)
   streamPreset = $state('1080p60')
+  /** Listen-together music per voice channel, with the local time each state arrived. */
+  music = new SvelteMap<Id, { state: MusicState; receivedAt: number }>()
+  /** The "Rynuvo Music" user: authors the bot's replies, never listed as a person. */
+  musicBot = $state<Id | null>(null)
+  musicStatus = new SvelteMap<string, MusicStatus>()
+  musicVolume = $state(0.5)
+  /** Show the queue panel in the music view. */
+  queueOpen = $state(false)
 
   /** The splash can go: onboarding is up, or the channel list and the open text channel's first page are in. */
   get ready(): boolean {
@@ -73,6 +82,27 @@ class Store {
 
   canManage = (c: Channel): boolean => !!this.me && (this.me.isAdmin || c.ownerId === this.me.id)
 
+  /** Everyone in the circle, without the music bot. */
+  people(): User[] {
+    return [...this.users.values()].filter((u) => u.id !== this.musicBot)
+  }
+
+  musicIn(channel: Id | null): { state: MusicState; receivedAt: number } | null {
+    if (channel === null) return null
+    const m = this.music.get(channel)
+    return m && m.state.now ? m : null
+  }
+
+  setMusicVolume(v: number) {
+    this.musicVolume = v
+    void api.musicSetVolume(v)
+  }
+
+  /** A music control from the player (replies go to the voice channel's last command channel). */
+  musicCmd(cmd: MusicCmd) {
+    void api.musicCmd(cmd, null).catch((e) => dialog.notice(errText(e)))
+  }
+
   user(id: Id): User | undefined {
     return this.users.get(id)
   }
@@ -94,6 +124,7 @@ class Store {
       this.volumes.clear()
       for (const [id, v] of Object.entries(p.volumes)) this.volumes.set(Number(id), v)
       if (p.streamPreset) this.streamPreset = p.streamPreset
+      if (typeof p.musicVolume === 'number') this.musicVolume = p.musicVolume
     } catch {
       // defaults are fine
     }
@@ -145,6 +176,9 @@ class Store {
     this.live = null
     this.watching = null
     this.streamStats.clear()
+    this.music.clear()
+    this.musicBot = null
+    this.musicStatus.clear()
     this.notice = notice
     this.phase = 'onboarding'
   }
@@ -357,6 +391,9 @@ class Store {
         this.channels = m.d.channels
         this.gotReady = true
         this.alerts = m.d.alerts
+        this.musicBot = m.d.musicBot ?? null
+        this.music.clear()
+        for (const s of m.d.music ?? []) this.music.set(s.channelId, { state: s, receivedAt: Date.now() })
         // drop caches of channels that disappeared while offline
         for (const id of [...this.messages.keys()]) if (!m.d.channels.some((c) => c.id === id)) this.messages.delete(id)
         if (!this.selected) this.select(next(this.channels, null, -1))
@@ -421,6 +458,10 @@ class Store {
       case 'streamStopped':
       case 'streamViewer':
       case 'streamSignal':
+        return
+      case 'musicState':
+        if (!m.d.now && !m.d.queue.length) this.music.delete(m.d.channelId)
+        else this.music.set(m.d.channelId, { state: m.d, receivedAt: Date.now() })
         return
       case 'pong':
         return

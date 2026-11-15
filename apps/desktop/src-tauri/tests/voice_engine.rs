@@ -53,7 +53,7 @@ async fn rig(threshold: f32, with_link: bool) -> Rig {
     } else {
         (None, None)
     };
-    let opts = EngineOpts { me: 1, input: Some("Mic A".into()), output: None, threshold, volumes: HashMap::new() };
+    let opts = EngineOpts { me: 1, input: Some("Mic A".into()), output: None, threshold, volumes: HashMap::new(), music_volume: 0.5 };
     let engine = VoiceEngine::start(
         Box::new(FakeBackend(shared.clone())),
         opts,
@@ -207,4 +207,34 @@ async fn stop_returns_while_mic_floods() {
     });
     assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok(), "stop() must return while the mic outpaces the DSP");
     flood.join().unwrap();
+}
+
+/// How much output the engine has queued: drain it all and count.
+fn drain(r: &Rig) -> usize {
+    let mut s = r.shared.lock().unwrap();
+    let Some(io) = s.io.as_mut() else { return 0 };
+    let mut buf = [0f32; 960];
+    let mut n = 0;
+    loop {
+        let k = io.playback.pop_slice(&mut buf);
+        if k == 0 {
+            return n;
+        }
+        n += k;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_card_that_runs_dry_gets_more_queued() {
+    let r = rig(0.5, false).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(drain(&r), 2 * 960, "40 ms queued to start with");
+    // The card empties the queue over and over before the engine comes back to it.
+    for _ in 0..10 {
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        drain(&r);
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(drain(&r) > 4 * 960, "more queued after running dry");
+    r.engine.stop();
 }

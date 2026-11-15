@@ -67,6 +67,8 @@ async fn snapshot(st: &AppState, me: User) -> anyhow::Result<WsServerMsg> {
         alerts,
         voice: st.voice.members(),
         streams: st.voice.streams(),
+        music: st.music.states(crate::now_ms()),
+        music_bot: crate::music::wire::bot_id(st).await,
     })
 }
 
@@ -151,6 +153,7 @@ async fn run(
                         Ok(WsClientMsg::StreamWatch { user_id: streamer, codecs }) => crate::voice::stream_watch(st, user_id, streamer, codecs),
                         Ok(WsClientMsg::StreamUnwatch { user_id: streamer }) => crate::voice::stream_unwatch(st, user_id, streamer),
                         Ok(WsClientMsg::StreamSignal { to, data }) => crate::voice::stream_signal(st, user_id, to, data),
+                        Ok(WsClientMsg::Music { cmd, text_channel_id }) => crate::music::wire::command(st, user_id, is_admin, cmd, text_channel_id).await,
                         _ => {}
                     },
                     Message::Binary(b) => st.relay.from_ws(conn_id, &b).await,

@@ -14,7 +14,7 @@
   import { dialog } from './lib/dialog.svelte'
   import Sidebar from './components/Sidebar.svelte'
   import UserVolumeMenu from './components/UserVolumeMenu.svelte'
-  import { api, errText, onSessionEvent, onStreamEvent, onVoiceEvent } from './lib/api'
+  import { api, errText, onMusicEvent, onSessionEvent, onStreamEvent, onVoiceEvent } from './lib/api'
   import { store } from './lib/state.svelte'
   import { updater } from './lib/updater.svelte'
   import type { Channel, ChannelKind, Id } from './lib/types'
@@ -50,11 +50,13 @@
     const un = onSessionEvent((e) => store.apply(e))
     const unv = onVoiceEvent((e) => store.applyVoiceEvent(e))
     const uns = onStreamEvent((e) => store.applyStreamEvent(e))
+    const unm = onMusicEvent((e) => store.musicStatus.set(e.videoId, e))
     void store.boot()
     return () => {
       void un.then((f) => f())
       void unv.then((f) => f())
       void uns.then((f) => f())
+      void unm.then((f) => f())
     }
   })
 

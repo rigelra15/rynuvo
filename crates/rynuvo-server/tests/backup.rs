@@ -19,7 +19,7 @@ async fn snapshot_is_a_readable_copy_and_once_per_day() {
     let p = snapshot(&pool, &dir, "2026-11-14").await.unwrap().expect("made a snapshot");
     assert_eq!(p.file_name().unwrap(), "rynuvo-2026-11-14.db");
     let copy = db::open_pool(&format!("sqlite://{}", p.display())).await.unwrap();
-    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users").fetch_one(&copy).await.unwrap();
+    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users WHERE nickname_key = 'dimas'").fetch_one(&copy).await.unwrap();
     assert_eq!(n, 1);
     assert!(snapshot(&pool, &dir, "2026-11-14").await.unwrap().is_none(), "one per day");
     assert!(std::fs::read_dir(&dir).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp")));

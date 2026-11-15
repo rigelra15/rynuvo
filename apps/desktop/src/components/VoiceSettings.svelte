@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Slider from './Slider.svelte'
   import { onDestroy, onMount } from 'svelte'
   import { api, errText } from '../lib/api'
   import { store } from '../lib/state.svelte'
@@ -78,7 +79,7 @@
   <h3>Mic threshold</h3>
   <p class="muted">Your mic opens when the bar turns green. Raise this if background noise gets through.</p>
   <div class="meter"><div class="fill" class:open={store.micLevel.open} style="width:{meter}%"></div></div>
-  <input type="range" min="0" max="100" bind:value={sensitivity} oninput={threshold} />
+  <Slider bind:value={sensitivity} max={100} step={1} label="Mic threshold" oninput={threshold} />
   <button class="btn" onclick={test}>{testing ? 'Stop test' : 'Test mic'}</button>
   {#if testing}<p class="muted">You should hear yourself. Use headphones to avoid echo.</p>{/if}
 </section>
@@ -99,8 +100,7 @@
   section { padding: 14px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
   h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
   p { margin: 0; font-size: 13px; }
-  select, input[type='range'] { width: 100%; }
-  input[type='range'] { accent-color: var(--accent); }
+  select { width: 100%; }
   .meter { width: 100%; height: 8px; border-radius: 4px; background: var(--elev); overflow: hidden; }
   .fill { height: 100%; background: var(--faint); transition: width 90ms linear; }
   .fill.open { background: var(--speaking); }

@@ -7,7 +7,7 @@
 
   let { onMenu }: { onMenu: (userId: Id, e: MouseEvent) => void } = $props()
 
-  const groups = $derived(memberGroups(store.users.values(), store.online, store.me?.id))
+  const groups = $derived(memberGroups(store.people(), store.online, store.me?.id))
 
   /** The voice channel a member is in, if any. */
   function inVoice(id: Id): string | null {

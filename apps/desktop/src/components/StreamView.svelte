@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Slider from './Slider.svelte'
   import { onMount } from 'svelte'
   import { api, errText } from '../lib/api'
   import { CODEC_STRING, decodableCodecs, KeyGate, parseAu, statsLine, type CodecName } from '../lib/stream'
@@ -108,7 +109,7 @@
     <span class="stats muted">{line}</span>
     <label class="vol" title="Stream volume">
       <span class="muted">Volume</span>
-      <input type="range" min="0" max="2" step="0.05" bind:value={volume} oninput={setVolume} />
+      <Slider bind:value={volume} max={2} step={0.05} tone="light" label="Stream volume" oninput={setVolume} />
     </label>
     <button class="btn" onclick={toggleFullscreen}>Fullscreen</button>
     <button class="btn" onclick={() => store.closeStream()}>Stop watching</button>
@@ -126,5 +127,5 @@
   .live { background: var(--danger); color: #fff; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
   .stats { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .vol { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-  .vol input { width: 90px; }
+  .vol :global(.slider) { width: 90px; }
 </style>

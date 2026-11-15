@@ -4,6 +4,7 @@ mod diag;
 #[cfg(target_os = "macos")]
 mod mac_notify;
 mod media;
+pub mod music;
 mod notify;
 pub mod prefs;
 pub mod stream;
@@ -11,6 +12,7 @@ mod tray;
 pub mod voice;
 mod voice_cmd;
 mod stream_cmd;
+mod music_cmd;
 
 use std::sync::Arc;
 
@@ -83,7 +85,21 @@ pub fn run() {
                 }),
                 tauri::async_runtime::handle().inner().clone(),
             );
-            app.manage(commands::Core::new(store, dir.join(file), voice, stream));
+            let http = music::ytm::client();
+            let h3 = app.handle().clone();
+            let music = music::ctl::MusicCtl::new(
+                Arc::new(music_cmd::VoiceOut(voice.clone())),
+                music_cmd::loader(http.clone()),
+                Arc::new(move |s| {
+                    let _ = h3.emit(music_cmd::MUSIC_EVENT, s);
+                }),
+            );
+            tauri::async_runtime::spawn({
+                let m = music.clone();
+                async move { m.spawn_ticker() }
+            });
+            app.manage(music_cmd::MusicHttp(http));
+            app.manage(commands::Core::new(store, dir.join(file), voice, stream, music));
             tray::build(app.handle())?;
             if let Err(e) = tray::register_shortcuts(app.handle(), &p) {
                 tracing::warn!("shortcuts: {e}");
@@ -128,6 +144,12 @@ pub fn run() {
             stream_cmd::stream_request_key,
             stream_cmd::stream_self_check,
             stream_cmd::open_capture_settings,
+            music_cmd::music_play,
+            music_cmd::music_search,
+            music_cmd::music_cmd,
+            music_cmd::music_lyrics,
+            music_cmd::music_status,
+            music_cmd::music_set_volume,
             voice_cmd::voice_state,
             voice_cmd::voice_join,
             voice_cmd::voice_leave,

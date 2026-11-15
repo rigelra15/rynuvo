@@ -4,18 +4,23 @@
   import { membersOf } from '../lib/voice'
   import { avatarColor } from '../lib/avatar'
   import { pop } from '../lib/motion'
-  import { bento } from '../lib/bento'
+  import { bento, fill } from '../lib/bento'
   import { groupTitle } from '../lib/home'
   import type { Channel, Id } from '../lib/types'
   import Icon from './Icon.svelte'
   import GoLiveDialog from './GoLiveDialog.svelte'
   import StreamView from './StreamView.svelte'
+  import MusicPlayer from './MusicPlayer.svelte'
+  import MusicBackdrop from './MusicBackdrop.svelte'
 
   let { channel, onMenu }: { channel: Channel; onMenu: (userId: Id, e: MouseEvent) => void } = $props()
   const list = $derived(membersOf(store.voice, channel.id))
   const joined = $derived(store.inVoice(channel.id))
   const watching = $derived(store.watching !== null && list.some((m) => m.userId === store.watching) ? store.watching : null)
   let picking = $state(false)
+  const music = $derived(store.musicIn(channel.id))
+  /** The music panel sits on the right, unless a stream is open (the stream wins). */
+  const playerUp = $derived(joined && music !== null && watching === null)
   const strip = $derived(watching !== null && joined)
   const anyoneSpeaking = $derived(list.some((m) => store.speaking.has(m.userId)))
   // Background glow colours: the first two members' avatar colours, else the accent.
@@ -28,7 +33,8 @@
   const GAP = 10
   let gw = $state(0)
   let gh = $state(0)
-  const layout = $derived(bento(list.length, gw, gh, GAP))
+  // Beside the music panel the tiles stretch to fill the whole left side.
+  const layout = $derived(playerUp ? fill(bento(list.length, gw, gh, GAP), gw, gh, GAP) : bento(list.length, gw, gh, GAP))
   const avatarSize = $derived(strip ? 36 : Math.round(Math.min(112, Math.max(40, layout.h * 0.34))))
 
   const who = $derived(groupTitle(list.map((m) => store.nick(m.userId))))
@@ -45,7 +51,7 @@
 </script>
 
 <section class="stage" class:anyone-speaking={anyoneSpeaking} style="--g2:{glow[0] ?? 'var(--accent)'};--g3:{glow[1] ?? glow[0] ?? 'var(--accent)'}">
-  <div class="glow" aria-hidden="true"></div>
+  {#if music}<MusicBackdrop url={music.state.now!.artUrl} />{:else}<div class="glow" aria-hidden="true"></div>{/if}
   {#if !joined}
     <!-- Before joining: who's in here, and one big button. -->
     <div class="prejoin">
@@ -59,12 +65,11 @@
       {/if}
       <h2>{channel.name}</h2>
       <p>{list.length ? `${who} ${list.length === 1 ? 'is' : 'are'} currently in voice` : 'No one is here yet. Be the first!'}</p>
+      {#if music}<p class="np"><Icon name="music" size={14} /> {music.state.now!.title} — {music.state.now!.artist}</p>{/if}
       <button class="joinbtn" onclick={() => store.joinVoice(channel.id)}>Join Voice</button>
     </div>
   {:else}
-    {#if watching !== null}
-      {#key watching}<StreamView userId={watching} />{/key}
-    {/if}
+    {#snippet people()}
     <div class="area" class:strip bind:clientWidth={gw} bind:clientHeight={gh}>
       <div class="grid" class:strip style={strip ? '' : `width:${layout.cols * layout.w + (layout.cols - 1) * GAP}px`}>
         {#each list as m (m.userId)}
@@ -106,6 +111,20 @@
       </div>
     </div>
 
+    {/snippet}
+    {#if watching !== null}
+      {#key watching}<StreamView userId={watching} />{/key}
+      {#if music}<p class="np"><Icon name="music" size={14} /> {music.state.now!.title} — {music.state.now!.artist}</p>{/if}
+      {@render people()}
+    {:else if playerUp && music}
+      <div class="split">
+        {@render people()}
+        <MusicPlayer {music} />
+      </div>
+    {:else}
+      {@render people()}
+    {/if}
+
     {#if store.voicePath === 'ws'}<p class="path muted">via server (WebSocket)</p>{/if}
     {#if store.live}
       <p class="path muted">
@@ -139,8 +158,9 @@
       radial-gradient(closest-side at 30% 35%, color-mix(in srgb, var(--accent) 38%, transparent), transparent),
       radial-gradient(closest-side at 70% 65%, color-mix(in srgb, var(--g2) 32%, transparent), transparent),
       radial-gradient(closest-side at 65% 25%, color-mix(in srgb, var(--g3) 26%, transparent), transparent);
-    animation: drift 20s ease-in-out infinite alternate;
+    animation: drift 20s ease-in-out infinite alternate, breathe 7s ease-in-out infinite;
   }
+  @keyframes breathe { 0%, 100% { filter: brightness(0.85); } 50% { filter: brightness(1.25); } }
   .anyone-speaking .glow { opacity: 0.9; }
   @keyframes drift {
     from { transform: translate(-6%, -4%) rotate(0deg); }
@@ -155,7 +175,9 @@
   .joinbtn { background: #fff; color: #16171c; font-weight: 600; padding: 9px 18px; border-radius: 8px; transition: transform 120ms, box-shadow 120ms; }
   .joinbtn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 
-  .area { flex: 1; min-height: 0; display: grid; place-items: center; }
+  .area { flex: 1; min-height: 0; min-width: 0; display: grid; place-items: center; }
+  .split .area { align-self: stretch; }
+  .split { flex: 1; min-height: 0; display: flex; gap: 16px; }
   .grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
   .tile {
     position: relative; border-radius: 12px; overflow: hidden; display: grid; place-items: center;
@@ -176,6 +198,8 @@
   .self { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.45); color: #fff; font-weight: 600; font-size: 13px; }
   .sub { color: rgba(255, 255, 255, 0.78); font-size: 12px; }
   .area.strip { flex: 0 0 auto; display: block; }
+  .np { margin: 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: rgba(255, 255, 255, 0.85); font-size: 13px; }
+  .prejoin .np { margin: -8px 0 14px; }
   .grid.strip { flex-wrap: wrap; }
   .grid.strip .tile { width: 150px; height: 84px; }
   .n {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Slider from './Slider.svelte'
   import { menu } from '../lib/motion'
   import { api, errText } from '../lib/api'
   import { dialog } from '../lib/dialog.svelte'
@@ -34,7 +35,7 @@
   {#if !isMe}
     <label>
       <span>User volume <b>{pct}%</b></span>
-      <input type="range" min="0" max="200" step="5" bind:value={pct} oninput={change} />
+      <Slider bind:value={pct} max={200} step={5} label="User volume" oninput={change} />
     </label>
   {/if}
   {#if canKick}<button class="danger" onclick={kick}>Disconnect</button>{/if}
@@ -45,7 +46,6 @@
   .menu { position: fixed; z-index: 60; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; width: 220px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); display: flex; flex-direction: column; gap: 8px; }
   .who { font-weight: 600; padding: 0 2px; }
   label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
-  input { width: 100%; accent-color: var(--accent); }
   button { text-align: left; padding: 7px 10px; border-radius: 6px; }
   button:hover { background: var(--elev); }
   .danger { color: #f87171; }

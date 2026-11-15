@@ -22,7 +22,9 @@ fn ended(st: &AppState, conn_id: u64, reason: &str) {
 /// Announce that `m` left and store its traffic.
 fn left(st: &AppState, m: Member) {
     st.hub.broadcast(WsServerMsg::VoiceMemberLeft { user_id: m.user_id, channel_id: m.channel_id });
+    let ch = m.channel_id;
     store_usage(st, m);
+    crate::music::wire::voice_left(st, ch);
 }
 
 /// The member's voice session is over: end their stream and their watching.

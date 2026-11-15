@@ -14,3 +14,11 @@ export function bento(n: number, W: number, H: number, gap: number, ratio = 16 /
   }
   return { ...best, w: Math.floor(best.w), h: Math.floor(best.h) }
 }
+
+/** The same columns and rows, stretched to fill the whole `W×H` area (tiles lose the 16:9 shape). */
+export function fill(b: Bento, W: number, H: number, gap: number): Bento {
+  if (b.rows === 0) return b
+  const w = Math.floor((W - gap * (b.cols - 1)) / b.cols)
+  const h = Math.floor((H - gap * (b.rows - 1)) / b.rows)
+  return { ...b, w: Math.max(0, w), h: Math.max(0, h) }
+}
