@@ -231,7 +231,6 @@ struct Worker {
     enc: Option<Encoder>,
     mixer: Mixer,
     muted: bool,
-    deafened: bool,
     mic_test: bool,
     frame: [f32; FRAME],
     filled: usize,
@@ -276,7 +275,6 @@ impl Worker {
             enc,
             mixer,
             muted: false,
-            deafened: false,
             mic_test: false,
             frame: [0.0; FRAME],
             filled: 0,
@@ -350,7 +348,7 @@ impl Worker {
     fn handle(&mut self, c: Cmd) -> bool {
         match c {
             Cmd::Muted(v) => self.muted = v,
-            Cmd::Deafened(v) => self.deafened = v,
+            Cmd::Deafened(v) => self.mixer.set_deafened(v),
             Cmd::Threshold(t) => self.gate.set_threshold(t),
             Cmd::Volume(u, v) => self.mixer.set_volume(u, v),
             Cmd::Devices(i, o) => self.open_or_schedule(i, o),
@@ -450,9 +448,6 @@ impl Worker {
         let mut out = [0f32; FRAME];
         while play.occupied_len() < target && play.vacant_len() >= FRAME {
             self.mixer.mix(&mut out);
-            if self.deafened {
-                out.fill(0.0);
-            }
             for half in out.chunks_exact(DSP_FRAME) {
                 self.dsp.render(half.try_into().unwrap());
             }

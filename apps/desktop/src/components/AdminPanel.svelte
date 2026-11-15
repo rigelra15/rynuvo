@@ -135,11 +135,11 @@
 <style>
   section { padding: 14px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
   .member, .report, .between { align-self: stretch; }
-  h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  h3 { margin: 0; font-size: 15px; font-weight: 700; color: var(--text); }
   p { margin: 0; font-size: 13px; }
   .row { display: flex; gap: 10px; align-items: center; }
   .between { justify-content: space-between; }
-  .code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.08em; color: #fff; }
+  .code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.08em; color: var(--accent); }
   .alert { color: #fca5a5; }
   .member { display: flex; align-items: center; gap: 8px; font-size: 14px; }
   .nick { flex: 1; }

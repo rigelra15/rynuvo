@@ -6,6 +6,7 @@ import type { Channel, Id, Message, User } from './types'
 import { applyVoice, type MyVoice, type VoiceEvent, type VoiceMember } from './voice'
 import { applyStreams, type StreamEvent, type StreamInfo } from './stream'
 import type { MusicCmd, MusicState, MusicStatus } from './music'
+import { videos } from './videos'
 
 export const TYPING_TTL_MS = 6000
 
@@ -393,7 +394,10 @@ class Store {
         this.alerts = m.d.alerts
         this.musicBot = m.d.musicBot ?? null
         this.music.clear()
-        for (const s of m.d.music ?? []) this.music.set(s.channelId, { state: s, receivedAt: Date.now() })
+        for (const s of m.d.music ?? []) {
+          this.music.set(s.channelId, { state: s, receivedAt: Date.now() })
+          videos.prefetch(s)
+        }
         // drop caches of channels that disappeared while offline
         for (const id of [...this.messages.keys()]) if (!m.d.channels.some((c) => c.id === id)) this.messages.delete(id)
         if (!this.selected) this.select(next(this.channels, null, -1))
@@ -461,7 +465,10 @@ class Store {
         return
       case 'musicState':
         if (!m.d.now && !m.d.queue.length) this.music.delete(m.d.channelId)
-        else this.music.set(m.d.channelId, { state: m.d, receivedAt: Date.now() })
+        else {
+          this.music.set(m.d.channelId, { state: m.d, receivedAt: Date.now() })
+          videos.prefetch(m.d)
+        }
         return
       case 'pong':
         return

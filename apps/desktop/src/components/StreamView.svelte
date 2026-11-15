@@ -109,7 +109,7 @@
     <span class="stats muted">{line}</span>
     <label class="vol" title="Stream volume">
       <span class="muted">Volume</span>
-      <Slider bind:value={volume} max={2} step={0.05} tone="light" label="Stream volume" oninput={setVolume} />
+      <Slider bind:value={volume} max={2} step={0.01} tone="light" label="Stream volume" oninput={setVolume} />
     </label>
     <button class="btn" onclick={toggleFullscreen}>Fullscreen</button>
     <button class="btn" onclick={() => store.closeStream()}>Stop watching</button>

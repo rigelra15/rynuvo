@@ -1,8 +1,3 @@
-<script lang="ts" module>
-  /** Where each music video streams from, asked once per video. */
-  const videoUrls = new Map<string, Promise<string>>()
-</script>
-
 <script lang="ts">
   import Slider from './Slider.svelte'
   import Avatar from './Avatar.svelte'
@@ -10,7 +5,8 @@
   import Icon from './Icon.svelte'
   import LyricsView from './LyricsView.svelte'
   import { store } from '../lib/state.svelte'
-  import { api } from '../lib/api'
+  import { videos } from '../lib/videos'
+  import { follow } from '../lib/video'
   import { annotationsOf, frameClock, lyricExtras, lyricsOf } from '../lib/lyrics.svelte'
   import { clock, LYRICS_SOURCES, lyricsStatus, mayControl, positionMs, type MusicState } from '../lib/music'
   import { membersOf } from '../lib/voice'
@@ -35,7 +31,8 @@
   const votes = $derived(s.skipVotes?.length ?? 0)
   const voted = $derived(!!store.me && !!s.skipVotes?.includes(store.me.id))
   const source = $derived(s.lyrics ?? 'auto')
-  const lyrics = $derived(lyricsOf(now, source))
+  // A music video's timing is the video's, not the song's: no lyrics for it, the queue instead.
+  const lyrics = $derived(now.video ? null : lyricsOf(now, source))
   // Romanization and translation, asked only when this app wants one of them.
   const wantNotes = $derived(lyricExtras.roman || lyricExtras.translate)
   const notesRaw = $derived(wantNotes && lyrics?.lines.length ? annotationsOf(`${now.videoId}|${lyrics.source}`, lyrics.lines.map((l) => l.text)) : null)
@@ -52,23 +49,12 @@
     videoReady = false
     if (!id) return
     let live = true
-    const known = videoUrls.get(id)
-    const got = known ?? api.musicVideoUrl(id)
-    if (!known) videoUrls.set(id, got)
-    got.then((u) => { if (live) videoUrl = u }, () => videoUrls.delete(id))
+    videos.get(id).then((u) => { if (live) videoUrl = u }, () => {})
     return () => { live = false }
   })
   $effect(() => {
     const v = video
-    if (!v || !videoReady) return
-    const want = pos / 1000
-    if (paused) { if (!v.paused) v.pause() }
-    else if (v.paused) void v.play().catch(() => {})
-    if (v.seeking) return
-    const drift = v.currentTime - want
-    // Far off (a seek, a late start): jump. A little off: run a touch faster or slower to catch up.
-    if (Math.abs(drift) > 0.6) v.currentTime = want
-    else v.playbackRate = Math.abs(drift) > 0.06 ? (drift > 0 ? 0.95 : 1.05) : 1
+    if (v && videoReady) follow(v, pos, paused)
   })
 
   const sourceName = (id: string) => LYRICS_SOURCES.find((x) => x.id === id)?.name ?? id
@@ -84,11 +70,12 @@
 </script>
 
 <aside class="player" class:paused>
-  {#if videoUrl}
-    <!-- Opens once the first frame is in, pushing the title down smoothly. -->
-    <div class="vid" class:ready={videoReady}>
-      <div class="vbox">
-        <video
+  {#if now.video}
+    <!-- Opens at once with the video's thumbnail; the picture fades in over it when the first frame is in. -->
+    <div class="vid ready">
+      <div class="vbox" style="background-image:url('{now.artUrl}')">
+        {#if videoUrl}<video
+          class:on={videoReady}
           bind:this={video}
           src={videoUrl}
           muted
@@ -97,17 +84,17 @@
           disablepictureinpicture
           onloadeddata={() => (videoReady = true)}
           onerror={() => { videoUrl = null; videoReady = false }}
-        ></video>
+        ></video>{/if}
       </div>
     </div>
   {/if}
-  <div class="head">
+  <div class="head" class:vmode={now.video}>
     <div class="sleeve">
       <div class="disc"><div class="label" style="background-image:url('{now.artUrl}')"></div></div>
       <div class="cover" style="background-image:url('{now.artUrl}')"></div>
     </div>
     <div class="info">
-      <div class="kicker">{paused ? 'Paused' : 'Now playing'}{repeat === 'song' ? ' · on loop' : ''}</div>
+      {#if paused || repeat === 'song'}<div class="kicker">{paused ? 'Paused' : 'On loop'}{paused && repeat === 'song' ? ', on loop' : ''}</div>{/if}
       <div class="title" title={now.title}>{now.title}</div>
       <div class="artist">{now.artist}{now.album ? ` · ${now.album}` : ''}</div>
       <span class="who" title="Requested by {store.nick(now.requestedBy)}"><Avatar user={store.user(now.requestedBy)} id={now.requestedBy} size={16} />{store.nick(now.requestedBy)}</span>
@@ -143,8 +130,8 @@
       aria-label="Loop: {repeat}"
       onclick={() => store.musicCmd({ op: 'repeat', mode: null })}
     ><Icon name={repeat === 'song' ? 'repeatOne' : 'repeat'} /></button>
-    <button class:on={store.queueOpen} title="Queue" onclick={() => (store.queueOpen = !store.queueOpen)}><Icon name="queue" /></button>
-    <div class="src">
+    {#if !now.video}<button class:on={store.queueOpen} title="Queue" onclick={() => (store.queueOpen = !store.queueOpen)}><Icon name="queue" /></button>{/if}
+    {#if !now.video}<div class="src">
       <button
         class:on={picking}
         aria-haspopup="menu"
@@ -177,10 +164,10 @@
           <label class="toggle"><span>Translate to English</span><input type="checkbox" bind:checked={lyricExtras.translate} /></label>
         </div>
       {/if}
-    </div>
+    </div>{/if}
     <label class="vol" title="Music volume (only for you)">
       <Icon name="volume" size={16} />
-      <Slider value={store.musicVolume} step={0.05} tone="light" label="Music volume" oninput={(v) => store.setMusicVolume(v)} />
+      <Slider value={store.musicVolume} step={0.01} tone="light" label="Music volume" oninput={(v) => store.setMusicVolume(v)} />
     </label>
   </div>
   {#if s.queue.length}
@@ -188,7 +175,7 @@
   {/if}
 
   <div class="below">
-    {#if store.queueOpen}
+    {#if store.queueOpen || now.video}
       <div class="queue">
         <div class="add"><SongSearch glass autofocus={false} /></div>
         <h3>Queue</h3>
@@ -218,14 +205,19 @@
 
 <style>
   .player {
-    flex: none; width: clamp(320px, 34%, 460px); min-height: 0; display: flex; flex-direction: column; gap: 12px; color: #fff;
+    flex: 1; width: 100%; min-height: 0; display: flex; flex-direction: column; gap: 12px; color: #fff;
     padding: 18px; border-radius: 16px; background: rgba(10, 10, 16, 0.32); backdrop-filter: blur(18px);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
   }
   .vid { display: grid; grid-template-rows: 0fr; margin-bottom: -12px; opacity: 0; transition: grid-template-rows 650ms cubic-bezier(0.22, 1, 0.36, 1), margin 650ms cubic-bezier(0.22, 1, 0.36, 1), opacity 500ms ease-out; }
   .vid.ready { grid-template-rows: 1fr; margin-bottom: 0; opacity: 1; }
-  .vbox { min-height: 0; overflow: hidden; border-radius: 12px; }
-  video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; border-radius: 12px; }
+  .vbox { min-height: 0; overflow: hidden; border-radius: 12px; aspect-ratio: 16 / 9; background: #000 center / cover no-repeat; }
+  video { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 12px; opacity: 0; transition: opacity 400ms ease-out; }
+  video.on { opacity: 1; }
+  /* With a video playing, the record and sleeve fold away and the title sits under the picture. */
+  .sleeve { transition: width 650ms cubic-bezier(0.22, 1, 0.36, 1), height 650ms cubic-bezier(0.22, 1, 0.36, 1), margin 650ms cubic-bezier(0.22, 1, 0.36, 1), opacity 300ms ease-out; }
+  .head.vmode { gap: 0; }
+  .head.vmode .sleeve { width: 0; height: 0; margin-right: 0; opacity: 0; overflow: hidden; }
   .head { display: flex; gap: 16px; align-items: center; min-width: 0; }
   .sleeve { position: relative; flex: none; width: 112px; height: 112px; margin-right: 58px; }
   .cover, .label { background-size: cover; background-position: center; background-color: #2a2b35; }
@@ -241,7 +233,7 @@
   .label::after { content: ''; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%; background: #111; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-  .kicker { text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; color: rgba(255, 255, 255, 0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kicker { font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, 0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .title { font-weight: 800; font-size: 22px; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
   .artist { color: rgba(255, 255, 255, 0.78); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .warn { font-size: 12px; color: #ffb4b4; }
@@ -321,7 +313,7 @@
   .queue button:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
   .empty { color: rgba(255, 255, 255, 0.6); font-size: 13px; }
   @media (prefers-reduced-motion: reduce) {
-    .vid { transition: none; }
+    .vid, .sleeve { transition: none; }
     .disc, .plain pre, .dot.wait { animation: none; }
   }
 </style>

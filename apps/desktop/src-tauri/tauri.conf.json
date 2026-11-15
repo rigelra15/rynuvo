@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Rynuvo",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "identifier": "id.hypertopia.rynuvo",
   "build": {
     "frontendDist": "../dist",
@@ -25,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' rynuvo-media: http://rynuvo-media.localhost data: blob: https://*.googleusercontent.com https://*.ggpht.com https://i.ytimg.com; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; img-src 'self' rynuvo-media: http://rynuvo-media.localhost data: blob: https://*.googleusercontent.com https://*.ggpht.com https://i.ytimg.com; style-src 'self' 'unsafe-inline'; media-src 'self' https://*.googlevideo.com; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {

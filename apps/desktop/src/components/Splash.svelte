@@ -11,7 +11,7 @@
 
 <style>
   .splash {
-    position: fixed; inset: 0; z-index: 1000; background: var(--bg);
+    position: fixed; inset: 0; z-index: 1000; background: var(--desk);
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
   }
   .logo { position: relative; color: var(--accent); display: grid; place-items: center; }
@@ -20,7 +20,7 @@
     background: radial-gradient(closest-side, var(--accent-soft), transparent);
     animation: breathe 2.4s ease-in-out infinite;
   }
-  .word { font-size: 20px; font-weight: 700; letter-spacing: 0.02em; color: var(--text); }
+  .word { font-size: 30px; font-weight: 750; font-stretch: 78%; letter-spacing: -0.01em; color: var(--text); font-variation-settings: 'opsz' 48; }
   @keyframes breathe {
     0%, 100% { transform: scale(0.85); opacity: 0.6; }
     50% { transform: scale(1.15); opacity: 1; }

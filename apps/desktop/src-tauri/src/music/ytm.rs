@@ -2,12 +2,17 @@
 //! WEB_REMIX client, and audio stream URLs with the VISIONOS client, which returns plain URLs.
 use rynuvo_proto::MusicEntryReq;
 use serde_json::{Value, json};
+use std::collections::VecDeque;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 const BASE: &str = "https://music.youtube.com";
 const REMIX_VERSION: &str = "1.20260707.12.00";
-/// The search filters for "Songs" and "Videos".
+/// YouTube Music's search filter for "Songs".
 const SONG_FILTER: &str = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D";
-const VIDEO_FILTER: &str = "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D";
+/// Videos come from YouTube itself, filtered to "Type: Video".
+const WEB_VERSION: &str = "2.20251110.01.00";
+const VIDEO_FILTER: &str = "EgIQAQ%3D%3D";
 
 /// The audio stream chosen for a song.
 #[derive(Debug, Clone, PartialEq)]
@@ -69,9 +74,36 @@ pub fn parse_search(v: &Value) -> Vec<MusicEntryReq> {
     parse_shelf(v, false)
 }
 
-/// Music videos in a search response, best first.
+/// Videos in a YouTube (not YouTube Music) search response, best first. YouTube ranks videos the
+/// way people expect; YouTube Music buries uploads by smaller channels. Auto-made "- Topic"
+/// tracks are songs (they show up there already) and live streams have no length, so both are left out.
 pub fn parse_videos(v: &Value) -> Vec<MusicEntryReq> {
-    parse_shelf(v, true)
+    let Some(sections) = v.pointer("/contents/twoColumnSearchResultsRenderer/primaryContents/sectionListRenderer/contents").and_then(Value::as_array)
+    else {
+        return vec![];
+    };
+    let first = |v: &Value, path: &str| v.pointer(path).map(text).unwrap_or("").to_string();
+    sections
+        .iter()
+        .filter_map(|s| s.pointer("/itemSectionRenderer/contents").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|it| it.get("videoRenderer"))
+        .filter_map(|r| {
+            let video_id = r.get("videoId")?.as_str()?.to_string();
+            let duration_ms = clock_ms(r.pointer("/lengthText/simpleText")?.as_str()?)?;
+            let artist = first(r, "/ownerText/runs/0");
+            (!artist.ends_with(" - Topic")).then_some(())?;
+            Some(MusicEntryReq {
+                art_url: format!("https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"),
+                title: first(r, "/title/runs/0"),
+                video_id,
+                artist,
+                album: None,
+                duration_ms,
+                video: true,
+            })
+        })
+        .collect()
 }
 
 fn parse_shelf(v: &Value, video: bool) -> Vec<MusicEntryReq> {
@@ -152,7 +184,24 @@ pub async fn search(http: &reqwest::Client, query: &str) -> Result<Vec<MusicEntr
 }
 
 pub async fn search_videos(http: &reqwest::Client, query: &str) -> Result<Vec<MusicEntryReq>, String> {
-    Ok(parse_videos(&search_raw(http, query, VIDEO_FILTER).await?))
+    let body = json!({
+        "context": {"client": {"clientName": "WEB", "clientVersion": WEB_VERSION, "gl": "ID", "hl": "en"}},
+        "query": query,
+        "params": VIDEO_FILTER,
+    });
+    let v: Value = http
+        .post("https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
+        .header("X-YouTube-Client-Name", "1")
+        .header("X-YouTube-Client-Version", WEB_VERSION)
+        .json(&body)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("Couldn't reach YouTube ({e})"))?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(parse_videos(&v))
 }
 
 async fn search_raw(http: &reqwest::Client, query: &str, filter: &str) -> Result<Value, String> {
@@ -179,6 +228,35 @@ async fn search_raw(http: &reqwest::Client, query: &str, filter: &str) -> Result
     Ok(v)
 }
 
+/// YouTube's player answers by video id, kept for a while: the song's audio and its music video come
+/// from the same answer, so the video is ready the moment the audio is (no second, slow round trip).
+pub struct PlayerCache {
+    max: usize,
+    ttl: Duration,
+    items: VecDeque<(String, Instant, Value)>,
+}
+
+impl PlayerCache {
+    pub fn new(max: usize, ttl: Duration) -> Self {
+        PlayerCache { max, ttl, items: VecDeque::new() }
+    }
+
+    pub fn get(&self, id: &str, now: Instant) -> Option<Value> {
+        self.items.iter().find(|(k, at, _)| k == id && now.duration_since(*at) <= self.ttl).map(|(_, _, v)| v.clone())
+    }
+
+    pub fn put(&mut self, id: &str, v: Value, now: Instant) {
+        self.items.retain(|(k, _, _)| k != id);
+        self.items.push_back((id.to_string(), now, v));
+        while self.items.len() > self.max {
+            self.items.pop_front();
+        }
+    }
+}
+
+/// Stream links last about six hours; an hour is well inside that.
+static PLAYERS: LazyLock<Mutex<PlayerCache>> = LazyLock::new(|| Mutex::new(PlayerCache::new(24, Duration::from_secs(3600))));
+
 pub async fn resolve(http: &reqwest::Client, video_id: &str) -> Result<Stream, String> {
     pick_stream(&player(http, video_id).await?)
 }
@@ -189,6 +267,18 @@ pub async fn resolve_video(http: &reqwest::Client, video_id: &str) -> Result<Str
 }
 
 async fn player(http: &reqwest::Client, video_id: &str) -> Result<Value, String> {
+    if let Some(v) = PLAYERS.lock().unwrap().get(video_id, Instant::now()) {
+        return Ok(v);
+    }
+    let v = fetch_player(http, video_id).await?;
+    // Only answers that can actually be played are worth keeping.
+    if v.pointer("/playabilityStatus/status").and_then(Value::as_str) == Some("OK") {
+        PLAYERS.lock().unwrap().put(video_id, v.clone(), Instant::now());
+    }
+    Ok(v)
+}
+
+async fn fetch_player(http: &reqwest::Client, video_id: &str) -> Result<Value, String> {
     let sw = http.get(format!("{BASE}/sw.js_data")).send().await.and_then(|r| r.error_for_status()).map_err(|e| format!("Couldn't reach YouTube Music ({e})"))?;
     let visitor = parse_visitor(&sw.text().await.map_err(|e| e.to_string())?).ok_or("YouTube Music changed its visitor data")?;
     let body = json!({
@@ -232,6 +322,20 @@ pub async fn download(http: &reqwest::Client, s: &Stream) -> Result<Vec<u8>, Str
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_player_answer_is_kept_for_a_while_and_only_a_few_at_once() {
+        let mut c = PlayerCache::new(2, Duration::from_secs(60));
+        let t0 = Instant::now();
+        c.put("a", json!({"n": 1}), t0);
+        assert_eq!(c.get("a", t0 + Duration::from_secs(30)), Some(json!({"n": 1})), "asked again soon: no new request");
+        assert_eq!(c.get("a", t0 + Duration::from_secs(61)), None, "stream links go stale: ask again");
+        c.put("a", json!({"n": 1}), t0);
+        c.put("b", json!({"n": 2}), t0);
+        c.put("c", json!({"n": 3}), t0);
+        assert_eq!(c.get("a", t0), None, "the oldest goes when it's full");
+        assert!(c.get("b", t0).is_some() && c.get("c", t0).is_some());
+    }
+
     fn run(t: &str) -> Value {
         json!({"text": t})
     }
@@ -271,26 +375,31 @@ mod tests {
     }
 
     #[test]
-    fn video_rows_are_videos_with_wide_thumbnails() {
-        let item = json!({"musicResponsiveListItemRenderer": {
-            "playlistItemData": {"videoId": "RPvhItA3lIM"},
-            "thumbnail": {"musicThumbnailRenderer": {"thumbnail": {"thumbnails": [
-                {"url": "https://i.ytimg.com/vi/RPvhItA3lIM/hqdefault.jpg?sqp=x", "width": 400, "height": 225}]}}},
-            "flexColumns": [
-                {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [run("ILYSB (Official Lyric Video)")]}}},
-                {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [
-                    {"text": "LANY", "navigationEndpoint": {"browseEndpoint": {"browseId": "UC"}}},
-                    run(" • "), run("118M views"), run(" • "), run("3:30")]}}}]
-        }});
-        let v = json!({"contents": {"tabbedSearchResultsRenderer": {"tabs": [{"tabRenderer": {"content": {"sectionListRenderer": {"contents": [
-            {"musicShelfRenderer": {"contents": [item]}}]}}}}]}}});
+    fn youtube_videos_are_videos_with_wide_thumbnails() {
+        let vid = |id: &str, title: &str, owner: &str, len: Option<&str>| {
+            let mut r = json!({"videoRenderer": {"videoId": id, "title": {"runs": [run(title)]}, "ownerText": {"runs": [run(owner)]}}});
+            if let Some(l) = len { r["videoRenderer"]["lengthText"] = json!({"simpleText": l}); }
+            r
+        };
+        let v = json!({"contents": {"twoColumnSearchResultsRenderer": {"primaryContents": {"sectionListRenderer": {"contents": [
+            {"itemSectionRenderer": {"contents": [
+                vid("E55qxJm1_RY", "Riski inrahim x Batak Perantau - Adu Nasib (MV)", "Bester TV Archive", Some("2:24")),
+                {"shelfRenderer": {}},
+                vid("tOlRgobbekU", "Speedrun Hamil", "Riski Inrahim - Topic", Some("2:26")),
+                vid("liveLIVE123", "Live now", "Someone", None),
+                vid("rEaKyyoP4mQ", "SEPUH (Lyrics Video)", "FzNrSyhd", Some("1:02:57")),
+            ]}},
+            {"continuationItemRenderer": {}}]}}}}});
         let r = parse_videos(&v);
-        assert_eq!(r.len(), 1);
+        let ids: Vec<_> = r.iter().map(|e| e.video_id.as_str()).collect();
+        assert_eq!(ids, ["E55qxJm1_RY", "rEaKyyoP4mQ"], "auto-made Topic tracks and live streams are left out");
         assert!(r[0].video);
-        assert_eq!(r[0].artist, "LANY");
-        assert_eq!(r[0].album, None, "views aren't an album");
-        assert_eq!(r[0].duration_ms, 210_000);
-        assert_eq!(r[0].art_url, "https://i.ytimg.com/vi/RPvhItA3lIM/hqdefault.jpg?sqp=x");
+        assert_eq!(r[0].title, "Riski inrahim x Batak Perantau - Adu Nasib (MV)");
+        assert_eq!(r[0].artist, "Bester TV Archive");
+        assert_eq!(r[0].album, None);
+        assert_eq!(r[0].duration_ms, 144_000);
+        assert_eq!(r[1].duration_ms, 3_777_000);
+        assert_eq!(r[0].art_url, "https://i.ytimg.com/vi/E55qxJm1_RY/hqdefault.jpg");
         assert!(!parse_search(&search_fixture())[0].video, "songs aren't videos");
     }
 
@@ -359,3 +468,4 @@ mod live {
         assert!((song.duration_ms() as i64 - e.duration_ms as i64).abs() < 3000);
     }
 }
+

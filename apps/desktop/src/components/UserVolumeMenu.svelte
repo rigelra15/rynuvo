@@ -19,9 +19,11 @@
   }
 
   async function kick() {
+    // Read who before closing: closing the menu drops its props, `userId` included.
+    const who = userId
     onClose()
     try {
-      await api.voiceKick(userId)
+      await api.voiceKick(who)
     } catch (e) {
       void dialog.notice(errText(e))
     }
@@ -35,7 +37,7 @@
   {#if !isMe}
     <label>
       <span>User volume <b>{pct}%</b></span>
-      <Slider bind:value={pct} max={200} step={5} label="User volume" oninput={change} />
+      <Slider bind:value={pct} max={200} step={1} label="User volume" oninput={change} />
     </label>
   {/if}
   {#if canKick}<button class="danger" onclick={kick}>Disconnect</button>{/if}
@@ -43,10 +45,10 @@
 </div>
 
 <style>
-  .menu { position: fixed; z-index: 60; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; width: 220px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); display: flex; flex-direction: column; gap: 8px; }
+  .menu { position: fixed; z-index: 60; background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 8px; width: 220px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); display: flex; flex-direction: column; gap: 8px; }
   .who { font-weight: 600; padding: 0 2px; }
   label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
-  button { text-align: left; padding: 7px 10px; border-radius: 6px; }
+  button { text-align: left; padding: 7px 10px; border-radius: 9px; }
   button:hover { background: var(--elev); }
   .danger { color: #f87171; }
   p { margin: 0; font-size: 12px; }

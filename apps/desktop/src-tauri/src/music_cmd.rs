@@ -74,7 +74,7 @@ pub async fn music_search(http: State<'_, MusicHttp>, query: String) -> Result<V
     let (songs, videos) = tokio::join!(ytm::search(&http.0, query), ytm::search_videos(&http.0, query));
     let mut found = songs?;
     found.truncate(6);
-    found.extend(videos.unwrap_or_default().into_iter().take(4));
+    found.extend(videos.unwrap_or_default().into_iter().take(5));
     Ok(found)
 }
 
