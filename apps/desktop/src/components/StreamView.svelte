@@ -2,7 +2,7 @@
   import Slider from './Slider.svelte'
   import { onMount } from 'svelte'
   import { api, errText } from '../lib/api'
-  import { CODEC_STRING, decodableCodecs, KeyGate, parseAu, statsLine, type CodecName } from '../lib/stream'
+  import { CODEC_STRING, decodableCodecs, KeyGate, parseAu, spsSize, statsLine, type CodecName } from '../lib/stream'
   import { store } from '../lib/state.svelte'
   import type { Id } from '../lib/types'
 
@@ -22,6 +22,7 @@
     const ctx = canvas.getContext('2d')!
     let decoder: VideoDecoder | null = null
     let codec: CodecName | null = null
+    let coded = ''
     const gate = new KeyGate(() => void api.streamRequestKey(userId))
     let n = 0
     let closed = false
@@ -36,7 +37,7 @@
       f.close()
       waiting = false
     }
-    const fresh = (c: CodecName) => {
+    const fresh = (c: CodecName, sz: { width: number; height: number } | null) => {
       try {
         decoder?.close()
       } catch {
@@ -49,19 +50,24 @@
           gate.broken()
         },
       })
-      decoder.configure({ codec: CODEC_STRING[c], optimizeForLatency: true })
+      // The real picture size, read from the key frame: without it WebView2 assumes 1280×720 and
+      // shows only that corner of a bigger screen.
+      decoder.configure({ codec: CODEC_STRING[c], optimizeForLatency: true, ...(sz && { codedWidth: sz.width, codedHeight: sz.height }) })
       codec = c
+      coded = sz ? `${sz.width}x${sz.height}` : ''
     }
     const onAu = (buf: ArrayBuffer) => {
       if (closed) return
       const au = parseAu(buf)
       if (!au) return
-      if (au.codec !== codec || !decoder || decoder.state === 'closed') {
+      const sz = au.key ? spsSize(au.codec, au.data) : null
+      const resized = !!sz && `${sz.width}x${sz.height}` !== coded
+      if (au.codec !== codec || !decoder || decoder.state === 'closed' || resized) {
         if (!au.key) {
           gate.broken()
           return
         }
-        fresh(au.codec)
+        fresh(au.codec, sz)
       }
       if (!gate.accept(au, decoder!.decodeQueueSize)) return
       decoder!.decode(new EncodedVideoChunk({ type: au.key ? 'key' : 'delta', timestamp: n++ * 16_667, data: au.data }))

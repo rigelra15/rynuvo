@@ -159,3 +159,150 @@ export function selfCheckLines(c: SelfCheck): { label: string; ok: boolean; deta
   )
   return lines
 }
+
+/** Reads an RBSP (emulation-prevention bytes removed) bit by bit. */
+class Bits {
+  private bytes: number[] = []
+  private pos = 0
+  constructor(nal: Uint8Array) {
+    for (let i = 0; i < nal.length; i++) {
+      if (i >= 2 && nal[i] === 3 && nal[i - 1] === 0 && nal[i - 2] === 0) continue
+      this.bytes.push(nal[i])
+    }
+  }
+  u(n: number): number {
+    let v = 0
+    for (let i = 0; i < n; i++) {
+      const b = this.bytes[this.pos >> 3]
+      if (b === undefined) throw new Error('short')
+      v = v * 2 + ((b >> (7 - (this.pos & 7))) & 1)
+      this.pos++
+    }
+    return v
+  }
+  skip(n: number) {
+    this.pos += n
+  }
+  ue(): number {
+    let zeros = 0
+    while (this.u(1) === 0) if (++zeros > 31) throw new Error('bad')
+    return 2 ** zeros - 1 + this.u(zeros)
+  }
+  se(): number {
+    const k = this.ue()
+    return k & 1 ? (k + 1) / 2 : -k / 2
+  }
+}
+
+function nalUnits(annexb: Uint8Array): Uint8Array[] {
+  const starts: number[] = []
+  for (let i = 0; i + 2 < annexb.length; i++) {
+    if (annexb[i] === 0 && annexb[i + 1] === 0 && annexb[i + 2] === 1) {
+      starts.push(i + 3)
+      i += 2
+    }
+  }
+  return starts.map((s, k) => {
+    let e = k + 1 < starts.length ? starts[k + 1] - 3 : annexb.length
+    while (e > s && annexb[e - 1] === 0) e--
+    return annexb.subarray(s, e)
+  })
+}
+
+const HIGH_PROFILES = new Set([100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135])
+
+function h264Size(nal: Uint8Array) {
+  const b = new Bits(nal.subarray(1))
+  const profile = b.u(8)
+  b.skip(16)
+  b.ue()
+  let chroma = 1
+  let separate = 0
+  if (HIGH_PROFILES.has(profile)) {
+    chroma = b.ue()
+    if (chroma === 3) separate = b.u(1)
+    b.ue()
+    b.ue()
+    b.skip(1)
+    if (b.u(1)) {
+      for (let i = 0; i < (chroma !== 3 ? 8 : 12); i++) {
+        if (!b.u(1)) continue
+        let last = 8
+        let next = 8
+        for (let j = 0; j < (i < 6 ? 16 : 64) && next !== 0; j++) {
+          next = (last + b.se() + 256) % 256
+          if (next !== 0) last = next
+        }
+      }
+    }
+  }
+  b.ue()
+  const poc = b.ue()
+  if (poc === 0) b.ue()
+  else if (poc === 1) {
+    b.skip(1)
+    b.se()
+    b.se()
+    const n = b.ue()
+    for (let i = 0; i < n; i++) b.se()
+  }
+  b.ue()
+  b.skip(1)
+  const wMbs = b.ue() + 1
+  const hUnits = b.ue() + 1
+  const frameOnly = b.u(1)
+  if (!frameOnly) b.skip(1)
+  b.skip(1)
+  let [l, r, t, bo] = [0, 0, 0, 0]
+  if (b.u(1)) [l, r, t, bo] = [b.ue(), b.ue(), b.ue(), b.ue()]
+  const mono = chroma === 0 || separate === 1
+  const cx = mono ? 1 : chroma === 3 ? 1 : 2
+  const cy = (mono ? 1 : chroma === 1 ? 2 : 1) * (2 - frameOnly)
+  return { width: wMbs * 16 - cx * (l + r), height: (2 - frameOnly) * hUnits * 16 - cy * (t + bo) }
+}
+
+function hevcSize(nal: Uint8Array) {
+  const b = new Bits(nal.subarray(2))
+  b.skip(4)
+  const subLayers = b.u(3)
+  b.skip(1)
+  b.skip(2 + 1 + 5 + 32 + 48 + 8) // general profile, tier and level
+  const profileHere: number[] = []
+  const levelHere: number[] = []
+  for (let i = 0; i < subLayers; i++) {
+    profileHere.push(b.u(1))
+    levelHere.push(b.u(1))
+  }
+  if (subLayers > 0) b.skip(2 * (8 - subLayers))
+  for (let i = 0; i < subLayers; i++) b.skip((profileHere[i] ? 88 : 0) + (levelHere[i] ? 8 : 0))
+  b.ue()
+  const chroma = b.ue()
+  if (chroma === 3) b.skip(1)
+  let width = b.ue()
+  let height = b.ue()
+  if (b.u(1)) {
+    const [l, r, t, bo] = [b.ue(), b.ue(), b.ue(), b.ue()]
+    width -= (chroma === 1 || chroma === 2 ? 2 : 1) * (l + r)
+    height -= (chroma === 1 ? 2 : 1) * (t + bo)
+  }
+  return { width, height }
+}
+
+/**
+ * The picture size in a key frame's sequence parameter set, or null when it carries none (or the
+ * codec isn't one we read). WebCodecs needs it: without a coded size some decoders (WebView2 on
+ * Windows) assume 1280×720 and show only that corner of a bigger picture.
+ */
+export function spsSize(codec: CodecName, annexb: Uint8Array): { width: number; height: number } | null {
+  if (codec === 'av1') return null
+  for (const nal of nalUnits(annexb)) {
+    if (!nal.length) continue
+    try {
+      if (codec === 'h264' && (nal[0] & 0x1f) === 7) return h264Size(nal)
+      if (codec === 'hevc' && ((nal[0] >> 1) & 0x3f) === 33) return hevcSize(nal)
+    } catch {
+      return null
+    }
+  }
+  return null
+}

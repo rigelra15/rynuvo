@@ -43,6 +43,11 @@
     if (store.phase === 'onboarding') settingsOpen = false
   })
 
+  // Back online (woke up, network came back): a good moment to look for a new version.
+  $effect(() => {
+    if (store.conn.state === 'online') updater.nudge()
+  })
+
   onMount(() => {
     updater.start()
     const un = onSessionEvent((e) => store.apply(e))

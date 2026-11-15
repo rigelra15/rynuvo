@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'vitest'
-import { applyStreams, codecOrder, KeyGate, parseAu, selfCheckLines, statsLine, type Au, type StreamInfo } from './stream'
+import { describe, expect, it, test } from 'vitest'
+import { applyStreams, codecOrder, KeyGate, parseAu, selfCheckLines, spsSize, statsLine, type Au, type StreamInfo } from './stream'
 
 const s = (userId: number, channelId = 10): StreamInfo => ({ userId, channelId, codecs: ['h264'], preset: '1080p60' })
 
@@ -104,5 +104,25 @@ describe('selfCheckLines', () => {
     const l = selfCheckLines({ encoders: [{ codec: 'av1', hardware: false, works: false }], capture: 'denied' })
     expect(l[0]).toEqual({ label: 'AV1 encoder', ok: false, detail: 'Not available' })
     expect(l[1]).toEqual({ label: 'Screen capture', ok: false, detail: 'Not allowed — turn on Rynuvo in Screen Recording settings' })
+  })
+})
+
+describe('spsSize', () => {
+  // Real parameter sets: VideoToolbox (what the Mac app encodes with), x264 and x265.
+  const au = (hex: string) => Uint8Array.from([0, 0, 0, 1, ...hex.match(/../g)!.map((b) => parseInt(b, 16)), 0, 0, 1, 0x65, 0x88])
+  it.each([
+    ['h264', '27640032ac5680780277e9', 1920, 1246],
+    ['h264', '27640033ac56802f40f7fb40', 3024, 1964],
+    ['h264', '67640028acd940780227a970110000030001000003003c0f183196', 1918, 1080],
+    ['hevc', '420101016000000300b00000030000030096a003c0801387d6205ee45914bff2e7f13fac05a810101004', 1920, 1246],
+    ['hevc', '420101016000000300b00000030000030096a0017a2007b1f78817b916452ffcb9fc4feb016a04040401', 3024, 1964],
+    ['hevc', '4201010408000003009e0800000300007890007810021cefcb2b349265780b7020200040000003004000000782', 1918, 1080],
+  ] as const)('reads the picture size from a %s key frame (%s)', (codec, sps, width, height) => {
+    expect(spsSize(codec, au(sps))).toEqual({ width, height })
+  })
+
+  it('finds nothing in a frame without a parameter set', () => {
+    expect(spsSize('h264', Uint8Array.from([0, 0, 0, 1, 0x41, 0x9a, 0x02]))).toBeNull()
+    expect(spsSize('av1', Uint8Array.from([0x12, 0x00]))).toBeNull()
   })
 })

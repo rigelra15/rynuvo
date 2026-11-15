@@ -11,6 +11,8 @@
   import AdminPanel from './AdminPanel.svelte'
   import Countdown from './Countdown.svelte'
   import VoiceSettings from './VoiceSettings.svelte'
+  import { updater } from '../lib/updater.svelte'
+  import { updateStatus, type CheckResult } from '../lib/update'
 
   let { onClose }: { onClose: () => void } = $props()
 
@@ -23,6 +25,31 @@
   let logMsg = $state<string | null>(null)
   let version = $state('')
   let error = $state<string | null>(null)
+  let checkingUpdate = $state(false)
+  let updateResult = $state<CheckResult | null>(null)
+  let restarting = $state(false)
+  const upd = $derived(
+    updateStatus({ update: updater.state, checking: checkingUpdate, result: updateResult, busy: store.myVoice.channelId !== null || store.live !== null }),
+  )
+
+  async function checkUpdates() {
+    checkingUpdate = true
+    updateResult = null
+    try {
+      updateResult = await updater.checkNow()
+    } finally {
+      checkingUpdate = false
+    }
+  }
+
+  async function restartToUpdate() {
+    restarting = true
+    try {
+      await updater.restart()
+    } finally {
+      restarting = false
+    }
+  }
 
   let check = $state<ReturnType<typeof selfCheckLines> | null>(null)
   let captureDenied = $state(false)
@@ -219,6 +246,19 @@
               <button class="btn" onclick={() => void api.openCaptureSettings()}>Open Screen Recording settings</button>
             {/if}
           {/if}
+        </section>
+
+        <section>
+          <h3>Updates</h3>
+          <p class="muted">You're on Rynuvo {version}. New versions download in the background on their own.</p>
+          <div class="row">
+            {#if upd.restart}
+              <button class="btn primary" onclick={restartToUpdate} disabled={restarting}>{restarting ? 'Restarting…' : 'Restart to update'}</button>
+            {:else}
+              <button class="btn" onclick={checkUpdates} disabled={checkingUpdate || updater.state.phase !== 'idle'}>Check for updates</button>
+            {/if}
+          </div>
+          {#if upd.text}<p class="note" aria-live="polite">{upd.text}</p>{/if}
         </section>
 
         <section>
