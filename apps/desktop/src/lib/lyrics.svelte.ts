@@ -6,16 +6,17 @@ import type { Lyrics, MusicEntry } from './music'
 const cache = new SvelteMap<string, Lyrics | null>()
 const asked = new Set<string>()
 
-/** The song's lyrics: `undefined` while loading, `null` when there are none. */
-export function lyricsOf(e: MusicEntry): Lyrics | null | undefined {
-  if (!asked.has(e.videoId)) {
-    asked.add(e.videoId)
-    void api.musicLyrics(e.videoId, e.title, e.artist, e.durationMs).then(
-      (l) => cache.set(e.videoId, l),
-      () => cache.set(e.videoId, null),
+/** The song's lyrics from `source`: `undefined` while loading, `null` when there are none. */
+export function lyricsOf(e: MusicEntry, source = 'auto'): Lyrics | null | undefined {
+  const key = `${e.videoId}|${source}`
+  if (!asked.has(key)) {
+    asked.add(key)
+    void api.musicLyrics(e.videoId, e.title, e.artist, e.durationMs, source).then(
+      (l) => cache.set(key, l),
+      () => cache.set(key, null),
     )
   }
-  return cache.get(e.videoId)
+  return cache.get(key)
 }
 
 /** A clock (ms) that follows the screen's frame rate while `on`, for motion that has to be smooth. */

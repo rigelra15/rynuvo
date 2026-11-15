@@ -12,6 +12,7 @@
   import StreamView from './StreamView.svelte'
   import MusicPlayer from './MusicPlayer.svelte'
   import MusicBackdrop from './MusicBackdrop.svelte'
+  import MusicIdle from './MusicIdle.svelte'
 
   let { channel, onMenu }: { channel: Channel; onMenu: (userId: Id, e: MouseEvent) => void } = $props()
   const list = $derived(membersOf(store.voice, channel.id))
@@ -19,8 +20,8 @@
   const watching = $derived(store.watching !== null && list.some((m) => m.userId === store.watching) ? store.watching : null)
   let picking = $state(false)
   const music = $derived(store.musicIn(channel.id))
-  /** The music panel sits on the right, unless a stream is open (the stream wins). */
-  const playerUp = $derived(joined && music !== null && watching === null)
+  /** The music panel sits on the right (empty when nothing plays), unless a stream is open (the stream wins). */
+  const playerUp = $derived(joined && watching === null)
   const strip = $derived(watching !== null && joined)
   const anyoneSpeaking = $derived(list.some((m) => store.speaking.has(m.userId)))
   // Background glow colours: the first two members' avatar colours, else the accent.
@@ -116,10 +117,10 @@
       {#key watching}<StreamView userId={watching} />{/key}
       {#if music}<p class="np"><Icon name="music" size={14} /> {music.state.now!.title} — {music.state.now!.artist}</p>{/if}
       {@render people()}
-    {:else if playerUp && music}
+    {:else if playerUp}
       <div class="split">
         {@render people()}
-        <MusicPlayer {music} />
+        {#if music}<MusicPlayer {music} />{:else}<MusicIdle channelName={channel.name} />{/if}
       </div>
     {:else}
       {@render people()}

@@ -76,6 +76,12 @@ pub struct VoiceMember {
     pub channel_id: Id,
     pub muted: bool,
     pub deafened: bool,
+    /// Server time (ms) they joined this channel; 0 from servers before 0.5.1.
+    #[serde(default)]
+    pub joined_at: i64,
+    /// Server time (ms) the call in this channel began: when someone joined it empty. 0 from older servers.
+    #[serde(default)]
+    pub call_since: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -241,13 +247,44 @@ pub struct MusicState {
     pub paused_at: Option<u32>,
     pub queue: Vec<MusicEntry>,
     pub server_time: i64,
+    /// Where everyone in the channel gets lyrics from: one of `LYRICS_SOURCES`.
+    #[serde(default = "auto_lyrics")]
+    pub lyrics: String,
+    /// Loop mode: "off", "song" (play it again) or "queue" (finished songs go to the back).
+    #[serde(default = "repeat_off")]
+    pub repeat: String,
 }
+
+fn repeat_off() -> String {
+    "off".into()
+}
+
+fn auto_lyrics() -> String {
+    "auto".into()
+}
+
+/// Lyrics sources a voice channel can pick (id, name). "auto" tries them in a good order.
+pub const LYRICS_SOURCES: &[(&str, &str)] = &[
+    ("auto", "Auto"),
+    ("betterlyrics", "BetterLyrics"),
+    ("lrcred", "LrcRed"),
+    ("simpmusic", "SimpMusic"),
+    ("lrclib", "LRCLIB"),
+    ("netease", "NetEase"),
+];
 
 /// A music command for the voice channel the sender is in.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "op", rename_all = "camelCase")]
 pub enum MusicCmd {
     Add { entry: MusicEntryReq },
+    /// Pick the channel's lyrics source (owner or admin only).
+    Lyrics { source: String },
+    /// Set the loop mode ("off", "song", "queue"); none = the next one (off → queue → song → off).
+    Repeat {
+        #[serde(default)]
+        mode: Option<String>,
+    },
     Skip,
     Pause,
     Resume,
@@ -396,9 +433,11 @@ mod tests {
         assert_eq!(v, json!({"t":"voiceState","d":{"muted":true,"deafened":false}}));
         let leave: WsClientMsg = serde_json::from_str(r#"{"t":"voiceLeave"}"#).unwrap();
         assert_eq!(leave, WsClientMsg::VoiceLeave);
-        let m = VoiceMember { user_id: 1, channel_id: 2, muted: false, deafened: true };
+        let m = VoiceMember { user_id: 1, channel_id: 2, muted: false, deafened: true, joined_at: 10, call_since: 5 };
         let v = serde_json::to_value(WsServerMsg::VoiceMemberUpdated(m)).unwrap();
-        assert_eq!(v, json!({"t":"voiceMemberUpdated","d":{"userId":1,"channelId":2,"muted":false,"deafened":true}}));
+        assert_eq!(v, json!({"t":"voiceMemberUpdated","d":{"userId":1,"channelId":2,"muted":false,"deafened":true,"joinedAt":10,"callSince":5}}));
+        let old: VoiceMember = serde_json::from_value(json!({"userId":1,"channelId":2,"muted":false,"deafened":true})).unwrap();
+        assert_eq!((old.joined_at, old.call_since), (0, 0));
         let v = serde_json::to_value(WsServerMsg::VoiceJoined { channel_id: 2, session: 9, key: "k".into(), udp_port: 3478 }).unwrap();
         assert_eq!(v, json!({"t":"voiceJoined","d":{"channelId":2,"session":9,"key":"k","udpPort":3478}}));
     }

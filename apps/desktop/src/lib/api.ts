@@ -76,8 +76,8 @@ export const api = {
   musicPlay: (query: string, textChannelId: Id | null) => invoke<void>('music_play', { query, textChannelId }),
   musicSearch: (query: string) => invoke<SongResult[]>('music_search', { query }),
   musicCmd: (cmd: MusicCmd, textChannelId: Id | null) => invoke<void>('music_cmd', { cmd, textChannelId }),
-  musicLyrics: (videoId: string, title: string, artist: string, durationMs: number) =>
-    invoke<Lyrics | null>('music_lyrics', { videoId, title, artist, durationMs }),
+  musicLyrics: (videoId: string, title: string, artist: string, durationMs: number, source: string) =>
+    invoke<Lyrics | null>('music_lyrics', { videoId, title, artist, durationMs, source }),
   musicStatus: (videoId: string) => invoke<MusicStatus | null>('music_status', { videoId }),
   musicSetVolume: (volume: number) => invoke<void>('music_set_volume', { volume }),
   prefsGet: () => invoke<Prefs>('prefs_get'),

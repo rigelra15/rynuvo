@@ -82,8 +82,8 @@ pub fn music_cmd(core: State<'_, Core>, cmd: MusicCmd, text_channel_id: Option<I
 }
 
 #[tauri::command]
-pub async fn music_lyrics(http: State<'_, MusicHttp>, video_id: String, title: String, artist: String, duration_ms: u32) -> Result<Option<Lyrics>, String> {
-    Ok(lyrics::fetch(&http.0, &video_id, &title, &artist, duration_ms).await)
+pub async fn music_lyrics(http: State<'_, MusicHttp>, video_id: String, title: String, artist: String, duration_ms: u32, source: Option<String>) -> Result<Option<Lyrics>, String> {
+    Ok(lyrics::fetch(&http.0, source.as_deref().unwrap_or("auto"), &video_id, &title, &artist, duration_ms).await)
 }
 
 #[tauri::command]

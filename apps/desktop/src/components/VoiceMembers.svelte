@@ -22,7 +22,7 @@
     return () => clearInterval(iv)
   })
   const pos = $derived(music ? positionMs(music.state, music.receivedAt, t) : 0)
-  const lyrics = $derived(now ? lyricsOf(now) : undefined)
+  const lyrics = $derived(now ? lyricsOf(now, music?.state.lyrics ?? 'auto') : undefined)
   const lineAt = $derived(lyrics?.lines.length ? lyricAt(lyrics.lines, pos + 150) : -1)
   const lyric = $derived(lineAt >= 0 ? lyrics!.lines[lineAt].text : '')
 </script>

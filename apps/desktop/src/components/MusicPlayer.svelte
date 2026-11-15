@@ -1,10 +1,12 @@
 <script lang="ts">
   import Slider from './Slider.svelte'
+  import Avatar from './Avatar.svelte'
+  import SongSearch from './SongSearch.svelte'
   import Icon from './Icon.svelte'
   import LyricsView from './LyricsView.svelte'
   import { store } from '../lib/state.svelte'
   import { frameClock, lyricsOf } from '../lib/lyrics.svelte'
-  import { clock, mayControl, positionMs, type MusicState } from '../lib/music'
+  import { clock, LYRICS_SOURCES, mayControl, positionMs, type MusicState } from '../lib/music'
   import { membersOf } from '../lib/voice'
 
   let { music }: { music: { state: MusicState; receivedAt: number } } = $props()
@@ -22,7 +24,18 @@
   const canControl = $derived(mayControl(now.requestedBy, me, inVoice))
   const onlyWho = $derived(`Only ${store.nick(now.requestedBy)} can control this song`)
   const status = $derived(store.musicStatus.get(now.videoId))
-  const lyrics = $derived(lyricsOf(now))
+  const repeat = $derived(s.repeat ?? 'off')
+  const source = $derived(s.lyrics ?? 'auto')
+  const lyrics = $derived(lyricsOf(now, source))
+  const sourceName = (id: string) => LYRICS_SOURCES.find((x) => x.id === id)?.name ?? id
+  // Only the channel's owner or an admin picks where lyrics come from; everyone in the call follows.
+  const channel = $derived(store.channels.find((c) => c.id === s.channelId))
+  const canPick = $derived(!!channel && store.canManage(channel))
+  let picking = $state(false)
+  function pickSource(id: string) {
+    picking = false
+    if (id !== source) void store.musicCmd({ op: 'lyrics', source: id })
+  }
 
 </script>
 
@@ -33,9 +46,10 @@
       <div class="cover" style="background-image:url('{now.artUrl}')"></div>
     </div>
     <div class="info">
-      <div class="kicker">{paused ? 'Paused' : 'Now playing'} · {store.nick(now.requestedBy)}</div>
+      <div class="kicker">{paused ? 'Paused' : 'Now playing'}{repeat === 'song' ? ' · on loop' : ''}</div>
       <div class="title" title={now.title}>{now.title}</div>
       <div class="artist">{now.artist}{now.album ? ` · ${now.album}` : ''}</div>
+      <span class="who" title="Requested by {store.nick(now.requestedBy)}"><Avatar user={store.user(now.requestedBy)} id={now.requestedBy} size={16} />{store.nick(now.requestedBy)}</span>
     </div>
   </div>
   {#if status?.status === 'error'}
@@ -54,7 +68,35 @@
       <Icon name={paused ? 'play' : 'pause'} />
     </button>
     <button disabled={!canControl} title={canControl ? 'Skip' : onlyWho} onclick={() => store.musicCmd({ op: 'skip' })}><Icon name="skip" /></button>
+    <button
+      class:on={repeat !== 'off'}
+      title={repeat === 'off' ? 'Loop: off (click for queue)' : repeat === 'queue' ? 'Loop: queue (click for song)' : 'Loop: this song (click to turn off)'}
+      aria-label="Loop: {repeat}"
+      onclick={() => store.musicCmd({ op: 'repeat', mode: null })}
+    ><Icon name={repeat === 'song' ? 'repeatOne' : 'repeat'} /></button>
     <button class:on={store.queueOpen} title="Queue" onclick={() => (store.queueOpen = !store.queueOpen)}><Icon name="queue" /></button>
+    <div class="src">
+      <button
+        class:on={picking}
+        aria-haspopup="menu"
+        aria-expanded={picking}
+        title="Lyrics: {sourceName(source)}{source === 'auto' && lyrics?.source ? ` (${lyrics.source})` : ''}"
+        onclick={() => (picking = !picking)}
+      ><Icon name="lyrics" /></button>
+      {#if picking}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="scrim" onmousedown={() => (picking = false)}></div>
+        <div class="menu" role="menu" aria-label="Lyrics source">
+          <div class="mhead">Lyrics from{source === 'auto' && lyrics?.source ? ` · now ${lyrics.source}` : ''}</div>
+          {#each LYRICS_SOURCES as o (o.id)}
+            <button role="menuitemradio" aria-checked={o.id === source} class:on={o.id === source} disabled={!canPick && o.id !== source} onclick={() => canPick && pickSource(o.id)}>
+              <span>{o.name}</span>{#if o.id === source}<Icon name="check" size={14} />{/if}
+            </button>
+          {/each}
+          {#if !canPick}<div class="mnote">Only the channel's owner or an admin can change this</div>{/if}
+        </div>
+      {/if}
+    </div>
     <label class="vol" title="Music volume (only for you)">
       <Icon name="volume" size={16} />
       <Slider value={store.musicVolume} step={0.05} tone="light" label="Music volume" oninput={(v) => store.setMusicVolume(v)} />
@@ -67,13 +109,15 @@
   <div class="below">
     {#if store.queueOpen}
       <div class="queue">
+        <div class="add"><SongSearch glass autofocus={false} /></div>
         <h3>Queue</h3>
         {#if !s.queue.length}<p class="empty">The queue is empty</p>{/if}
         <ol>
           {#each s.queue as e, i (e.id)}
             <li>
               <span class="qart" style="background-image:url('{e.artUrl}')"></span>
-              <span class="qtxt"><b>{e.title}</b><small>{e.artist} · {clock(e.durationMs)} · {store.nick(e.requestedBy)}</small></span>
+              <span class="qtxt"><b>{e.title}</b><small>{e.artist} · {clock(e.durationMs)}</small></span>
+              <span class="who" title="Requested by {store.nick(e.requestedBy)}"><Avatar user={store.user(e.requestedBy)} id={e.requestedBy} size={16} />{store.nick(e.requestedBy)}</span>
               {#if mayControl(e.requestedBy, me, inVoice)}
                 <button title="Remove from the queue" onclick={() => store.musicCmd({ op: 'remove', index: i + 1 })}><Icon name="close" size={14} /></button>
               {/if}
@@ -131,7 +175,21 @@
   .vol { flex: 1; display: flex; align-items: center; gap: 6px; margin-left: 4px; color: rgba(255, 255, 255, 0.8); min-width: 0; }
   .vol :global(.slider) { flex: 1; min-width: 40px; max-width: 120px; }
   .next { font-size: 12px; color: rgba(255, 255, 255, 0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .below { flex: 1; min-height: 0; margin-top: 4px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 6px; }
+  .src { position: relative; }
+  .scrim { position: fixed; inset: 0; z-index: 4; }
+  .menu {
+    position: absolute; top: calc(100% + 6px); right: -60px; z-index: 5; min-width: 200px; padding: 4px; border-radius: 10px;
+    background: rgba(20, 20, 28, 0.92); backdrop-filter: blur(18px); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+  .src .menu button { width: 100%; height: auto; background: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 7px; font-size: 13px; color: #fff; text-align: left; }
+  .menu button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
+  .menu button:disabled { opacity: 0.45; cursor: default; }
+  .mhead { padding: 6px 10px 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255, 255, 255, 0.6); }
+  .mnote { padding: 6px 10px; font-size: 11.5px; color: rgba(255, 255, 255, 0.6); border-top: 1px solid rgba(255, 255, 255, 0.08); margin-top: 4px; }
+  .add { margin-bottom: 10px; }
+  .add :global(ul) { max-height: 220px; }
+  .menu button.on { color: #fff; font-weight: 600; }
+  .below { flex: 1; min-height: 0; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 6px; }
   .plain { height: 100%; overflow: hidden; mask-image: linear-gradient(transparent, #000 15%, #000 85%, transparent); }
   .plain pre { margin: 0; font: inherit; font-size: 15px; font-weight: 600; white-space: pre-wrap; color: rgba(255, 255, 255, 0.75); animation: crawl 240s linear infinite; }
   @keyframes crawl { to { transform: translateY(-70%); } }
@@ -145,6 +203,12 @@
   .qtxt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .qtxt b, .qtxt small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .qtxt small { color: rgba(255, 255, 255, 0.65); }
+  .who {
+    flex: none; align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; max-width: 120px; padding: 2px 8px 2px 2px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.12); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .info .who { margin-top: 4px; }
+  .queue li .who { align-self: center; }
   .queue button { color: rgba(255, 255, 255, 0.7); display: grid; padding: 4px; border-radius: 6px; }
   .queue button:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
   .empty { color: rgba(255, 255, 255, 0.6); font-size: 13px; }

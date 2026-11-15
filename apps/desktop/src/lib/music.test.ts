@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clock, lyricAt, mayControl, parseCommand, positionMs, type MusicState, wordFill } from './music'
+import { activeLines, clock, withInterludes, lyricAt, mayControl, parseCommand, playQuery, positionMs, type MusicState, wordFill } from './music'
 
 describe('music commands', () => {
   it('play aliases take the rest as the query', () => {
@@ -8,6 +8,20 @@ describe('music commands', () => {
     expect(parseCommand('m!play Stuck')).toEqual({ kind: 'play', query: 'Stuck' })
     expect(parseCommand('m!p Stuck')).toEqual({ kind: 'play', query: 'Stuck' })
     expect(parseCommand('!p')).toEqual({ kind: 'play', query: '' })
+  })
+  it('loop takes an optional mode', () => {
+    expect(parseCommand('!loop')).toEqual({ kind: 'cmd', cmd: { op: 'repeat', mode: null } })
+    expect(parseCommand('!repeat queue')).toEqual({ kind: 'cmd', cmd: { op: 'repeat', mode: 'queue' } })
+    expect(parseCommand('!loop Song')).toEqual({ kind: 'cmd', cmd: { op: 'repeat', mode: 'song' } })
+  })
+  it('a play command being typed shows its search once the space is in', () => {
+    expect(playQuery('!p')).toBeNull()
+    expect(playQuery('!p ')).toBe('')
+    expect(playQuery('!play stuck la')).toBe('stuck la')
+    expect(playQuery('M!P keshi')).toBe('keshi')
+    expect(playQuery('!pause')).toBeNull()
+    expect(playQuery('hey !p x')).toBeNull()
+    expect(playQuery('!p two\nlines')).toBeNull()
   })
   it('controls', () => {
     expect(parseCommand('!skip')).toEqual({ kind: 'cmd', cmd: { op: 'skip' } })
@@ -78,5 +92,38 @@ describe('wordFill', () => {
   it('lets the last word run to the next line, at most 1.5 s', () => {
     expect(wordFill(line, 2, 2500, 3000)).toBeCloseTo(0.5)
     expect(wordFill(line, 2, 2750, 99_000)).toBeCloseTo(0.5)
+  })
+})
+
+describe('lines sung together', () => {
+  const L = (ms: number, end?: number) => ({ ms, end, text: 'x', words: [] })
+  const lines = [L(1000, 4000), L(2000, 5000), L(6000), L(9000)]
+  it('every line still being sung is active, the newest included', () => {
+    expect(activeLines(lines, 500)).toEqual([])
+    expect(activeLines(lines, 1500)).toEqual([0])
+    expect(activeLines(lines, 3000)).toEqual([0, 1])
+    expect(activeLines(lines, 4500)).toEqual([1])
+  })
+  it('without an end time a line lasts until the next one starts', () => {
+    expect(activeLines(lines, 5500)).toEqual([1])
+    expect(activeLines(lines, 7000)).toEqual([2])
+    expect(activeLines(lines, 99000)).toEqual([3])
+  })
+})
+
+describe('interludes', () => {
+  const L = (ms: number, end?: number) => ({ ms, end, text: 'x', words: [] })
+  it('the wait before the first line gets dots', () => {
+    const out = withInterludes([L(12000, 15000), L(15000)])
+    expect(out[0]).toMatchObject({ ms: 0, end: 12000, gap: true })
+    expect(out.length).toBe(3)
+  })
+  it('a long break between lines gets dots, a short one does not', () => {
+    const out = withInterludes([L(1000, 4000), L(5000, 8000), L(20000)])
+    expect(out.map((l) => !!l.gap)).toEqual([false, false, true, false])
+    expect(out[2]).toMatchObject({ ms: 8000, end: 20000 })
+  })
+  it('lines without end times only get the opening dots', () => {
+    expect(withInterludes([L(500), L(30000)]).some((l) => l.gap)).toBe(false)
   })
 })

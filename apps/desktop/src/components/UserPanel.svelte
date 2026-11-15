@@ -1,6 +1,7 @@
 <script lang="ts">
   import Avatar from './Avatar.svelte'
   import Icon from './Icon.svelte'
+  import CallTimer from './CallTimer.svelte'
   import { store } from '../lib/state.svelte'
   import type { User } from '../lib/types'
 
@@ -12,7 +13,7 @@
   <div class="vc">
     <div class="vct">
       <span class="ok">Voice connected</span>
-      <span class="muted">{voiceChannel.name}{store.voicePath === 'ws' ? ' · via server' : ''}</span>
+      <span class="muted">{voiceChannel.name}<CallTimer channelId={voiceChannel.id} prefix=" · " />{store.voicePath === 'ws' ? ' · via server' : ''}</span>
     </div>
     <button class="gear" title="Leave voice" onclick={() => store.leaveVoice()}><Icon name="leave" /></button>
   </div>
