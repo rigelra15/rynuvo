@@ -1,0 +1,65 @@
+# Keeps the Rust build caches on main, where release tags can restore them (a cache saved by one tag
+# can't be read by the next). Without this the Windows release compiled everything from scratch (~18 min).
+# Only Windows and the server: the Mac build is quick anyway, and Mac minutes cost 10×.
+name: Warm cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - Cargo.toml
+      - crates/**
+      - apps/desktop/src-tauri/**
+      - .github/workflows/warm-cache.yml
+  workflow_dispatch:
+
+concurrency:
+  group: warm-cache
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      # Same key as the release build in release.yml.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: desktop-x86_64-pc-windows-msvc
+      - name: Faster disk on Windows
+        shell: pwsh
+        continue-on-error: true
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+      - name: Install frontend deps
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+      # The release's exact compile (same features and target), without bundling or signing.
+      - name: Build
+        working-directory: apps/desktop
+        run: pnpm tauri build --target x86_64-pc-windows-msvc --no-bundle
+
+  server:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: server
+      - name: Build
+        run: cargo build --release --locked -p rynuvo-server
