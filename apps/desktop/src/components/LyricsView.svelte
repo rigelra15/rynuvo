@@ -1,9 +1,11 @@
 <script lang="ts">
   import { scale } from 'svelte/transition'
-  import { activeLines, withInterludes, wordFill, type LyricLine, type Word } from '../lib/music'
+  import { activeLines, withInterludes, wordFill, type Annotation, type LyricLine, type Word } from '../lib/music'
 
-  /** `pos`: where the song is now (ms), updated every frame while playing. */
-  let { lines: sungLines, pos }: { lines: LyricLine[]; pos: number } = $props()
+  /** `pos`: where the song is now (ms), updated every frame while playing. `notes`: each line's
+   *  romanization and translation, in the same order as `lines`, when wanted. */
+  let { lines: sungLines, pos, notes = null }: { lines: LyricLine[]; pos: number; notes?: Annotation[] | null } = $props()
+  const noteOf = $derived(new Map(notes ? sungLines.map((l, i) => [l, notes[i]] as const) : []))
   // Dots stand in for the intro and long breaks.
   const lines = $derived(withInterludes(sungLines))
 
@@ -54,6 +56,9 @@
         {#if l.bg?.length}
           <span class="bg">{#if now}{@render sung(l.bg, l, endOf(i))}{:else}{l.bg.map((w) => w.text).join(' ')}{/if}</span>
         {/if}
+        {@const a = noteOf.get(l)}
+        {#if a?.roman}<span class="roman">{a.roman}</span>{/if}
+        {#if a?.translation}<span class="trans">{a.translation}</span>{/if}
       </p>
       {/if}
     {/each}
@@ -80,7 +85,10 @@
   /* The duet's second voice sings from the other side. */
   p.duet { text-align: right; transform-origin: right center; padding-left: 15%; }
   p:not(.duet) { padding-right: 4%; }
-  .main, .bg { display: block; }
+  .main, .bg, .roman, .trans { display: block; }
+  /* Under the line, small: how it sounds, then what it means. */
+  .roman { margin-top: 3px; font-size: 13.5px; font-weight: 600; color: rgba(255, 255, 255, 0.72); }
+  .trans { margin-top: 2px; font-size: 13px; font-weight: 500; font-style: italic; color: rgba(255, 255, 255, 0.6); }
   /* Backing vocals: smaller, under the line, filling with it. */
   .bg { margin-top: 2px; font-size: 15px; font-weight: 600; opacity: 0.75; }
   /* An intro or a break: three dots that light one by one and breathe, then shrink away as the

@@ -106,7 +106,7 @@ async fn a_queued_song_plays_through_the_voice_engine_in_time() {
     heard().await; // the join chime
     assert!(heard().await < 1e-3, "silence before the music");
 
-    let entry = MusicEntryReq { video_id: "tone0000000".into(), title: "Tone".into(), artist: "Test".into(), album: None, art_url: String::new(), duration_ms: 1500 };
+    let entry = MusicEntryReq { video_id: "tone0000000".into(), title: "Tone".into(), artist: "Test".into(), album: None, art_url: String::new(), duration_ms: 1500, video: false };
     ctl.send_ws(WsClientMsg::Music { cmd: MusicCmd::Add { entry }, text_channel_id: Some(text) });
     eventually("the song is set playing", || !sets.lock().unwrap().is_empty()).await;
     let (_, at, paused) = sets.lock().unwrap()[0];

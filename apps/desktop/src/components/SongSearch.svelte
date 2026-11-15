@@ -53,7 +53,8 @@
     busy = true
     const t = setTimeout(() => {
       api.musicSearch(term).then(
-        (r) => { if (mine === seq) { results = r; pick = 0; busy = false } },
+        // Songs first, then music videos: the keys walk them in the order they are shown.
+        (r) => { if (mine === seq) { results = [...r.filter((x) => !x.video), ...r.filter((x) => x.video)]; pick = 0; busy = false } },
         (e) => { if (mine === seq) { error = String(e); results = []; busy = false } },
       )
     }, 350)
@@ -103,25 +104,36 @@
   {/if}
   {#if error}<p class="hint err">{error}</p>{/if}
   {#if results.length}
-    <ul role="listbox" aria-label="Songs">
-      {#each results as s, i (s.videoId)}
-        <li>
-          <button
-            role="option"
-            aria-selected={i === pick}
-            class:on={i === pick}
-            disabled={voice === null}
-            onmouseenter={() => (pick = i)}
-            onclick={() => play(s)}
-          >
-            <span class="art" style="background-image:url('{s.artUrl}')"></span>
-            <span class="txt"><b>{s.title}</b><small>{s.artist}{s.album ? ` · ${s.album}` : ''}</small></span>
-            <span class="len">{clock(s.durationMs)}</span>
-            <span class="go" class:done={added === s.videoId}><Icon name={added === s.videoId ? 'check' : 'play'} size={14} /></span>
-          </button>
-        </li>
+    {@const songs = results.filter((x) => !x.video).length}
+    <div role="listbox" aria-label="Songs and videos" class="lists">
+      {#each [{ name: 'Songs', from: 0, to: songs }, { name: 'Videos', from: songs, to: results.length }] as sec (sec.name)}
+        {#if sec.to > sec.from}
+          <div class="sec" role="group" aria-label={sec.name}>
+            <h4>{sec.name}</h4>
+            <ul>
+              {#each results.slice(sec.from, sec.to) as s, k (s.videoId)}
+                {@const i = sec.from + k}
+                <li>
+                  <button
+                    role="option"
+                    aria-selected={i === pick}
+                    class:on={i === pick}
+                    disabled={voice === null}
+                    onmouseenter={() => (pick = i)}
+                    onclick={() => play(s)}
+                  >
+                    <span class="art" class:wide={s.video} style="background-image:url('{s.artUrl}')"></span>
+                    <span class="txt"><b>{s.title}</b><small>{s.artist}{s.album ? ` · ${s.album}` : ''}</small></span>
+                    <span class="len">{clock(s.durationMs)}</span>
+                    <span class="go" class:done={added === s.videoId}><Icon name={added === s.videoId ? 'check' : 'play'} size={14} /></span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
       {/each}
-    </ul>
+    </div>
   {:else if q.trim() && !busy && !error}
     <p class="hint">Nothing found for “{q.trim()}”</p>
   {/if}
@@ -141,12 +153,17 @@
   .search input::placeholder { color: var(--sub); }
   .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--rule); border-top-color: var(--accent); animation: spin 700ms linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 320px; overflow-y: auto; }
-  .glass ul { max-height: none; flex: 1; min-height: 0; }
+  .lists { margin-top: 6px; max-height: 320px; overflow-y: auto; }
+  .glass .lists { max-height: none; flex: 1; min-height: 0; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  .sec + .sec { margin-top: 8px; }
+  h4 { margin: 0; padding: 4px 8px 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--sub); }
   li button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; text-align: left; color: var(--fg); }
   li button.on:not(:disabled) { background: var(--hover); }
   li button:disabled { opacity: 0.55; cursor: not-allowed; }
   .art { flex: none; width: 40px; height: 40px; border-radius: 6px; background-size: cover; background-position: center; background-color: var(--chip); }
+  /* A video's thumbnail keeps its 16:9. */
+  .art.wide { width: 71px; }
   .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .txt b, .txt small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .txt b { font-size: 13.5px; }

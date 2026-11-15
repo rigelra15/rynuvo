@@ -74,21 +74,13 @@ async fn listen_together_over_the_socket() {
     p.send_json(add(text, "Next", 60_000)).await;
     assert_eq!(music(&mut x, 3000).await.queue.len(), 1);
 
-    // Xeno may not skip the admin's song.
+    // Xeno's skip of the admin's song is a vote; with two in the call one vote is half the room.
     x.send_json(json!({"t":"music","d":{"textChannelId":text,"cmd":{"op":"skip"}}})).await;
     let mut said = String::new();
-    while !said.starts_with("Only") {
+    while !said.starts_with("⏭") {
         said = bot_says(&mut x, bot).await;
     }
-    assert_eq!(said, "Only Admin can skip this song");
-
-    // The 1 s song ends on its own and "Next" starts.
-    let s = until(&mut x, 5000, |m| match m {
-        WsServerMsg::MusicState(s) if s.now.as_ref().is_some_and(|e| e.title == "Next") => Some(s),
-        _ => None,
-    })
-    .await;
-    assert!(s.queue.is_empty());
+    assert!(said.starts_with("⏭ Vote passed (1/1): skipped Short\n▶ Now playing: LANY — Next"), "{said}");
 
     // A late joiner gets the music in Ready.
     let mut late = app.ws(&xeno.token).await;
@@ -99,6 +91,7 @@ async fn listen_together_over_the_socket() {
     .await;
     assert_eq!(m.len(), 1);
     assert_eq!(m[0].now.as_ref().unwrap().title, "Next");
+    assert!(m[0].queue.is_empty());
 
     // Everyone leaves: the music ends.
     p.send_json(json!({"t":"voiceLeave"})).await;

@@ -148,6 +148,8 @@ pub fn run() {
             music_cmd::music_search,
             music_cmd::music_cmd,
             music_cmd::music_lyrics,
+            music_cmd::music_annotate,
+            music_cmd::music_video_url,
             music_cmd::music_status,
             music_cmd::music_set_volume,
             voice_cmd::voice_state,

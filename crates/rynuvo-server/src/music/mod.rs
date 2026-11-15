@@ -30,6 +30,9 @@ pub struct Session {
     /// The channel's lyrics source (an id from `LYRICS_SOURCES`), "auto" until someone picks.
     pub lyrics: Option<String>,
     pub repeat: Repeat,
+    /// Votes to skip the playing song (cleared when it changes), and the votes it took last time.
+    skip_votes: Vec<Id>,
+    skip_needed: u32,
     next_id: u64,
 }
 
@@ -72,6 +75,8 @@ pub struct Actor<'a> {
     pub manager: bool,
     /// Is this user in the voice channel right now?
     pub present: &'a dyn Fn(Id) -> bool,
+    /// How many people are in the voice channel.
+    pub listeners: usize,
     pub nick: &'a dyn Fn(Id) -> String,
 }
 
@@ -148,6 +153,7 @@ impl Session {
     /// Start the next song (or stop), following the loop mode. `ended`: the song finished on its own
     /// (a looped song plays again); false for a skip. Returns the song now playing.
     pub fn advance(&mut self, now: i64, ended: bool) -> Option<&MusicEntry> {
+        self.clear_votes();
         if let Some(p) = self.playing.take() {
             match self.repeat {
                 Repeat::Song if ended => self.queue.push_front(p.entry),
@@ -157,6 +163,11 @@ impl Session {
         }
         self.playing = self.queue.pop_front().map(|entry| Playing { entry, started_at: now, paused_at: None });
         self.playing.as_ref().map(|p| &p.entry)
+    }
+
+    fn clear_votes(&mut self) {
+        self.skip_votes.clear();
+        self.skip_needed = 0;
     }
 
     pub fn state(&self, channel_id: Id, now: i64) -> MusicState {
@@ -169,7 +180,30 @@ impl Session {
             server_time: now,
             lyrics: self.lyrics.clone().unwrap_or_else(|| "auto".into()),
             repeat: self.repeat.id().into(),
+            skip_votes: self.skip_votes.clone(),
+            skip_needed: if self.skip_votes.is_empty() { 0 } else { self.skip_needed },
         }
+    }
+
+    /// Someone who can't skip the song outright votes to: half the room (rounded up) skips it.
+    fn vote_skip(&mut self, title: String, a: &Actor, now: i64) -> Outcome {
+        self.skip_votes.retain(|v| (a.present)(*v));
+        let needed = a.listeners.div_ceil(2).max(1) as u32;
+        self.skip_needed = needed;
+        if self.skip_votes.contains(&a.id) {
+            return Outcome { changed: false, reply: Some(format!("You already voted to skip ({}/{needed})", self.skip_votes.len())) };
+        }
+        self.skip_votes.push(a.id);
+        let have = self.skip_votes.len() as u32;
+        if have < needed {
+            return Outcome { changed: true, reply: Some(format!("🗳 {} voted to skip {title} ({have}/{needed})", (a.nick)(a.id))) };
+        }
+        let mut text = format!("⏭ Vote passed ({have}/{needed}): skipped {title}");
+        if let Some(e) = self.advance(now, false) {
+            let by = (a.nick)(e.requested_by);
+            text.push_str(&format!("\n▶ Now playing: {} · requested by {by}", line(e)));
+        }
+        Outcome { changed: true, reply: Some(text) }
     }
 
     fn now_playing_line(&self) -> String {
@@ -237,6 +271,7 @@ impl Session {
                     art_url: req.art_url,
                     duration_ms: req.duration_ms,
                     requested_by: a.id,
+                    video: req.video,
                 };
                 if self.playing.is_none() {
                     let text = format!("▶ Now playing: {} · requested by {}", line(&e), nick(a.id));
@@ -288,6 +323,7 @@ impl Session {
                 }
                 self.playing = None;
                 self.queue.clear();
+                self.clear_votes();
                 did(format!("⏹ {} stopped the music", nick(a.id)))
             }
             Cmd::Skip | Cmd::Pause | Cmd::Resume | Cmd::Seek(_) => {
@@ -300,6 +336,10 @@ impl Session {
                     _ => "seek",
                 };
                 if !may_control(p.entry.requested_by, a) {
+                    if matches!(cmd, Cmd::Skip) {
+                        let title = p.entry.title.clone();
+                        return self.vote_skip(title, a, now);
+                    }
                     return say(format!("Only {} can {verb} this song", nick(p.entry.requested_by)));
                 }
                 match cmd {
@@ -349,7 +389,7 @@ mod tests {
     const ADMIN: Id = 9;
 
     fn req(t: &str) -> MusicEntryReq {
-        MusicEntryReq { video_id: format!("vid{t}"), title: t.into(), artist: "LANY".into(), album: None, art_url: String::new(), duration_ms: 200_000 }
+        MusicEntryReq { video_id: format!("vid{t}"), title: t.into(), artist: "LANY".into(), album: None, art_url: String::new(), duration_ms: 200_000, video: false }
     }
 
     fn nick(id: Id) -> String {
@@ -361,9 +401,10 @@ mod tests {
     }
 
     fn run(s: &mut Session, cmd: Cmd, who: Id, present: &[Id], now: i64) -> Outcome {
+        let listeners = present.len();
         let present = present.to_vec();
         let p = move |id: Id| present.contains(&id);
-        s.handle(cmd, &Actor { id: who, admin: who == ADMIN, manager: who == ADMIN, present: &p, nick: &nick }, now)
+        s.handle(cmd, &Actor { id: who, admin: who == ADMIN, manager: who == ADMIN, present: &p, listeners, nick: &nick }, now)
     }
 
     #[test]
@@ -399,15 +440,44 @@ mod tests {
         let mut s = Session::default();
         run(&mut s, Cmd::Add(req("Stuck")), POKY, &[POKY], 0);
         run(&mut s, Cmd::Add(req("ILYSB")), XENO, &[POKY, XENO], 0);
-        let o = run(&mut s, Cmd::Skip, XENO, &[POKY, XENO], 10);
-        assert!(!o.changed);
-        assert_eq!(o.reply.unwrap(), "Only PokyVL can skip this song");
         let o = run(&mut s, Cmd::Pause, XENO, &[POKY, XENO], 10);
         assert_eq!(o.reply.unwrap(), "Only PokyVL can pause this song");
         let o = run(&mut s, Cmd::Skip, POKY, &[POKY, XENO], 10);
         assert!(o.changed);
         assert_eq!(o.reply.unwrap(), "⏭ PokyVL skipped Stuck\n▶ Now playing: LANY — ILYSB (3:20) · requested by Xeno");
         assert_eq!(s.playing.as_ref().unwrap().started_at, 10, "next song starts now");
+    }
+
+    #[test]
+    fn others_vote_to_skip_and_half_the_room_skips() {
+        const THIRD: Id = 3;
+        const FOURTH: Id = 4;
+        let room = [POKY, XENO, THIRD, FOURTH];
+        let mut s = Session::default();
+        run(&mut s, Cmd::Add(req("Stuck")), POKY, &room, 0);
+        run(&mut s, Cmd::Add(req("A")), POKY, &room, 0);
+        let o = run(&mut s, Cmd::Skip, XENO, &room, 10);
+        assert!(o.changed, "a vote shows on everyone's player");
+        assert_eq!(o.reply.unwrap(), "🗳 Xeno voted to skip Stuck (1/2)");
+        assert_eq!(s.state(5, 10).skip_votes, vec![XENO]);
+        assert_eq!(s.state(5, 10).skip_needed, 2);
+        let o = run(&mut s, Cmd::Skip, XENO, &room, 11);
+        assert!(!o.changed);
+        assert_eq!(o.reply.unwrap(), "You already voted to skip (1/2)");
+        let o = run(&mut s, Cmd::Skip, THIRD, &room, 12);
+        assert!(o.reply.unwrap().starts_with("⏭ Vote passed (2/2): skipped Stuck"));
+        assert_eq!(s.playing.as_ref().unwrap().entry.title, "A");
+        assert!(s.state(5, 12).skip_votes.is_empty(), "votes are per song");
+    }
+
+    #[test]
+    fn votes_from_people_who_left_do_not_count() {
+        let mut s = Session::default();
+        run(&mut s, Cmd::Add(req("Stuck")), POKY, &[POKY, XENO, 3, 4], 0);
+        run(&mut s, Cmd::Skip, XENO, &[POKY, XENO, 3, 4], 1);
+        // Xeno left; 3 of them now, 2 needed, and Xeno's vote is gone.
+        let o = run(&mut s, Cmd::Skip, 3, &[POKY, 3, 4], 2);
+        assert_eq!(o.reply.unwrap(), "🗳 Admin voted to skip Stuck (1/2)");
     }
 
     #[test]

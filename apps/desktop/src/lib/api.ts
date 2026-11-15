@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { Channel, ChannelKind, Id, ImageRef, Message, User, WsServerMsg } from './types'
 import type { MyVoice, Prefs, VoiceEvent } from './voice'
 import type { SelfCheck, Source, StreamEvent } from './stream'
-import type { Lyrics, MusicCmd, MusicStatus, SongResult } from './music'
+import type { Lyrics, MusicCmd, MusicStatus, SongResult, Annotation } from './music'
 
 export type ConnState = { state: 'connecting' } | { state: 'online' } | { state: 'reconnecting'; inMs: number }
 
@@ -76,6 +76,9 @@ export const api = {
   musicPlay: (query: string, textChannelId: Id | null) => invoke<void>('music_play', { query, textChannelId }),
   musicSearch: (query: string) => invoke<SongResult[]>('music_search', { query }),
   musicCmd: (cmd: MusicCmd, textChannelId: Id | null) => invoke<void>('music_cmd', { cmd, textChannelId }),
+  /** English translation and romanization per lyric line (same order). */
+  musicVideoUrl: (videoId: string) => invoke<string>('music_video_url', { videoId }),
+  musicAnnotate: (lines: string[]) => invoke<Annotation[]>('music_annotate', { lines }),
   musicLyrics: (videoId: string, title: string, artist: string, durationMs: number, source: string) =>
     invoke<Lyrics | null>('music_lyrics', { videoId, title, artist, durationMs, source }),
   musicStatus: (videoId: string) => invoke<MusicStatus | null>('music_status', { videoId }),

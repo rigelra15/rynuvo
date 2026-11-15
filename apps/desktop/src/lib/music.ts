@@ -10,6 +10,8 @@ export interface MusicEntry {
   artUrl: string
   durationMs: number
   requestedBy: Id
+  /** A music video: the player shows it above the title. */
+  video?: boolean
 }
 
 export interface MusicState {
@@ -23,6 +25,9 @@ export interface MusicState {
   lyrics?: string
   /** Loop mode; missing from servers before 0.5.1. */
   repeat?: Repeat
+  /** Votes to skip the playing song, and how many it takes (0 = no vote going). */
+  skipVotes?: Id[]
+  skipNeeded?: number
 }
 
 export type Repeat = 'off' | 'song' | 'queue'
@@ -45,6 +50,7 @@ export interface SongResult {
   album: string | null
   artUrl: string
   durationMs: number
+  video?: boolean
 }
 
 export type MusicCmd =
@@ -84,6 +90,9 @@ export function lyricsStatus(l: Lyrics | null | undefined): { label: string; ton
   if (l.lines.length) return { label: 'Line synced', tone: 'good' }
   return { label: 'Plain text', tone: 'meh' }
 }
+
+/** A lyric line's English translation (when not English) and romanization (when not in Latin letters). */
+export interface Annotation { translation: string | null; roman: string | null }
 
 /** This app's progress fetching a song. */
 export interface MusicStatus { videoId: string; status: 'loading' | 'ready' | 'error'; message: string | null }

@@ -218,6 +218,9 @@ pub struct MusicEntryReq {
     #[serde(default)]
     pub art_url: String,
     pub duration_ms: u32,
+    /// A music video (shown on the player) rather than a plain song.
+    #[serde(default)]
+    pub video: bool,
 }
 
 /// A song in a voice channel's music queue.
@@ -234,6 +237,9 @@ pub struct MusicEntry {
     pub art_url: String,
     pub duration_ms: u32,
     pub requested_by: Id,
+    /// A music video (shown on the player) rather than a plain song.
+    #[serde(default)]
+    pub video: bool,
 }
 
 /// What a voice channel is listening to. Apps play `now` at position `server_time - started_at`
@@ -253,6 +259,11 @@ pub struct MusicState {
     /// Loop mode: "off", "song" (play it again) or "queue" (finished songs go to the back).
     #[serde(default = "repeat_off")]
     pub repeat: String,
+    /// Who voted to skip the playing song, and how many votes it takes (0 = no vote going).
+    #[serde(default)]
+    pub skip_votes: Vec<Id>,
+    #[serde(default)]
+    pub skip_needed: u32,
 }
 
 fn repeat_off() -> String {

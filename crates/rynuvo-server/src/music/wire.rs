@@ -92,6 +92,7 @@ pub async fn command(st: &AppState, user_id: Id, is_admin: bool, cmd: MusicCmd, 
     let owner = sqlx::query_scalar::<_, Option<Id>>("SELECT owner_id FROM channels WHERE id = ?").bind(ch).fetch_optional(&st.db).await.ok().flatten().flatten();
     let manager = is_admin || owner == Some(user_id);
     let voice = st.voice.clone();
+    let listeners = st.voice.members().iter().filter(|m| m.channel_id == ch).count();
     let present = move |id: Id| voice.member(id).is_some_and(|m| m.channel_id == ch);
     let nick = |id: Id| names.get(&id).cloned().unwrap_or_else(|| "Someone".into());
     let now = now_ms();
@@ -101,7 +102,7 @@ pub async fn command(st: &AppState, user_id: Id, is_admin: bool, cmd: MusicCmd, 
         if text_channel.is_some() {
             s.reply_to = text_channel;
         }
-        let out = s.handle(to_cmd(cmd), &Actor { id: user_id, admin: is_admin, manager, present: &present, nick: &nick }, now);
+        let out = s.handle(to_cmd(cmd), &Actor { id: user_id, admin: is_admin, manager, present: &present, listeners, nick: &nick }, now);
         (out, s.state(ch, now), text_channel.or(s.reply_to))
     };
     if out.changed {
