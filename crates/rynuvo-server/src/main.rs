@@ -72,9 +72,11 @@ async fn serve(cfg: Config) -> anyhow::Result<()> {
         hub,
         voice: voice.clone(),
         relay: relay.clone(),
+        music: Default::default(),
     };
     relay.quota.set_limit(cfg.quota_gb.saturating_mul(1_000_000_000));
     rynuvo_server::quota::spawn(state.db.clone(), relay.quota.clone(), state.hub.clone()).await;
+    rynuvo_server::music::wire::spawn(state.clone());
     rynuvo_server::backup::spawn(state.db.clone(), cfg.backups_dir(), cfg.backups_keep);
     rynuvo_server::stun::spawn(cfg.stun_ports, Some(relay))?;
     rynuvo_server::voice::relay::Relay::spawn_drop_logger();

@@ -9,9 +9,11 @@ async fn hello_gets_ready_with_snapshot() {
     let c = app.create_channel(&a.token, "text", "umum").await;
     let mut ws = app.ws(&a.token).await;
     match ws.next().await {
-        WsServerMsg::Ready { me, users, channels, online, alerts, .. } => {
+        WsServerMsg::Ready { me, users, channels, online, alerts, music_bot, .. } => {
             assert_eq!(me.id, a.user.id);
-            assert_eq!(users.len(), 1);
+            let bot = music_bot.expect("the music bot is named");
+            assert_eq!(users.iter().filter(|u| u.id != bot).count(), 1, "people");
+            assert!(users.iter().any(|u| u.id == bot && u.nickname == "Rynuvo Music"), "the bot's name, for its replies");
             assert_eq!(channels, vec![c]);
             assert_eq!(online, vec![a.user.id]);
             assert!(alerts.is_empty());

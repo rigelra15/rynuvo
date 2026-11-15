@@ -47,8 +47,10 @@ impl TestApp {
             hub: hub.clone(),
             voice: voice.clone(),
             relay: relay.clone(),
+            music: Default::default(),
         };
         crate::stun::spawn_on(udp_sock, Some(relay));
+        crate::music::wire::spawn(state.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let router = build_router(state.clone());

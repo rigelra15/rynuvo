@@ -199,6 +199,68 @@ pub struct ApiError {
     pub message: String,
 }
 
+/// A song as the requester's app found it on YouTube Music.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicEntryReq {
+    pub video_id: String,
+    pub title: String,
+    pub artist: String,
+    #[serde(default)]
+    pub album: Option<String>,
+    /// Cover image (https), may be empty.
+    #[serde(default)]
+    pub art_url: String,
+    pub duration_ms: u32,
+}
+
+/// A song in a voice channel's music queue.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicEntry {
+    pub id: u64,
+    pub video_id: String,
+    pub title: String,
+    pub artist: String,
+    #[serde(default)]
+    pub album: Option<String>,
+    #[serde(default)]
+    pub art_url: String,
+    pub duration_ms: u32,
+    pub requested_by: Id,
+}
+
+/// What a voice channel is listening to. Apps play `now` at position `server_time - started_at`
+/// (adjusted for their clock offset), or hold at `paused_at`. `now: None` = no music.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicState {
+    pub channel_id: Id,
+    pub now: Option<MusicEntry>,
+    pub started_at: i64,
+    pub paused_at: Option<u32>,
+    pub queue: Vec<MusicEntry>,
+    pub server_time: i64,
+}
+
+/// A music command for the voice channel the sender is in.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "op", rename_all = "camelCase")]
+pub enum MusicCmd {
+    Add { entry: MusicEntryReq },
+    Skip,
+    Pause,
+    Resume,
+    Seek { ms: u32 },
+    /// 1-based queue position.
+    Remove { index: u32 },
+    Stop,
+    Queue,
+    NowPlaying,
+    /// The requester's search found nothing (the bot says so).
+    NotFound { query: String },
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "t", content = "d", rename_all = "camelCase")]
 pub enum WsClientMsg {
@@ -226,6 +288,9 @@ pub enum WsClientMsg {
     /// Opaque connection setup data (P2P candidates) for a streamer–viewer pair.
     #[serde(rename_all = "camelCase")]
     StreamSignal { to: Id, data: serde_json::Value },
+    /// `text_channel_id`: where the command was typed (the bot answers there); `None` for buttons.
+    #[serde(rename_all = "camelCase")]
+    Music { cmd: MusicCmd, text_channel_id: Option<Id> },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -251,6 +316,11 @@ pub enum WsServerMsg {
         voice: Vec<VoiceMember>,
         #[serde(default)]
         streams: Vec<StreamInfo>,
+        #[serde(default)]
+        music: Vec<MusicState>,
+        /// The "Rynuvo Music" user: shown as the author of its replies, never as a member.
+        #[serde(default)]
+        music_bot: Option<Id>,
     },
     MessageCreated(Message),
     MessageUpdated(Message),
@@ -288,12 +358,22 @@ pub enum WsServerMsg {
     StreamViewer { streamer: Id, viewer: Id, codecs: Vec<String>, key: String, joined: bool },
     #[serde(rename_all = "camelCase")]
     StreamSignal { from: Id, data: serde_json::Value },
+    MusicState(MusicState),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn music_msgs_shape() {
+        let v = serde_json::to_value(WsClientMsg::Music { cmd: MusicCmd::Seek { ms: 1000 }, text_channel_id: None }).unwrap();
+        assert_eq!(v, json!({"t":"music","d":{"cmd":{"op":"seek","ms":1000},"textChannelId":null}}));
+        let add: WsClientMsg = serde_json::from_value(json!({"t":"music","d":{"textChannelId":4,"cmd":{"op":"add","entry":{
+            "videoId":"abc","title":"Stuck","artist":"LANY","durationMs":200000}}}})).unwrap();
+        assert!(matches!(add, WsClientMsg::Music { cmd: MusicCmd::Add { entry }, text_channel_id: Some(4) } if entry.art_url.is_empty()));
+    }
 
     #[test]
     fn stream_msgs_shape() {
