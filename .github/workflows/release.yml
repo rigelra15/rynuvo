@@ -74,7 +74,19 @@ jobs:
           # Signs the updater bundles (the key has no password).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          # macOS: one fixed self-signed certificate, so every version is the same app to macOS and
+          # Screen Recording / Microphone permissions survive updates (ad-hoc signing loses them).
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
+
+      - name: Mac app is signed with the Rynuvo certificate
+        if: matrix.os == 'macos-latest'
+        run: |
+          app=$(ls -d target/${{ matrix.target }}/release/bundle/macos/*.app)
+          codesign -d -r- "$app" 2>&1 | tee /dev/stderr | grep -q 'certificate root' || {
+            echo "::error::$app is not signed with the certificate (permissions would reset on update)"; exit 1; }
 
       - name: Collect installer and updater bundle
         run: |
