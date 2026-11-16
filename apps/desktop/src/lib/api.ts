@@ -45,6 +45,7 @@ export const api = {
   saveImage: (id: string) => invoke<string>('save_image', { id }),
   runNettest: () => invoke<NetReport>('run_nettest'),
   sendLog: () => invoke<void>('send_log'),
+  exportStreamDiagnostics: () => invoke<string>('export_stream_diagnostics'),
   appVersion: () => invoke<string>('app_version'),
   voiceState: () => invoke<MyVoice>('voice_state'),
   voiceJoin: (channelId: Id) => invoke<MyVoice>('voice_join', { channelId }),

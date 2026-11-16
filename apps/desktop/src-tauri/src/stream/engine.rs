@@ -187,6 +187,8 @@ struct BInner {
     force_key: AtomicBool,
     stop: AtomicBool,
     audio_seq: AtomicU32,
+    captured: AtomicU32,
+    queue_drops: AtomicU32,
 }
 
 impl BInner {
@@ -235,10 +237,16 @@ impl Broadcast {
             force_key: AtomicBool::new(true),
             stop: AtomicBool::new(false),
             audio_seq: AtomicU32::new(0),
+            captured: AtomicU32::new(0),
+            queue_drops: AtomicU32::new(0),
         });
         let (ftx, frx) = smpsc::sync_channel::<Frame>(1);
+        let video_diag = inner.clone();
         let video: VideoSink = Arc::new(move |f| {
-            let _ = ftx.try_send(f); // encoder busy: drop this frame, keep latency low
+            video_diag.captured.fetch_add(1, Ordering::Relaxed);
+            if ftx.try_send(f).is_err() { // encoder busy: keep latency low
+                video_diag.queue_drops.fetch_add(1, Ordering::Relaxed);
+            }
         });
         let audio = audio_sink(inner.clone());
         let (i3, ev3) = (Arc::downgrade(&inner), events.clone());
@@ -401,6 +409,9 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
     let mut relay_state = false;
     let mut relay_change: Option<Instant> = None;
     let mut pacer = Pacer::new(1, 64_000);
+    let mut diag_at = Instant::now();
+    let (mut encoded, mut encode_skips, mut encode_errors) = (0u32, 0u32, 0u32);
+    let (mut encode_calls, mut encode_total_us, mut pace_total_ms) = (0u64, 0u64, 0u64);
     while !inner.stop.load(Ordering::Relaxed) {
         let fresh = match frames.recv_timeout(Duration::from_millis(50)) {
             Ok(f) => {
@@ -446,6 +457,20 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
             restart(capped);
         }
         rate.set_max(if relay { inner.preset.max_kbps.min(RELAY_KBPS) } else { inner.preset.max_kbps });
+        if diag_at.elapsed() >= Duration::from_secs(1) {
+            let secs = diag_at.elapsed().as_secs_f32();
+            let captured = inner.captured.swap(0, Ordering::Relaxed);
+            let drops = inner.queue_drops.swap(0, Ordering::Relaxed);
+            let udp_send_errors: u32 = inner.viewers.lock().unwrap().values().map(|v| v.link.take_send_failures()).sum();
+            let avg_ms = if encode_calls == 0 { 0.0 } else { encode_total_us as f64 / encode_calls as f64 / 1000.0 };
+            tracing::info!(captured_fps = captured as f32 / secs, encoded_fps = encoded as f32 / secs,
+                queue_drops = drops, encoder_skips = encode_skips, encode_errors, encode_avg_ms = avg_ms,
+                pacing_wait_ms = pace_total_ms, udp_send_errors, bitrate_target_kbps = kbps,
+                codec = %e_name(&enc), hardware = enc.as_ref().is_some_and(|e| e.hardware()), relay,
+                "rynuvo-stream-diag sender");
+            (encoded, encode_skips, encode_errors, encode_calls, encode_total_us, pace_total_ms) = (0, 0, 0, 0, 0, 0);
+            diag_at = Instant::now();
+        }
         if ids.is_empty() {
             let idle = StreamEvent::Live { viewers: Vec::new(), codec: e_name(&enc), kbps, hardware: enc.as_ref().is_some_and(|e| e.hardware()), relay: false };
             if last_live.as_ref() != Some(&idle) {
@@ -491,8 +516,13 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
             e.set_bitrate(kbps);
         }
         let force = inner.force_key.swap(false, Ordering::Relaxed);
-        match e.encode(frame, force) {
+        let encode_at = Instant::now();
+        let result = e.encode(frame, force);
+        encode_total_us += encode_at.elapsed().as_micros() as u64;
+        encode_calls += 1;
+        match result {
             Ok(Some(out)) => {
+                encoded += 1;
                 frame_no = frame_no.wrapping_add(1);
                 let ts = started.elapsed().as_millis() as u16;
                 let flags = if out.key { frag::KEY } else { 0 };
@@ -505,15 +535,18 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
                     let bytes: u64 = chunk.iter().map(|m| m.len() as u64).sum::<u64>() * n;
                     let w = pacer.wait(bytes, Instant::now());
                     if !w.is_zero() {
-                        std::thread::sleep(w.min(Duration::from_millis(200)));
+                        let wait = w.min(Duration::from_millis(200));
+                        pace_total_ms += wait.as_millis() as u64;
+                        std::thread::sleep(wait);
                     }
                     inner.fan_out(chunk);
                 }
                 last_sent = Some(Instant::now());
                 last_taken = Some(taken);
             }
-            Ok(None) => {}
+            Ok(None) => { encode_skips += 1; }
             Err(err) => {
+                encode_errors += 1;
                 tracing::warn!("stream: encode failed: {err}");
                 enc = None;
             }
@@ -601,6 +634,7 @@ async fn receive(
     let mut last_video = Instant::now();
     let (mut frames, mut bytes, mut codec) = (0u32, 0usize, 0u8);
     let mut window = Instant::now();
+    let mut max_loss = 0.0f32;
     loop {
         tokio::select! {
             m = rx.recv() => {
@@ -643,7 +677,9 @@ async fn receive(
                     break;
                 }
                 let mut r = vec![T_REPORT];
-                r.extend_from_slice(&reasm.take_loss().to_be_bytes());
+                let loss = reasm.take_loss();
+                max_loss = max_loss.max(loss);
+                r.extend_from_slice(&loss.to_be_bytes());
                 link.send(&r);
                 if reasm.needs_keyframe() {
                     link.send(&[T_KEYREQ]);
@@ -651,12 +687,19 @@ async fn receive(
                 let secs = window.elapsed().as_secs_f32().max(0.001);
                 if secs >= 1.0 {
                     let name = Codec::from_u8(codec).map_or("", |c| c.name()).to_string();
+                    let receive_fps = frames as f32 / secs;
+                    let receive_kbps = (bytes as f32 * 8.0 / 1000.0 / secs) as u32;
+                    let path = path_name(link.path());
+                    tracing::info!(receive_fps, receive_kbps, loss_max_pct = max_loss * 100.0,
+                        udp_send_errors = link.take_send_failures(), path, codec = %name,
+                        "rynuvo-stream-diag receiver");
+                    max_loss = 0.0;
                     (events)(StreamEvent::Stats {
                         user_id: streamer,
-                        fps: frames as f32 / secs,
+                        fps: receive_fps,
                         codec: name,
-                        kbps: (bytes as f32 * 8.0 / 1000.0 / secs) as u32,
-                        path: path_name(link.path()).into(),
+                        kbps: receive_kbps,
+                        path: path.into(),
                     });
                     frames = 0;
                     bytes = 0;

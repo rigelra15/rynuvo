@@ -3,6 +3,7 @@
 use std::{
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
     sync::OnceLock,
 };
 
@@ -50,4 +51,22 @@ pub fn collect_tail(max_bytes: usize) -> String {
     let mut buf = Vec::new();
     let _ = f.read_to_end(&mut buf);
     String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// Export only aggregate stream performance lines: never share raw logs containing IPs or identifiers.
+pub fn export_stream_diagnostics(downloads: &Path) -> anyhow::Result<PathBuf> {
+    let entries: Vec<_> = collect_tail(MAX_TAIL)
+        .lines()
+        .filter(|line| line.contains("rynuvo-stream-diag"))
+        .map(str::to_owned)
+        .collect();
+    if entries.is_empty() {
+        anyhow::bail!("No stream diagnostics yet. Start watching or sharing a screen for a few seconds, then retry.");
+    }
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    let path = downloads.join(format!("rynuvo-stream-diagnostics-{stamp}.log"));
+    let header = format!("Rynuvo stream diagnostics\nVersion: {}\nOS: {}\nOnly aggregate stream metrics are included.\n\n",
+        env!("CARGO_PKG_VERSION"), std::env::consts::OS);
+    std::fs::write(&path, format!("{header}{}\n", entries.join("\n")))?;
+    Ok(path)
 }
