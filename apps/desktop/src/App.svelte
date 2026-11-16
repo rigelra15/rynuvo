@@ -9,6 +9,7 @@
   import Onboarding from './components/Onboarding.svelte'
   import Settings from './components/Settings.svelte'
   import DialogHost from './components/DialogHost.svelte'
+  import UpdateModal from './components/UpdateModal.svelte'
   import { dialog } from './lib/dialog.svelte'
   import Sidebar from './components/Sidebar.svelte'
   import UserVolumeMenu from './components/UserVolumeMenu.svelte'
@@ -152,6 +153,7 @@
 {/if}
 
 <DialogHost />
+<UpdateModal />
 
 <style>
   .app { height: 100%; display: flex; flex-direction: column; }
