@@ -23,11 +23,11 @@
   let net = $state<string[] | null>(null)
   let netBusy = $state(false)
   let logMsg = $state<string | null>(null)
+  let diagnosticMsg = $state<string | null>(null)
   let version = $state('')
   let error = $state<string | null>(null)
   let checkingUpdate = $state(false)
   let updateResult = $state<CheckResult | null>(null)
-  let restarting = $state(false)
   const upd = $derived(
     updateStatus({ update: updater.state, checking: checkingUpdate, result: updateResult, busy: store.myVoice.channelId !== null || store.live !== null }),
   )
@@ -39,15 +39,6 @@
       updateResult = await updater.checkNow()
     } finally {
       checkingUpdate = false
-    }
-  }
-
-  async function restartToUpdate() {
-    restarting = true
-    try {
-      await updater.restart()
-    } finally {
-      restarting = false
     }
   }
 
@@ -130,6 +121,15 @@
       net = [errText(err)]
     } finally {
       netBusy = false
+    }
+  }
+
+  async function exportDiagnostics() {
+    diagnosticMsg = 'Exporting…'
+    try {
+      diagnosticMsg = `Saved to ${await api.exportStreamDiagnostics()}`
+    } catch (err) {
+      diagnosticMsg = errText(err)
     }
   }
 
@@ -252,11 +252,7 @@
           <h3>Updates</h3>
           <p class="muted">You're on Rynuvo {version}. New versions download in the background on their own.</p>
           <div class="row">
-            {#if upd.restart}
-              <button class="btn primary" onclick={restartToUpdate} disabled={restarting}>{restarting ? 'Restarting…' : 'Restart to update'}</button>
-            {:else}
-              <button class="btn" onclick={checkUpdates} disabled={checkingUpdate || updater.state.phase !== 'idle'}>Check for updates</button>
-            {/if}
+            <button class="btn" onclick={checkUpdates} disabled={checkingUpdate || updater.state.phase !== 'idle'}>Check for updates</button>
           </div>
           {#if upd.text}<p class="note" aria-live="polite">{upd.text}</p>{/if}
         </section>
@@ -268,6 +264,8 @@
 
         <section>
           <h3>Having problems?</h3>
+          <button class="btn" onclick={exportDiagnostics}>Export screen share diagnostics</button>
+          {#if diagnosticMsg}<p class="note">{diagnosticMsg}</p>{/if}
           <button class="btn" onclick={sendLog}>Send log to admin</button>
           {#if logMsg}<p class="note">{logMsg}</p>{/if}
         </section>
