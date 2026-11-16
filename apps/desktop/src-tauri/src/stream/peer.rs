@@ -88,6 +88,7 @@ struct Inner {
     role: Role,
     key: VoiceKey,
     seq: AtomicU32,
+    send_failures: AtomicU32,
     st: Mutex<State>,
     socks: Mutex<Vec<Arc<UdpSocket>>>,
     relay: RelayFn,
@@ -109,6 +110,7 @@ impl PeerLink {
             role,
             key,
             seq: AtomicU32::new(0),
+            send_failures: AtomicU32::new(0),
             st: Mutex::new(State { path: PeerPath::Connecting, remotes: Vec::new(), remotes_at: None, last_direct: Instant::now() }),
             socks: Mutex::new(Vec::new()),
             relay,
@@ -146,6 +148,11 @@ impl PeerLink {
         self.inner.st.lock().unwrap().path
     }
 
+    /// Socket sends rejected by the OS since the last diagnostic sample.
+    pub fn take_send_failures(&self) -> u32 {
+        self.inner.send_failures.swap(0, Ordering::Relaxed)
+    }
+
     pub fn stop(&self) {
         let _ = self.inner.stop.send(true);
     }
@@ -157,10 +164,13 @@ impl Inner {
         let pkt = seal_up(&self.key, kind, self.role.session(), seq, payload);
         for s in self.socks.lock().unwrap().iter() {
             if s.local_addr().is_ok_and(|l| l.is_ipv6() == to.is_ipv6()) {
-                let _ = s.try_send_to(&pkt, to);
+                if s.try_send_to(&pkt, to).is_err() {
+                    self.send_failures.fetch_add(1, Ordering::Relaxed);
+                }
                 return;
             }
         }
+        self.send_failures.fetch_add(1, Ordering::Relaxed); // no socket for this address family
     }
 
     fn set_path(&self, p: PeerPath) {
