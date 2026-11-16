@@ -1,3 +1,5 @@
 Release Rynuvo v0.8.3 once after merging PR #1 into main.
 Validated frontend and cross-platform compilation. Build signed installers and publish the GitHub Release.
 Update metadata deployment to the VPS is a separate step.
+
+Retry with corrected release workflow: tag-only checks and one-time main publication.
