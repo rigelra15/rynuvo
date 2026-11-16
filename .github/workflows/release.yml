@@ -1,11 +1,14 @@
 # Builds the desktop installers and the server binary, then publishes them as a GitHub Release.
-# Push a tag matching tauri.conf.json's version (e.g. `git tag v0.1.0 && git push origin v0.1.0`),
-# or run it by hand from the Actions tab to get the files as workflow artifacts only.
+# Tag pushes normally release. A one-off v0.8.3 marker also releases on merge to main,
+# avoiding an extra manual tag operation; no general release-on-every-main-push.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths:
+      - .github/releases/v0.8.3.once
   workflow_dispatch:
 
 permissions:
@@ -69,7 +72,7 @@ jobs:
         run: echo "version=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Tag matches app version
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && github.event_name == 'push')
         run: |
           [ "${GITHUB_REF_NAME}" = "v${{ steps.v.outputs.version }}" ] || {
             echo "::error::Tag ${GITHUB_REF_NAME} does not match tauri.conf.json version ${{ steps.v.outputs.version }}"; exit 1; }
@@ -174,5 +177,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -lh dist
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --repo "$GITHUB_REPOSITORY" --title "Rynuvo $GITHUB_REF_NAME" --generate-notes
+          # On the one-off main push, gh creates the tag at this checked-out build commit.
+          tag="$GITHUB_REF_NAME"
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then tag="v0.8.3"; fi
+          gh release create "$tag" dist/* \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Rynuvo $tag" --generate-notes
