@@ -2,6 +2,7 @@
   import { updater } from '../lib/updater.svelte'
 
   const state = $derived(updater.state)
+  const version = $derived(state.phase === 'idle' ? '' : state.version)
   const show = $derived(state.phase === 'ready' || state.phase === 'installing' || state.phase === 'failed')
 </script>
 
@@ -10,7 +11,7 @@
     <section class="update-box" role="alertdialog" aria-modal="true"
       aria-labelledby="update-heading" aria-describedby="update-description">
       <div class="mark">↻</div>
-      <h2 id="update-heading">Rynuvo update {state.version}</h2>
+      <h2 id="update-heading">Rynuvo update {version}</h2>
       {#if state.phase === 'ready'}
         <p id="update-description">A new version has been downloaded. Rynuvo will automatically leave voice, stop screen sharing, and restart to apply the update.</p>
         <div class="counter" aria-live="polite">Restarting in {state.seconds}s</div>
