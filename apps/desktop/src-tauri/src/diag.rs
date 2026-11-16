@@ -1,5 +1,5 @@
 //! Settings-page diagnostics: connection test, log upload, version.
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::{
     commands::Core,
@@ -32,4 +32,13 @@ pub async fn send_log(core: State<'_, Core>) -> Result<(), String> {
 #[tauri::command]
 pub fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
+}
+
+/// Save a privacy-conscious diagnostics report to Downloads for sharing with the developer.
+#[tauri::command]
+pub async fn export_stream_diagnostics(app: AppHandle) -> Result<String, String> {
+    let downloads = app.path().download_dir().map_err(|e| format!("Downloads folder unavailable: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || logs::export_stream_diagnostics(&downloads)
+        .map(|p| p.to_string_lossy().into_owned()).map_err(|e| e.to_string()))
+        .await.map_err(|e| e.to_string())?
 }
