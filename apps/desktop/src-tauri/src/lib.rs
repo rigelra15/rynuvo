@@ -132,6 +132,7 @@ pub fn run() {
             media::save_image,
             diag::run_nettest,
             diag::send_log,
+            diag::export_stream_diagnostics,
             diag::app_version,
             stream_cmd::stream_sources,
             stream_cmd::stream_encoders,
