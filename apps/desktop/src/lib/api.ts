@@ -143,7 +143,11 @@ export function onSessionEvent(cb: (e: SessionEvent) => void): Promise<UnlistenF
 
 /** Tauri command errors arrive as plain strings. */
 export function errText(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : 'Something went wrong'
+  if (typeof e === 'string') return e
+  if (e instanceof Error) return e.message
+  // Native plugins (the QR scanner, …) reject with plain objects: keep their reason.
+  const m = (e as { message?: unknown } | null)?.message
+  return typeof m === 'string' && m ? m : 'Something went wrong'
 }
 
 export const mediaUrl = (id: string) => convertFileSrc(id, 'rynuvo-media')

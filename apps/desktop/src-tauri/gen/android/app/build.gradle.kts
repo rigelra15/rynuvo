@@ -61,8 +61,10 @@ android {
         }
         getByName("release") {
             signingConfigs.findByName("release")?.let { signingConfig = it }
+            // R8 off: it stripped what ML Kit (the QR scanner) loads by reflection, and the
+            // scan failed with a NullPointerException. The APK is almost all native Rust anyway.
             optimization {
-               enable = true
+               enable = false
             }
             proguardFiles(
                 *fileTree(".") {

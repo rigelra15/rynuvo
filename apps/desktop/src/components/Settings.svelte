@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { renderSVG } from 'uqr'
+  import DiamondQr from './DiamondQr.svelte'
   import { toQr } from '../lib/code'
   import { backdrop, sheet } from '../lib/motion'
   import Icon from './Icon.svelte'
@@ -279,7 +279,7 @@
           <p class="muted">Create a transfer code, then scan it or type it in on the other device.</p>
           {#if transfer}
             <div class="transfer">
-              <div class="qr" aria-label="QR code for this transfer code">{@html renderSVG(toQr(transfer.code), { border: 2, whiteColor: '#fff', blackColor: '#000' })}</div>
+              <div class="qr"><DiamondQr text={toQr(transfer.code)} label="QR code for this transfer code" /></div>
               <div>
                 <div class="code selectable">{transfer.code}</div>
                 <p class="note"><Countdown until={transfer.expiresAt} /></p>
@@ -379,8 +379,8 @@
   .row { display: flex; gap: 8px; width: 100%; }
   .row input { flex: 1; }
   .transfer { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-  .qr { width: 132px; height: 132px; flex: none; border-radius: 10px; overflow: hidden; background: #fff; }
-  .qr :global(svg) { display: block; width: 100%; height: 100%; }
+  /* The code inside the diamond is ~70% of this: still larger than the old square QR. */
+  .qr { width: 220px; height: 220px; flex: none; }
   .code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.08em; color: var(--accent); }
   .note { color: var(--muted); }
   ul { margin: 0; padding-left: 18px; font-size: 13px; }

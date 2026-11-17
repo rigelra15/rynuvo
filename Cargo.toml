@@ -26,3 +26,7 @@ opt-level = 3
 # string pool"), and release builds strip debuginfo by default. Don't strip build-time artifacts.
 [profile.release.build-override]
 strip = false
+
+# The QR scanner with a camera fix for some Samsung phones (see the "Rynuvo patch" notes inside).
+[patch.crates-io]
+tauri-plugin-barcode-scanner = { path = "apps/desktop/src-tauri/vendor/tauri-plugin-barcode-scanner" }
