@@ -93,18 +93,33 @@ fn random32() -> [u8; 32] {
     k
 }
 
-fn envelope_key(ikm: &[u8], scope: &Scope, from: Id, to: Id, generation: u32) -> Option<[u8; 32]> {
+struct EnvelopeCtx<'a> {
+    scope: &'a Scope,
+    from: Id,
+    to: Id,
+    generation: u32,
+    eph_pub: &'a [u8; 32],
+    from_pub: &'a [u8; 32],
+    to_pub: &'a [u8; 32],
+}
+
+fn envelope_key(ikm: &[u8], c: &EnvelopeCtx) -> Option<[u8; 32]> {
+    let EnvelopeCtx { scope, from, to, generation, .. } = *c;
     let (kind, id) = match scope {
         Scope::Voice(id) => (1u8, *id),
         Scope::Stream(id) => (2u8, *id),
     };
-    let mut info = Vec::with_capacity(INFO_PREFIX.len() + 1 + 8 * 3 + 4);
+    let mut info = Vec::with_capacity(INFO_PREFIX.len() + 1 + 8 * 3 + 4 + 96);
     info.extend_from_slice(INFO_PREFIX);
     info.push(kind);
     info.extend_from_slice(&id.to_be_bytes());
     info.extend_from_slice(&from.to_be_bytes());
     info.extend_from_slice(&to.to_be_bytes());
     info.extend_from_slice(&generation.to_be_bytes());
+    // Raw key bytes are bound too: X25519 ignores bit 255 of a public key, so without this it is malleable.
+    info.extend_from_slice(c.eph_pub);
+    info.extend_from_slice(c.from_pub);
+    info.extend_from_slice(c.to_pub);
     let mut out = [0u8; 32];
     Hkdf::<Sha256>::new(None, ikm).expand(&info, &mut out).ok()?;
     Some(out)
@@ -122,7 +137,7 @@ fn dh_pair(a: &StaticSecret, a_peer: &XPublic, b: &StaticSecret, b_peer: &XPubli
 }
 
 /// Seal `key` for `to`: `eph_pub(32) || ChaCha20-Poly1305(key)` (48 bytes). The envelope key is single-use
-/// (fresh ephemeral), so the nonce is zero.
+/// (fresh ephemeral), so the nonce is zero. `None` if `to_pub` is a low-order point (hostile or corrupt key).
 pub fn seal_envelope(
     me: &DeviceKey,
     from: Id,
@@ -131,18 +146,27 @@ pub fn seal_envelope(
     scope: &Scope,
     generation: u32,
     key: &MediaKey,
-) -> Vec<u8> {
+) -> Option<Vec<u8>> {
     let eph = StaticSecret::from(random32());
     let eph_pub = XPublic::from(&eph);
     let to_x = XPublic::from(to_pub.0);
-    let ikm = dh_pair(&eph, &to_x, &me.0, &to_x).expect("recipient key is a valid curve point");
-    let k = envelope_key(&ikm, scope, from, to, generation).expect("hkdf length");
+    let ikm = dh_pair(&eph, &to_x, &me.0, &to_x)?;
+    let ctx = EnvelopeCtx {
+        scope,
+        from,
+        to,
+        generation,
+        eph_pub: eph_pub.as_bytes(),
+        from_pub: &me.public().0,
+        to_pub: &to_pub.0,
+    };
+    let k = envelope_key(&ikm, &ctx)?;
     let ct = ChaCha20Poly1305::new(Key::from_slice(&k))
         .encrypt(Nonce::from_slice(&[0u8; 12]), key.0.as_slice())
         .expect("encrypt");
     let mut out = eph_pub.as_bytes().to_vec();
     out.extend_from_slice(&ct);
-    out
+    Some(out)
 }
 
 /// Open an envelope addressed to `me` from `from`. `None` on any mismatch or malformed input.
@@ -158,10 +182,20 @@ pub fn open_envelope(
     if env.len() != 32 + 32 + TAG {
         return None;
     }
-    let eph_pub = XPublic::from(<[u8; 32]>::try_from(&env[..32]).ok()?);
+    let eph_raw = <[u8; 32]>::try_from(&env[..32]).ok()?;
+    let eph_pub = XPublic::from(eph_raw);
     let from_x = XPublic::from(from_pub.0);
     let ikm = dh_pair(&me.0, &eph_pub, &me.0, &from_x)?;
-    let k = envelope_key(&ikm, scope, from, to, generation)?;
+    let ctx = EnvelopeCtx {
+        scope,
+        from,
+        to,
+        generation,
+        eph_pub: &eph_raw,
+        from_pub: &from_pub.0,
+        to_pub: &me.public().0,
+    };
+    let k = envelope_key(&ikm, &ctx)?;
     let pt = ChaCha20Poly1305::new(Key::from_slice(&k)).decrypt(Nonce::from_slice(&[0u8; 12]), &env[32..]).ok()?;
     Some(MediaKey(pt.try_into().ok()?))
 }
@@ -209,9 +243,10 @@ pub fn open_frame(key: &MediaKey, kind: u8, sender: Id, ct: &[u8]) -> Option<Vec
         .ok()
 }
 
-fn code_of(mut members: Vec<(Id, [u8; 32])>) -> String {
+fn code_of(domain: &[u8], mut members: Vec<(Id, [u8; 32])>) -> String {
     members.sort();
     let mut h = Sha256::new();
+    h.update(domain);
     for (id, pk) in &members {
         h.update(id.to_be_bytes());
         h.update(pk);
@@ -225,12 +260,12 @@ fn code_of(mut members: Vec<(Id, [u8; 32])>) -> String {
 
 /// 30-digit code over everyone in the call; identical on every member's screen, independent of order.
 pub fn call_code(members: &[(Id, PublicKey)]) -> String {
-    code_of(members.iter().map(|(i, p)| (*i, p.0)).collect())
+    code_of(b"rynuvo-e2ee-v1 call", members.iter().map(|(i, p)| (*i, p.0)).collect())
 }
 
 /// 30-digit code for two people to compare.
 pub fn person_code(a: (Id, &PublicKey), b: (Id, &PublicKey)) -> String {
-    code_of(vec![(a.0, a.1.0), (b.0, b.1.0)])
+    code_of(b"rynuvo-e2ee-v1 person", vec![(a.0, a.1.0), (b.0, b.1.0)])
 }
 
 #[cfg(test)]
@@ -248,7 +283,7 @@ mod tests {
         let (a, a_pub) = pair();
         let (b, b_pub) = pair();
         let key = MediaKey::random();
-        let env = seal_envelope(&a, 1, 2, &b_pub, &Scope::Voice(9), 7, &key);
+        let env = seal_envelope(&a, 1, 2, &b_pub, &Scope::Voice(9), 7, &key).unwrap();
         assert_eq!(env.len(), 32 + 32 + 16);
         let got = open_envelope(&b, 1, &a_pub, 2, &Scope::Voice(9), 7, &env).unwrap();
         assert_eq!(got, key);
@@ -261,8 +296,12 @@ mod tests {
         let (c, _) = pair();
         let key = MediaKey::random();
         let s = Scope::Voice(9);
-        let env = seal_envelope(&a, 1, 2, &b_pub, &s, 7, &key);
+        let env = seal_envelope(&a, 1, 2, &b_pub, &s, 7, &key).unwrap();
+        assert!(seal_envelope(&a, 1, 2, &PublicKey([0; 32]), &s, 7, &key).is_none());
         assert!(open_envelope(&b, 1, &a_pub, 2, &s, 7, &env).is_some());
+        let mut high = env.clone();
+        high[31] ^= 0x80;
+        assert!(open_envelope(&b, 1, &a_pub, 2, &s, 7, &high).is_none(), "high bit");
         for i in [0, 31, 32, env.len() - 1] {
             let mut bad = env.clone();
             bad[i] ^= 1;
@@ -318,6 +357,7 @@ mod tests {
         let p = person_code((a.0, &a.1), (b.0, &b.1));
         assert_eq!(p, person_code((b.0, &b.1), (a.0, &a.1)));
         assert!(ok(&p));
+        assert_ne!(call_code(&[a.clone(), b.clone()]), p);
         assert_ne!(p, person_code((a.0, &a.1), (c.0, &c.1)));
     }
 }
