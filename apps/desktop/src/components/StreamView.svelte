@@ -2,7 +2,7 @@
   import Slider from './Slider.svelte'
   import { onMount } from 'svelte'
   import { api, errText } from '../lib/api'
-  import { CODEC_STRING, decodableCodecs, KeyGate, parseAu, spsSize, statsLine, type CodecName } from '../lib/stream'
+  import { CODEC_STRING, decodableCodecs, FramePacer, KeyGate, parseAu, RenderMeter, spsSize, statsLine, TsUnwrap, type CodecName, type RenderStats } from '../lib/stream'
   import { store } from '../lib/state.svelte'
   import type { Id } from '../lib/types'
 
@@ -13,9 +13,16 @@
   let size = $state({ width: 0, height: 0 })
   let volume = $state(1)
   let waiting = $state(true)
+  let render = $state<RenderStats | null>(null)
   const stats = $derived(store.streamStats.get(userId))
+  // The fps shown is what reached the screen, not what arrived.
   const line = $derived(
-    statsLine({ width: size.width, height: size.height, fps: stats?.fps ?? 0, codec: stats?.codec ?? '', path: stats?.path ?? 'connecting' }),
+    statsLine({ width: size.width, height: size.height, fps: render?.renderedFps ?? stats?.fps ?? 0, codec: stats?.codec ?? '', path: stats?.path ?? 'connecting' }),
+  )
+  const detail = $derived(
+    render
+      ? `Received ${render.receivedFps.toFixed(0)} fps · shown ${render.renderedFps.toFixed(0)} fps · frame gap ${render.intervalMs.toFixed(1)} ± ${render.jitterMs.toFixed(1)} ms · buffer ${render.bufferMs.toFixed(0)} ms · dropped ${render.lateDrops + render.gateDrops}`
+      : '',
   )
 
   onMount(() => {
@@ -24,8 +31,12 @@
     let codec: CodecName | null = null
     let coded = ''
     const gate = new KeyGate(() => void api.streamRequestKey(userId))
-    let n = 0
+    const unwrap = new TsUnwrap()
+    const pacer = new FramePacer<VideoFrame>()
+    const meter = new RenderMeter(performance.now())
+    let gateDrops = 0
     let closed = false
+    let raf = 0
 
     const draw = (f: VideoFrame) => {
       if (canvas.width !== f.displayWidth || canvas.height !== f.displayHeight) {
@@ -44,7 +55,10 @@
         // already closed
       }
       decoder = new VideoDecoder({
-        output: draw,
+        output: (f) => {
+          if (closed) f.close()
+          else pacer.push(f, performance.now())
+        },
         error: () => {
           decoder = null // the next key frame starts a new decoder
           gate.broken()
@@ -69,9 +83,33 @@
         }
         fresh(au.codec, sz)
       }
-      if (!gate.accept(au, decoder!.decodeQueueSize)) return
-      decoder!.decode(new EncodedVideoChunk({ type: au.key ? 'key' : 'delta', timestamp: n++ * 16_667, data: au.data }))
+      meter.arrived()
+      const timestamp = unwrap.next(au.ts)
+      if (!gate.accept(au, decoder!.decodeQueueSize)) {
+        gateDrops++
+        return
+      }
+      decoder!.decode(new EncodedVideoChunk({ type: au.key ? 'key' : 'delta', timestamp, data: au.data }))
     }
+
+    // Present on the display's refresh, each frame at its capture-time slot.
+    const tick = (now: number) => {
+      if (closed) return
+      const f = pacer.take(now)
+      if (f) {
+        draw(f)
+        meter.drawn(now)
+      }
+      const r = meter.report(now, { late: pacer.drops, gate: gateDrops, bufferMs: pacer.delay })
+      if (r) {
+        pacer.drops = 0
+        gateDrops = 0
+        render = r
+        void api.streamRenderStats(r).catch(() => {})
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
 
     void (async () => {
       try {
@@ -85,6 +123,8 @@
 
     return () => {
       closed = true
+      cancelAnimationFrame(raf)
+      pacer.clear()
       void api.streamUnwatch(userId)
       try {
         decoder?.close()
@@ -112,7 +152,7 @@
   </div>
   <div class="bar">
     <span class="who"><span class="live">LIVE</span> {store.nick(userId)}</span>
-    <span class="stats muted">{line}</span>
+    <span class="stats muted" title={detail}>{line}</span>
     <label class="vol" title="Stream volume">
       <span class="muted">Volume</span>
       <Slider bind:value={volume} max={2} step={0.01} tone="light" label="Stream volume" oninput={setVolume} />

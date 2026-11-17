@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from 'vitest'
-import { applyStreams, codecOrder, KeyGate, parseAu, selfCheckLines, spsSize, statsLine, type Au, type StreamInfo } from './stream'
+import { applyStreams, codecOrder, FramePacer, KeyGate, MAX_PACED_FRAMES, MAX_PLAYOUT_MS, RenderMeter, TsUnwrap, parseAu, selfCheckLines, spsSize, statsLine, type Au, type StreamInfo } from './stream'
 
 const s = (userId: number, channelId = 10): StreamInfo => ({ userId, channelId, codecs: ['h264'], preset: '1080p60' })
 
@@ -124,5 +124,95 @@ describe('spsSize', () => {
   it('finds nothing in a frame without a parameter set', () => {
     expect(spsSize('h264', Uint8Array.from([0, 0, 0, 1, 0x41, 0x9a, 0x02]))).toBeNull()
     expect(spsSize('av1', Uint8Array.from([0x12, 0x00]))).toBeNull()
+  })
+})
+
+describe('TsUnwrap', () => {
+  test('keeps rising across the u16 wrap, in µs', () => {
+    const u = new TsUnwrap()
+    expect(u.next(65_500)).toBe(0)
+    expect(u.next(65_517)).toBe(17_000)
+    expect(u.next(1)).toBe(37_000) // wrapped: 65 536 + 1 − 65 500
+    expect(u.next(18)).toBe(54_000)
+  })
+  test('a small step back stays behind instead of jumping a full wrap ahead', () => {
+    const u = new TsUnwrap()
+    u.next(1000)
+    expect(u.next(995)).toBe(-5_000)
+  })
+})
+
+const frame = (ms: number) => ({ timestamp: ms * 1000, closed: false, close() { this.closed = true } })
+
+describe('FramePacer', () => {
+  test('frames arriving in pairs are shown evenly once the jitter is learned', () => {
+    const p = new FramePacer<ReturnType<typeof frame>>()
+    // Captured every 16.7 ms, but delivered two at a time (each even frame waits for the odd one).
+    const arrivals = Array.from({ length: 240 }, (_, i) => ({ f: frame(i * 16.7), at: 1000 + (i | 1) * 16.7 }))
+    const shown: number[] = []
+    let k = 0
+    for (let t = 1000; t < 5200; t++) {
+      while (k < arrivals.length && arrivals[k].at <= t) p.push(arrivals[k].f, arrivals[k++].at)
+      if (p.take(t)) shown.push(t)
+    }
+    const gaps = shown.slice(1).map((t, i) => t - shown[i]).slice(90) // after the jitter estimate settles
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(15)
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(18)
+    expect(p.delay).toBeLessThanOrEqual(MAX_PLAYOUT_MS)
+  })
+
+  test('the added delay is bounded', () => {
+    const p = new FramePacer<ReturnType<typeof frame>>()
+    p.push(frame(0), 0)
+    for (let i = 1; i < 200; i++) p.push(frame(i * 16.7), i * 16.7 + (i % 2 ? 300 : 0))
+    expect(p.delay).toBeLessThanOrEqual(MAX_PLAYOUT_MS)
+  })
+
+  test('a full buffer drops the oldest frames and closes them', () => {
+    const p = new FramePacer<ReturnType<typeof frame>>()
+    const fs = Array.from({ length: MAX_PACED_FRAMES + 2 }, (_, i) => frame(i * 16.7))
+    fs.forEach((f) => p.push(f, 0))
+    expect(p.drops).toBe(2)
+    expect(fs[0].closed && fs[1].closed).toBe(true)
+  })
+
+  test('only the newest due frame is shown, the rest are closed', () => {
+    const p = new FramePacer<ReturnType<typeof frame>>()
+    const a = frame(0)
+    const b = frame(16.7)
+    p.push(a, 0)
+    p.push(b, 0)
+    expect(p.take(1000)).toBe(b)
+    expect(a.closed).toBe(true)
+    expect(p.drops).toBe(1)
+  })
+
+  test('clear closes everything held', () => {
+    const p = new FramePacer<ReturnType<typeof frame>>()
+    const a = frame(0)
+    p.push(a, 0)
+    p.clear()
+    expect(a.closed).toBe(true)
+    expect(p.take(1000)).toBeNull()
+  })
+})
+
+describe('RenderMeter', () => {
+  test('separates received from rendered fps and measures frame-gap jitter', () => {
+    const m = new RenderMeter(0)
+    for (let i = 0; i < 60; i++) m.arrived()
+    // 30 frames drawn alternating 16 / 50 ms gaps: half the arrivals never reached the screen.
+    let t = 0
+    for (let i = 0; i < 30; i++) {
+      m.drawn(t)
+      t += i % 2 ? 50 : 16
+    }
+    expect(m.report(500, { late: 0, gate: 0, bufferMs: 2 })).toBeNull()
+    const r = m.report(1000, { late: 30, gate: 0, bufferMs: 2 })!
+    expect(r.receivedFps).toBe(60)
+    expect(r.renderedFps).toBe(30)
+    expect(r.intervalMs).toBeGreaterThan(30)
+    expect(r.jitterMs).toBeGreaterThan(15)
+    expect(r.lateDrops).toBe(30)
   })
 })

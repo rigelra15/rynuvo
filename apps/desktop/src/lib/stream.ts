@@ -306,3 +306,156 @@ export function spsSize(codec: CodecName, annexb: Uint8Array): { width: number; 
   }
   return null
 }
+
+/**
+ * The sender stamps frames with a u16 millisecond clock (it wraps every 65.5 s). Turns it into
+ * a steadily rising microsecond timestamp, as WebCodecs wants.
+ */
+export class TsUnwrap {
+  private last = -1
+  private base = 0
+
+  next(ts16: number): number {
+    const t = ts16 & 0xffff
+    if (this.last >= 0) {
+      const d = (t - this.last + 0x10000) & 0xffff
+      // Forward steps advance; a small step back (a repeated frame) stays put.
+      if (d < 0x8000) this.base += d
+      else this.base -= 0x10000 - d
+    }
+    this.last = t
+    return this.base * 1000
+  }
+}
+
+/** Most extra delay the pacer adds to smooth out jitter. */
+export const MAX_PLAYOUT_MS = 50
+/** Frames held at most; older ones are dropped so latency can't build up. */
+export const MAX_PACED_FRAMES = 4
+/** Sender and viewer clocks drift; the arrival baseline creeps up this much per frame. */
+const DRIFT_MS = 0.02
+
+interface Timed {
+  timestamp: number // µs, sender clock
+  close(): void
+}
+
+/**
+ * Shows decoded frames at the pace the sender captured them. Frames arrive in bursts (network,
+ * decoder); drawing each the moment it is decoded puts two in one display refresh and none in the
+ * next, which reads as stutter even at a full 60 fps. Each frame is held until its capture time,
+ * mapped onto the local clock, plus a small delay sized to the jitter actually seen.
+ */
+export class FramePacer<F extends Timed> {
+  private q: F[] = []
+  private offset = NaN // local ms − sender ms for the earliest-arriving frames
+  private jitter = 0 // average lateness behind that baseline, ms
+  private applied = 2 // delay in use, ms
+  /** Frames never shown: due at the same refresh as a newer one, or pushed out of a full buffer. */
+  drops = 0
+
+  push(f: F, now: number) {
+    const media = f.timestamp / 1000
+    let late = now - media - this.offset
+    if (!(late >= 0) || late > 1000) {
+      // First frame, an earlier-than-ever arrival, or the sender restarted: new baseline.
+      this.offset = now - media
+      late = 0
+    } else {
+      this.offset += DRIFT_MS
+    }
+    this.jitter += (late - this.jitter) / 16
+    // Moved only in steps: every change shifts frames against the display refresh, so a delay
+    // that wobbled each frame would itself double up or skip frames.
+    const target = Math.min(MAX_PLAYOUT_MS, 2 * this.jitter + 2)
+    if (Math.abs(target - this.applied) > 3) this.applied = target
+    this.q.push(f)
+    while (this.q.length > MAX_PACED_FRAMES) {
+      this.q.shift()!.close()
+      this.drops++
+    }
+  }
+
+  /** Extra delay currently applied, ms. */
+  get delay(): number {
+    return this.applied
+  }
+
+  /** The frame to show at `now`, or null to keep the current one. Frames it skips are closed. */
+  take(now: number): F | null {
+    const due = now - this.offset - this.delay
+    let pick: F | null = null
+    while (this.q.length && this.q[0].timestamp / 1000 <= due) {
+      if (pick) {
+        pick.close()
+        this.drops++
+      }
+      pick = this.q.shift()!
+    }
+    return pick
+  }
+
+  clear() {
+    for (const f of this.q) f.close()
+    this.q = []
+    this.offset = NaN
+    this.jitter = 0
+    this.applied = 2
+  }
+}
+
+export interface RenderStats {
+  receivedFps: number
+  renderedFps: number
+  intervalMs: number
+  jitterMs: number
+  lateDrops: number
+  gateDrops: number
+  bufferMs: number
+}
+
+/** Counts what actually reached the screen, separately from what arrived. */
+export class RenderMeter {
+  private received = 0
+  private drawnCount = 0
+  private last = NaN
+  private gaps: number[] = []
+  private since: number
+
+  constructor(now: number) {
+    this.since = now
+  }
+
+  arrived() {
+    this.received++
+  }
+
+  drawn(now: number) {
+    if (!Number.isNaN(this.last)) this.gaps.push(now - this.last)
+    this.last = now
+    this.drawnCount++
+  }
+
+  /** The stats for the window since the last call, once it has run a second. */
+  report(now: number, drops: { late: number; gate: number; bufferMs: number }): RenderStats | null {
+    const secs = (now - this.since) / 1000
+    if (secs < 1) return null
+    const g = this.gaps
+    const mean = g.length ? g.reduce((a, b) => a + b, 0) / g.length : 0
+    const sd = g.length ? Math.sqrt(g.reduce((a, x) => a + (x - mean) ** 2, 0) / g.length) : 0
+    const r: RenderStats = {
+      receivedFps: this.received / secs,
+      renderedFps: this.drawnCount / secs,
+      intervalMs: mean,
+      jitterMs: sd,
+      lateDrops: drops.late,
+      gateDrops: drops.gate,
+      bufferMs: drops.bufferMs,
+    }
+    this.received = 0
+    this.drawnCount = 0
+    this.gaps = []
+    this.since = now
+    return r
+  }
+}

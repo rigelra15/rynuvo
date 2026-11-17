@@ -9,7 +9,7 @@
 Voice, screen share, chat and shared music, self-hosted on one tiny VPS.
 No accounts, no paywalls, no loading spinners.
 
-![version](https://img.shields.io/badge/version-0.8.3-f4b860?style=flat-square)
+![version](https://img.shields.io/badge/version-0.8.4-f4b860?style=flat-square)
 ![platforms](https://img.shields.io/badge/macOS%20%7C%20Windows-2a1a35?style=flat-square)
 ![stack](https://img.shields.io/badge/Rust%20%2B%20Tauri%202%20%2B%20Svelte%205-2a1a35?style=flat-square)
 
