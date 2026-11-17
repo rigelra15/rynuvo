@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod core;
 mod diag;
+pub mod e2ee;
 #[cfg(target_os = "macos")]
 mod mac_notify;
 mod media;
