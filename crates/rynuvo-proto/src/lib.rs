@@ -1,5 +1,6 @@
 //! Shared protocol types between rynuvo-server and rynuvo-desktop.
 
+pub mod e2ee;
 pub mod voice_wire;
 
 use serde::{Deserialize, Deserializer, Serialize};
