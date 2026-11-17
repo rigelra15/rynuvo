@@ -514,7 +514,7 @@ fn memory_key_when_keyring_fails() {
     let server = "http://rynuvo.test";
     let kept = MemoryStore::default();
     assert_eq!(load_or_create(&kept, server).public(), load_or_create(&kept, server).public(), "a working keychain keeps the key");
-    assert!(kept.get_e2ee(server).is_some());
+    assert!(kept.get_e2ee(server).unwrap().is_some());
     assert!(kept.get(server).is_none(), "the device key does not take the token's entry");
 
     let store = ForgetfulStore::default();
