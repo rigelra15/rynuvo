@@ -151,6 +151,7 @@ pub fn run() {
             diag::export_stream_diagnostics,
             diag::app_version,
             stream_cmd::stream_sources,
+            stream_cmd::stream_thumbnail,
             stream_cmd::stream_encoders,
             stream_cmd::stream_go_live,
             stream_cmd::stream_stop,

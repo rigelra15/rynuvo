@@ -42,6 +42,8 @@ pub struct CaptureOpts {
     pub max_width: u32,
     pub max_height: u32,
     pub fps: u32,
+    /// Draw the mouse pointer into the picture.
+    pub cursor: bool,
 }
 
 pub const PERMISSION: &str = "Allow Rynuvo in System Settings → Privacy & Security → Screen & System Audio Recording, then try again";
@@ -121,9 +123,44 @@ pub fn start(source_id: &str, opts: CaptureOpts, video: VideoSink, audio: AudioS
     }
 }
 
+/// One still of `source_id`, at most `max_w`×`max_h`, without the pointer, as JPEG: the Go Live
+/// picker's preview.
+pub fn thumbnail(source_id: &str, max_w: u32, max_h: u32) -> Result<Vec<u8>, String> {
+    #[cfg(any(target_os = "macos", windows))]
+    return os::thumbnail(source_id, max_w.max(2), max_h.max(2));
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let _ = (source_id, max_w, max_h);
+        Err("Screen share is not supported on this system".into())
+    }
+}
+
+/// Tightly packed BGRA to JPEG.
+pub fn jpeg_from_bgra(w: u32, h: u32, bgra: &[u8]) -> Result<Vec<u8>, String> {
+    let rgb: Vec<u8> = bgra.chunks_exact(4).flat_map(|p| [p[2], p[1], p[0]]).collect();
+    let img = image::RgbImage::from_raw(w, h, rgb).ok_or("Bad image size")?;
+    jpeg(&img)
+}
+
+pub fn jpeg(img: &image::RgbImage) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 75).encode_image(img).map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jpeg_from_bgra_keeps_the_size() {
+        let bgra: Vec<u8> = (0..8 * 6).flat_map(|i| [i as u8, 0, 255, 255]).collect();
+        let j = jpeg_from_bgra(8, 6, &bgra).unwrap();
+        assert_eq!(&j[..2], &[0xFF, 0xD8]);
+        let back = image::load_from_memory(&j).unwrap();
+        assert_eq!((back.width(), back.height()), (8, 6));
+        assert!(jpeg_from_bgra(8, 6, &bgra[..10]).is_err());
+    }
 
     #[test]
     fn scale_bgra_copies_crops_and_downscales() {

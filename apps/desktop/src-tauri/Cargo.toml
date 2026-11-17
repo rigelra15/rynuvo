@@ -57,7 +57,7 @@ block2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSBundle", "NSError", "NSDictionary"] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationContent", "UNNotificationRequest", "UNNotificationTrigger", "UNNotificationSound"] }
 videotoolbox = "0.21"
-screencapturekit = "11"
+screencapturekit = { version = "11", features = ["macos_14_0"] }
 apple-cf = "0.11"
 
 [target."cfg(windows)".dependencies]

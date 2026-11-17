@@ -65,7 +65,8 @@ export const api = {
   streamEncoders: () => invoke<string[]>('stream_encoders'),
   streamSelfCheck: () => invoke<SelfCheck>('stream_self_check'),
   openCaptureSettings: () => invoke<void>('open_capture_settings'),
-  streamGoLive: (sourceId: string, preset: string) => invoke<void>('stream_go_live', { sourceId, preset }),
+  streamGoLive: (sourceId: string, preset: string, cursor: boolean) => invoke<void>('stream_go_live', { sourceId, preset, cursor }),
+  streamThumbnail: (sourceId: string, width: number, height: number) => invoke<string>('stream_thumbnail', { sourceId, width, height }),
   streamStop: () => invoke<void>('stream_stop'),
   streamIsLive: () => invoke<boolean>('stream_is_live'),
   /** Access units arrive on `onAu` as raw bytes (see `parseAu`). */

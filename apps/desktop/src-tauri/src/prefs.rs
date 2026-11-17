@@ -18,6 +18,8 @@ pub struct Prefs {
     pub stream_preset: String,
     /// Listen-together music level, 0–1.
     pub music_volume: f32,
+    /// Go Live shows the mouse pointer.
+    pub stream_cursor: bool,
 }
 
 impl Default for Prefs {
@@ -32,6 +34,7 @@ impl Default for Prefs {
             autostart: false,
             stream_preset: "1080p60".into(),
             music_volume: 0.5,
+            stream_cursor: true,
         }
     }
 }

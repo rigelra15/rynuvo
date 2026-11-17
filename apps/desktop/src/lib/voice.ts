@@ -19,6 +19,7 @@ export interface Prefs {
   shortcutDeafen: string
   autostart: boolean
   streamPreset: string
+  streamCursor: boolean
   musicVolume: number
 }
 

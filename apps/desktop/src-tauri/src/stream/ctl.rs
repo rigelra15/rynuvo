@@ -85,7 +85,7 @@ impl StreamCtl {
         self.st.lock().unwrap().live.is_some()
     }
 
-    pub fn go_live(&self, source_id: &str, preset: &str) -> Result<(), String> {
+    pub fn go_live(&self, source_id: &str, preset: &str, cursor: bool) -> Result<(), String> {
         if self.voice.channel().is_none() {
             return Err("Join a voice channel first".into());
         }
@@ -96,7 +96,7 @@ impl StreamCtl {
         let p = engine::preset(preset);
         let source = source_id.to_string();
         let capture = self.capture.clone();
-        let start: engine::CaptureFn = Arc::new(move |opts, video, audio, ended| capture(&source, opts, video, audio, ended));
+        let start: engine::CaptureFn = Arc::new(move |opts, video, audio, ended| capture(&source, CaptureOpts { cursor, ..opts }, video, audio, ended));
         let ctl = self.clone();
         let events: EventSink = Arc::new(move |e| {
             if let StreamEvent::Error { .. } = &e {

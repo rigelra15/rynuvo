@@ -140,7 +140,7 @@ async fn two_clients_stream_over_relay() {
     let a = peer(&app, "Dimas", ch).await;
     let b = peer(&app, "Ayu", ch).await;
     // No STUN servers: no direct candidates, so everything rides the relay.
-    a.stream.go_live("synthetic:0", "720p30").unwrap();
+    a.stream.go_live("synthetic:0", "720p30", true).unwrap();
     eventually("stream registered", 5, || app.state.voice.streams().iter().any(|s| s.user_id == a.user)).await;
     let (aus, out) = collector();
     b.stream.watch(a.user, vec!["h264".into()], out).unwrap();
@@ -156,6 +156,25 @@ async fn two_clients_stream_over_relay() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_cursor_choice_reaches_the_capture() {
+    let app = TestApp::spawn().await;
+    let u = app.user("Owner").await;
+    let ch = app.create_channel(&u.token, "voice", "Mabar").await.id;
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let (s2, inner) = (seen.clone(), synthetic());
+    let capture: StartCapture = Arc::new(move |src: &str, opts: CaptureOpts, v, a, e| {
+        s2.lock().unwrap().push(opts.cursor);
+        inner(src, opts, v, a, e)
+    });
+    let a = peer_with(&app, "Dimas", ch, capture).await;
+    a.stream.go_live("synthetic:0", "720p30", false).unwrap();
+    a.stream.stop_live();
+    a.stream.go_live("synthetic:0", "720p30", true).unwrap();
+    a.stream.stop_live();
+    assert_eq!(*seen.lock().unwrap(), vec![false, true]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn viewer_join_gets_keyframe() {
     let app = TestApp::spawn().await;
     let u = app.user("Owner").await;
@@ -163,7 +182,7 @@ async fn viewer_join_gets_keyframe() {
     let a = peer(&app, "Dimas", ch).await;
     let b = peer(&app, "Ayu", ch).await;
     let c = peer(&app, "Raka", ch).await;
-    a.stream.go_live("synthetic:0", "720p30").unwrap();
+    a.stream.go_live("synthetic:0", "720p30", true).unwrap();
     eventually("stream registered", 5, || app.state.voice.streams().iter().any(|s| s.user_id == a.user)).await;
     let (b_aus, b_out) = collector();
     b.stream.watch(a.user, vec!["h264".into(), "hevc".into()], b_out).unwrap();
@@ -187,7 +206,7 @@ async fn stream_ends_on_streamer_leave() {
     let ch = app.create_channel(&u.token, "voice", "Mabar").await.id;
     let a = peer(&app, "Dimas", ch).await;
     let b = peer(&app, "Ayu", ch).await;
-    a.stream.go_live("synthetic:0", "720p30").unwrap();
+    a.stream.go_live("synthetic:0", "720p30", true).unwrap();
     eventually("stream registered", 5, || app.state.voice.streams().iter().any(|s| s.user_id == a.user)).await;
     let (aus, out) = collector();
     b.stream.watch(a.user, vec!["h264".into()], out).unwrap();
@@ -207,7 +226,7 @@ async fn go_live_needs_voice() {
     let ch = app.create_channel(&u.token, "voice", "Mabar").await.id;
     let a = peer(&app, "Dimas", ch).await;
     a.voice.leave();
-    let err = a.stream.go_live("synthetic:0", "1080p60").unwrap_err();
+    let err = a.stream.go_live("synthetic:0", "1080p60", true).unwrap_err();
     assert_eq!(err, "Join a voice channel first");
 }
 
@@ -222,7 +241,7 @@ async fn closed_source_ends_the_stream_for_everyone() {
     let ch = app.create_channel(&u.token, "voice", "Mabar").await.id;
     let a = peer_with(&app, "Dimas", ch, synthetic_with(Some(Duration::from_secs(2)), false)).await;
     let b = peer(&app, "Ayu", ch).await;
-    a.stream.go_live("synthetic:0", "720p30").unwrap();
+    a.stream.go_live("synthetic:0", "720p30", true).unwrap();
     eventually("stream registered", 5, || app.state.voice.streams().iter().any(|s| s.user_id == a.user)).await;
     let (aus, out) = collector();
     b.stream.watch(a.user, vec!["h264".into()], out).unwrap();
@@ -240,7 +259,7 @@ async fn encoder_failure_ends_the_stream() {
     let ch = app.create_channel(&u.token, "voice", "Mabar").await.id;
     let a = peer_with(&app, "Dimas", ch, synthetic_with(None, true)).await;
     let b = peer(&app, "Ayu", ch).await;
-    a.stream.go_live("synthetic:0", "720p30").unwrap();
+    a.stream.go_live("synthetic:0", "720p30", true).unwrap();
     eventually("stream registered", 5, || app.state.voice.streams().iter().any(|s| s.user_id == a.user)).await;
     let (_aus, out) = collector();
     b.stream.watch(a.user, vec!["h264".into()], out).unwrap();
@@ -258,7 +277,7 @@ async fn viewer_timeout_releases_the_watch() {
     let ch = app.create_channel(&u.token, "voice", "Mabar").await.id;
     let a = peer(&app, "Dimas", ch).await;
     let b = peer(&app, "Ayu", ch).await;
-    a.stream.go_live("synthetic:0", "720p30").unwrap();
+    a.stream.go_live("synthetic:0", "720p30", true).unwrap();
     eventually("stream registered", 5, || app.state.voice.streams().iter().any(|s| s.user_id == a.user)).await;
     let (aus, out) = collector();
     b.stream.watch(a.user, vec!["h264".into()], out).unwrap();

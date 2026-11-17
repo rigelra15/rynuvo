@@ -298,7 +298,7 @@ impl Broadcast {
         });
         let opts = move |capped: bool| {
             let (w, h) = if capped { (preset.width.min(RELAY_MAX.0), preset.height.min(RELAY_MAX.1)) } else { (preset.width, preset.height) };
-            CaptureOpts { max_width: w, max_height: h, fps: if capped { preset.fps.min(RELAY_FPS) } else { preset.fps } }
+            CaptureOpts { max_width: w, max_height: h, fps: if capped { preset.fps.min(RELAY_FPS) } else { preset.fps }, cursor: true }
         };
         if let Some(k) = &inner.net.keys {
             // My stream key, made now so the first frame can be sealed; sent to each viewer on join.

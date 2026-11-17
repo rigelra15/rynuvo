@@ -109,6 +109,75 @@ impl GraphicsCaptureApiHandler for Handler {
     }
 }
 
+struct ThumbFlags {
+    max: (u32, u32),
+    out: std::sync::mpsc::SyncSender<Result<Vec<u8>, String>>,
+}
+
+/// Takes the first frame, scales it down, and stops.
+struct Thumb {
+    max: (u32, u32),
+    out: Option<std::sync::mpsc::SyncSender<Result<Vec<u8>, String>>>,
+}
+
+impl GraphicsCaptureApiHandler for Thumb {
+    type Flags = ThumbFlags;
+    type Error = String;
+
+    fn new(ctx: Context<ThumbFlags>) -> Result<Self, String> {
+        Ok(Thumb { max: ctx.flags.max, out: Some(ctx.flags.out) })
+    }
+
+    fn on_frame_arrived(&mut self, frame: &mut WgcFrame, control: InternalCaptureControl) -> Result<(), String> {
+        let Ok(mut buf) = frame.buffer() else { return Ok(()) };
+        let (sw, sh, stride) = (buf.width(), buf.height(), buf.row_pitch());
+        if sw < 2 || sh < 2 {
+            return Ok(());
+        }
+        let (dw, dh) = fit(sw, sh, self.max.0, self.max.1);
+        let data = scale_bgra(buf.as_raw_buffer(), sw, sh, stride, dw, dh);
+        if let Some(out) = self.out.take() {
+            let _ = out.try_send(super::jpeg_from_bgra(dw, dh, &data));
+        }
+        control.stop();
+        Ok(())
+    }
+
+    fn on_closed(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+pub fn thumbnail(source_id: &str, max_w: u32, max_h: u32) -> Result<Vec<u8>, String> {
+    let (kind, id) = source_id.split_once(':').ok_or("Unknown source")?;
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let flags = ThumbFlags { max: (max_w, max_h), out: tx };
+    let interval = MinimumUpdateIntervalSettings::Default;
+    let err = |e: String| format!("Could not take a preview: {e}");
+    let control = match kind {
+        "screen" => {
+            let idx: usize = id.parse().map_err(|_| "Unknown screen")?;
+            let m = Monitor::from_index(idx).map_err(|_| "That screen is no longer connected")?;
+            let s = Settings::new(m, CursorCaptureSettings::WithoutCursor, DrawBorderSettings::WithoutBorder, SecondaryWindowSettings::Default, interval, DirtyRegionSettings::Default, ColorFormat::Bgra8, flags);
+            Thumb::start_free_threaded(s).map_err(|e| err(e.to_string()))?
+        }
+        "window" => {
+            let hwnd: usize = id.parse().map_err(|_| "Unknown window")?;
+            let w = Window::from_raw_hwnd(hwnd as *mut std::ffi::c_void);
+            if !w.is_valid() {
+                return Err("That window was closed".into());
+            }
+            let s = Settings::new(w, CursorCaptureSettings::WithoutCursor, DrawBorderSettings::WithoutBorder, SecondaryWindowSettings::Include, interval, DirtyRegionSettings::Default, ColorFormat::Bgra8, flags);
+            Thumb::start_free_threaded(s).map_err(|e| err(e.to_string()))?
+        }
+        _ => return Err("Unknown source".into()),
+    };
+    // A minimized window sends no frames: give up rather than wait forever.
+    let got = rx.recv_timeout(Duration::from_millis(1500));
+    let _ = control.stop();
+    got.map_err(|_| "No preview: the window may be minimized".to_string())?
+}
+
 pub fn start(source_id: &str, opts: CaptureOpts, video: VideoSink, audio: AudioSink, ended: EndedSink) -> Result<Capture, String> {
     let (kind, id) = source_id.split_once(':').ok_or("Unknown source")?;
     let interval = MinimumUpdateIntervalSettings::Custom(Duration::from_micros(1_000_000 / opts.fps.max(1) as u64));
@@ -120,7 +189,7 @@ pub fn start(source_id: &str, opts: CaptureOpts, video: VideoSink, audio: AudioS
             let m = Monitor::from_index(idx).map_err(|_| "That screen is no longer connected")?;
             let s = Settings::new(
                 m,
-                CursorCaptureSettings::WithCursor,
+                if opts.cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor },
                 DrawBorderSettings::WithoutBorder,
                 SecondaryWindowSettings::Default,
                 interval,
@@ -140,7 +209,7 @@ pub fn start(source_id: &str, opts: CaptureOpts, video: VideoSink, audio: AudioS
             let pid = w.process_id().map_err(|_| "That window was closed")?;
             let s = Settings::new(
                 w,
-                CursorCaptureSettings::WithCursor,
+                if opts.cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor },
                 DrawBorderSettings::WithoutBorder,
                 SecondaryWindowSettings::Include,
                 interval,

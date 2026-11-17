@@ -52,6 +52,7 @@ class Store {
   streamStats = new SvelteMap<Id, { fps: number; codec: string; kbps: number; path: string }>()
   streamNotice = $state<string | null>(null)
   streamPreset = $state('1080p60')
+  streamCursor = $state(true)
   /** Listen-together music per voice channel, with the local time each state arrived. */
   music = new SvelteMap<Id, { state: MusicState; receivedAt: number }>()
   /** The "Rynuvo Music" user: authors the bot's replies, never listed as a person. */
@@ -125,6 +126,7 @@ class Store {
       this.volumes.clear()
       for (const [id, v] of Object.entries(p.volumes)) this.volumes.set(Number(id), v)
       if (p.streamPreset) this.streamPreset = p.streamPreset
+      if (typeof p.streamCursor === 'boolean') this.streamCursor = p.streamCursor
       if (typeof p.musicVolume === 'number') this.musicVolume = p.musicVolume
     } catch {
       // defaults are fine
@@ -284,10 +286,21 @@ class Store {
     return this.streams.some((s) => s.userId === user)
   }
 
+  /** Show the mouse pointer in my Go Live; remembered for next time. */
+  async setStreamCursor(on: boolean) {
+    this.streamCursor = on
+    try {
+      const p = await api.prefsGet()
+      await api.prefsSet({ ...p, streamCursor: on })
+    } catch {
+      // still applies to this stream
+    }
+  }
+
   async goLive(sourceId: string, preset: string): Promise<boolean> {
     this.goingLive = true
     try {
-      await api.streamGoLive(sourceId, preset)
+      await api.streamGoLive(sourceId, preset, this.streamCursor)
       this.live = { viewers: [], codec: '', kbps: 0, hardware: false, relay: false }
       return true
     } catch (e) {

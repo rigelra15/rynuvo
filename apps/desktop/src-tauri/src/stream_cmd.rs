@@ -19,6 +19,15 @@ pub async fn stream_sources() -> Result<Vec<capture::Source>, String> {
     tauri::async_runtime::spawn_blocking(capture::sources).await.map_err(|e| e.to_string())?
 }
 
+/// A still of a screen or window for the Go Live picker, as a `data:image/jpeg` URL.
+#[tauri::command]
+pub async fn stream_thumbnail(source_id: String, width: u32, height: u32) -> Result<String, String> {
+    use base64::Engine;
+    let (w, h) = (width.min(1280), height.min(720));
+    let jpeg = tauri::async_runtime::spawn_blocking(move || capture::thumbnail(&source_id, w, h)).await.map_err(|e| e.to_string())??;
+    Ok(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpeg)))
+}
+
 /// Codecs this machine can encode, best first (the UI shows them; the stream negotiates per viewer).
 #[tauri::command]
 pub fn stream_encoders() -> Vec<&'static str> {
@@ -40,10 +49,10 @@ pub async fn stream_self_check() -> Result<SelfCheck, String> {
 }
 
 #[tauri::command]
-pub async fn stream_go_live(core: State<'_, Core>, source_id: String, preset: String) -> Result<(), String> {
+pub async fn stream_go_live(core: State<'_, Core>, source_id: String, preset: String, cursor: Option<bool>) -> Result<(), String> {
     let ctl = core.stream.clone();
     // Opening capture can wait on the OS (permission checks, ScreenCaptureKit setup).
-    tauri::async_runtime::spawn_blocking(move || ctl.go_live(&source_id, &preset)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || ctl.go_live(&source_id, &preset, cursor.unwrap_or(true))).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
