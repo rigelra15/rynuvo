@@ -143,6 +143,7 @@ pub fn run() {
             stream_cmd::stream_unwatch,
             stream_cmd::stream_set_volume,
             stream_cmd::stream_request_key,
+            stream_cmd::stream_render_stats,
             stream_cmd::stream_self_check,
             stream_cmd::open_capture_settings,
             music_cmd::music_play,

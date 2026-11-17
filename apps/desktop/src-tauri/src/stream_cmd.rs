@@ -92,3 +92,23 @@ pub fn open_capture_settings() {
             .spawn();
     }
 }
+
+/// What the viewer actually showed in the last second; logged for the stream diagnostics export.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderStats {
+    received_fps: f32,
+    rendered_fps: f32,
+    interval_ms: f32,
+    jitter_ms: f32,
+    late_drops: u32,
+    gate_drops: u32,
+    buffer_ms: f32,
+}
+
+#[tauri::command]
+pub fn stream_render_stats(s: RenderStats) {
+    tracing::info!(received_fps = s.received_fps, rendered_fps = s.rendered_fps, interval_ms = s.interval_ms,
+        jitter_ms = s.jitter_ms, late_drops = s.late_drops, gate_drops = s.gate_drops, buffer_ms = s.buffer_ms,
+        "rynuvo-stream-diag render");
+}

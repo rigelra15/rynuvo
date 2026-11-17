@@ -240,11 +240,13 @@ impl Broadcast {
             captured: AtomicU32::new(0),
             queue_drops: AtomicU32::new(0),
         });
-        let (ftx, frx) = smpsc::sync_channel::<Frame>(1);
+        let (ftx, frx) = smpsc::sync_channel::<(Frame, Instant)>(1);
         let video_diag = inner.clone();
         let video: VideoSink = Arc::new(move |f| {
             video_diag.captured.fetch_add(1, Ordering::Relaxed);
-            if ftx.try_send(f).is_err() { // encoder busy: keep latency low
+            // Stamped on arrival: the encoder may pick it up later, and that wait must not shift the
+            // frame's timestamp or the viewer shows it unevenly.
+            if ftx.try_send((f, Instant::now())).is_err() { // encoder busy: keep latency low
                 video_diag.queue_drops.fetch_add(1, Ordering::Relaxed);
             }
         });
@@ -392,7 +394,7 @@ fn audio_sink(inner: Arc<BInner>) -> AudioSink {
     })
 }
 
-fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: EventSink, restart: impl Fn(bool)) {
+fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<(Frame, Instant)>, events: EventSink, restart: impl Fn(bool)) {
     let mut enc: Option<Box<dyn VideoEncoder>> = None;
     let mut enc_size = (0, 0);
     let mut rate = Controller::new(inner.preset.max_kbps);
@@ -401,6 +403,7 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
     let started = Instant::now();
     let mut last: Option<Frame> = None;
     let mut last_new = Instant::now();
+    let mut captured_at = Instant::now();
     let mut last_sent: Option<Instant> = None;
     let mut last_taken: Option<Instant> = None;
     let mut last_report = Instant::now();
@@ -414,8 +417,9 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
     let (mut encode_calls, mut encode_total_us, mut pace_total_ms) = (0u64, 0u64, 0u64);
     while !inner.stop.load(Ordering::Relaxed) {
         let fresh = match frames.recv_timeout(Duration::from_millis(50)) {
-            Ok(f) => {
+            Ok((f, at)) => {
                 last = Some(f);
+                captured_at = at;
                 last_new = Instant::now();
                 true
             }
@@ -485,10 +489,11 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
             continue;
         }
         let max_fps = if relay { inner.preset.fps.min(RELAY_FPS) } else { inner.preset.fps };
-        if fresh && !force && too_soon(last_taken.map(|t| t.elapsed()), max_fps) {
+        // Fresh frames are timed from capture; repeats of the last one from now.
+        let taken = if fresh { captured_at } else { Instant::now() };
+        if fresh && !force && too_soon(last_taken.map(|t| taken.saturating_duration_since(t)), max_fps) {
             continue;
         }
-        let taken = Instant::now();
         let Some(frame) = last.as_ref() else { continue };
         let refs: Vec<&[Codec]> = codecs.iter().map(|c| c.as_slice()).collect();
         let codec = encode::negotiate(&encode::available(), &refs);
@@ -524,7 +529,7 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
             Ok(Some(out)) => {
                 encoded += 1;
                 frame_no = frame_no.wrapping_add(1);
-                let ts = started.elapsed().as_millis() as u16;
+                let ts = taken.saturating_duration_since(started).as_millis() as u16; // capture time, wraps every 65.5 s
                 let flags = if out.key { frag::KEY } else { 0 };
                 let mut msgs: Vec<Vec<u8>> = frag::split(frame_no, &out.data, flags, e.codec() as u8, ts).iter().map(|f| with_type(T_VIDEO, f)).collect();
                 msgs.extend(frag::fec(frame_no, &out.data, flags, e.codec() as u8, ts).iter().map(|f| with_type(T_FEC, f)));
@@ -542,7 +547,9 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
                     inner.fan_out(chunk);
                 }
                 last_sent = Some(Instant::now());
-                last_taken = Some(taken);
+                if fresh {
+                    last_taken = Some(taken); // a repeat must not gate the next real frame
+                }
             }
             Ok(None) => { encode_skips += 1; }
             Err(err) => {
