@@ -100,6 +100,16 @@ fn new_session(taken: &[Member]) -> u32 {
     }
 }
 
+fn in_scope(g: &[Member], a: Id, b: Id, scope: &Scope) -> bool {
+    match *scope {
+        Scope::Voice(ch) => [a, b].iter().all(|u| g.iter().any(|m| m.user_id == *u && m.channel_id == ch)),
+        Scope::Stream(streamer) => {
+            let other = if a == streamer { b } else if b == streamer { a } else { return false };
+            other != streamer && g.iter().any(|m| m.user_id == streamer && m.stream.as_ref().is_some_and(|s| s.viewers.iter().any(|v| v.user_id == other)))
+        }
+    }
+}
+
 impl VoiceRooms {
     pub fn join(&self, user_id: Id, conn_id: u64, channel_id: Id, pubkey: String, now_ms: i64) -> Result<Joined, JoinError> {
         let mut g = self.inner.lock().unwrap();
@@ -246,15 +256,17 @@ impl VoiceRooms {
     /// Whether `a` and `b` both belong to `scope`: members of the same voice channel, or a
     /// streamer and one of their viewers.
     pub fn shares_scope(&self, a: Id, b: Id, scope: &Scope) -> bool {
+        in_scope(&self.inner.lock().unwrap(), a, b, scope)
+    }
+
+    /// The connection of `to`, if `sender` is speaking from `sender_conn` (their current voice
+    /// connection) and shares `scope` with `to`. Checked and looked up under one lock.
+    pub fn scope_conn(&self, sender: Id, sender_conn: u64, to: Id, scope: &Scope) -> Option<u64> {
         let g = self.inner.lock().unwrap();
-        match *scope {
-            Scope::Voice(ch) => [a, b].iter().all(|u| g.iter().any(|m| m.user_id == *u && m.channel_id == ch)),
-            Scope::Stream(streamer) => {
-                let (other, here) = if a == streamer { (b, true) } else if b == streamer { (a, true) } else { (0, false) };
-                here && other != streamer
-                    && g.iter().any(|m| m.user_id == streamer && m.stream.as_ref().is_some_and(|s| s.viewers.iter().any(|v| v.user_id == other)))
-            }
+        if sender == to || !g.iter().any(|m| m.user_id == sender && m.conn_id == sender_conn) || !in_scope(&g, sender, to, scope) {
+            return None;
         }
+        g.iter().find(|m| m.user_id == to).map(|m| m.conn_id)
     }
 
     /// Run `f` with the member list locked (used by the relay hot path).

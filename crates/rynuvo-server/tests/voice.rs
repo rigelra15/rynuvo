@@ -394,3 +394,93 @@ async fn reconnect_same_key_is_not_a_leave() {
     .await;
     assert!(!left, "a same-key reconnect is not a leave");
 }
+
+fn key_msg(to: i64, scope: serde_json::Value, envelope: &str) -> serde_json::Value {
+    json!({"t":"e2eeKey","d":{"to":to,"scope":scope,"generation":1,"envelope":envelope}})
+}
+
+/// Every envelope this socket receives until it goes quiet.
+async fn envelopes(ws: &mut WsClient) -> Vec<(i64, String)> {
+    let mut out = Vec::new();
+    while let Some(m) = ws.try_next(400).await {
+        if let WsServerMsg::E2eeKey { from, envelope, .. } = m {
+            out.push((from, envelope));
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn voice_scope_needs_both_in_that_channel() {
+    let app = TestApp::spawn().await;
+    let a = app.user("Dimas").await;
+    let c = app.user("Budi").await;
+    let v1 = app.create_channel(&a.token, "voice", "One").await;
+    let v2 = app.create_channel(&a.token, "voice", "Two").await;
+    let (mut wa, mut wc) = (ready(&app, &a.token).await, ready(&app, &c.token).await);
+    wa.send_json(join(v1.id)).await;
+    wc.send_json(join(v2.id)).await;
+    member_update(&mut wc, a.user.id).await;
+    // A is in v1, C in v2, and the scope names v2: only "both are members" rejects this.
+    wa.send_json(key_msg(c.user.id, json!({"kind":"voice","id":v2.id}), "AAAA")).await;
+    assert!(envelopes(&mut wc).await.is_empty());
+}
+
+#[tokio::test]
+async fn stream_scope_flows_between_streamer_and_viewer_only() {
+    let app = TestApp::spawn().await;
+    let a = app.user("Dimas").await; // streamer
+    let b = app.user("Ayu").await; // viewer
+    let c = app.user("Budi").await; // in the channel, not watching
+    let v = app.create_channel(&a.token, "voice", "Mabar").await;
+    let (mut wa, mut wb, mut wc) = (ready(&app, &a.token).await, ready(&app, &b.token).await, ready(&app, &c.token).await);
+    for w in [&mut wa, &mut wb, &mut wc] {
+        w.send_json(join(v.id)).await;
+    }
+    member_update(&mut wc, a.user.id).await;
+    member_update(&mut wc, b.user.id).await;
+    wa.send_json(json!({"t":"streamStart","d":{"codecs":["h264"],"preset":"1080p60"}})).await;
+    until(&mut wb, |m| matches!(m, WsServerMsg::StreamStarted(_)).then_some(())).await;
+    wb.send_json(json!({"t":"streamWatch","d":{"userId":a.user.id,"codecs":["h264"]}})).await;
+    until(&mut wa, |m| matches!(m, WsServerMsg::StreamViewer { joined: true, .. }).then_some(())).await;
+    let scope = json!({"kind":"stream","id":a.user.id});
+
+    // (a) both ways between streamer and viewer
+    wa.send_json(key_msg(b.user.id, scope.clone(), "from-a")).await;
+    wb.send_json(key_msg(a.user.id, scope.clone(), "from-b")).await;
+    assert_eq!(envelopes(&mut wb).await, vec![(a.user.id, "from-a".to_string())]);
+    assert_eq!(envelopes(&mut wa).await, vec![(b.user.id, "from-b".to_string())]);
+
+    // (b) a channel member who is not a viewer neither sends nor receives
+    wa.send_json(key_msg(c.user.id, scope.clone(), "to-c")).await;
+    wc.send_json(key_msg(a.user.id, scope.clone(), "from-c")).await;
+    wb.send_json(key_msg(c.user.id, scope.clone(), "b-to-c")).await;
+    assert!(envelopes(&mut wc).await.is_empty(), "non-viewer received a stream key");
+    assert!(envelopes(&mut wa).await.is_empty(), "non-viewer sent a stream key");
+
+    // (c) after unwatching, nothing flows
+    wb.send_json(json!({"t":"streamUnwatch","d":{"userId":a.user.id}})).await;
+    until(&mut wa, |m| matches!(m, WsServerMsg::StreamViewer { joined: false, .. }).then_some(())).await;
+    wa.send_json(key_msg(b.user.id, scope.clone(), "late-a")).await;
+    wb.send_json(key_msg(a.user.id, scope.clone(), "late-b")).await;
+    assert!(envelopes(&mut wb).await.is_empty());
+    assert!(envelopes(&mut wa).await.is_empty());
+}
+
+#[tokio::test]
+async fn old_device_cannot_send_envelopes_after_takeover() {
+    let (app, a, b) = a_and_b().await;
+    let v = app.create_channel(&a.token, "voice", "Mabar").await;
+    let mut wa = ready(&app, &a.token).await;
+    let mut wb = ready(&app, &b.token).await;
+    wa.send_json(join(v.id)).await;
+    wb.send_json(join(v.id)).await;
+    member_update(&mut wa, b.user.id).await;
+    let mut wa2 = ready(&app, &a.token).await;
+    wa2.send_json(join(v.id)).await;
+    assert_eq!(voice_ended(&mut wa).await, "You joined voice from another device");
+    let scope = json!({"kind":"voice","id":v.id});
+    wa.send_json(key_msg(b.user.id, scope.clone(), "old")).await;
+    wa2.send_json(key_msg(b.user.id, scope, "new")).await;
+    assert_eq!(envelopes(&mut wb).await, vec![(a.user.id, "new".to_string())]);
+}

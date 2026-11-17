@@ -215,28 +215,21 @@ pub fn stream_unwatch(st: &AppState, viewer: Id, streamer: Id) {
     }
 }
 
-/// Whether `scope` is one the two users share, so keys may pass between them.
-fn may_exchange(st: &AppState, a: Id, b: Id, scope: &Scope) -> bool {
-    a != b && st.voice.shares_scope(a, b, scope)
-}
-
-/// Pass a sealed key envelope from `from` to `to`; the server never reads it.
-pub fn forward_key(st: &AppState, from: Id, to: Id, scope: Scope, generation: u32, envelope: String) {
-    if envelope.len() > MAX_ENVELOPE_B64 || !may_exchange(st, from, to, &scope) {
+/// Pass a sealed key envelope from `from` to `to`; the server never reads it. Only the sender's
+/// current voice connection may send.
+pub fn forward_key(st: &AppState, conn_id: u64, from: Id, to: Id, scope: Scope, generation: u32, envelope: String) {
+    if envelope.len() > MAX_ENVELOPE_B64 {
         return;
     }
-    if let Some(m) = st.voice.member(to) {
-        st.hub.send_to_conn(m.conn_id, Outgoing::Msg(WsServerMsg::E2eeKey { from, scope, generation, envelope }));
+    if let Some(conn) = st.voice.scope_conn(from, conn_id, to, &scope) {
+        st.hub.send_to_conn(conn, Outgoing::Msg(WsServerMsg::E2eeKey { from, scope, generation, envelope }));
     }
 }
 
 /// `by` wants the key of `from` for `scope`: tell `from`.
-pub fn forward_key_request(st: &AppState, by: Id, from: Id, scope: Scope) {
-    if !may_exchange(st, by, from, &scope) {
-        return;
-    }
-    if let Some(m) = st.voice.member(from) {
-        st.hub.send_to_conn(m.conn_id, Outgoing::Msg(WsServerMsg::E2eeKeyRequest { by, scope }));
+pub fn forward_key_request(st: &AppState, conn_id: u64, by: Id, from: Id, scope: Scope) {
+    if let Some(conn) = st.voice.scope_conn(by, conn_id, from, &scope) {
+        st.hub.send_to_conn(conn, Outgoing::Msg(WsServerMsg::E2eeKeyRequest { by, scope }));
     }
 }
 

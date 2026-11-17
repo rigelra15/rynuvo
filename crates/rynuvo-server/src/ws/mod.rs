@@ -145,8 +145,8 @@ async fn run(
                         }
                         Ok(WsClientMsg::Ping) => if !send(socket, &WsServerMsg::Pong).await { return },
                         Ok(WsClientMsg::VoiceJoin { channel_id, pubkey }) => crate::voice::join(st, user_id, conn_id, channel_id, pubkey).await,
-                        Ok(WsClientMsg::E2eeKey { to, scope, generation, envelope }) => crate::voice::forward_key(st, user_id, to, scope, generation, envelope),
-                        Ok(WsClientMsg::E2eeKeyRequest { from, scope }) => crate::voice::forward_key_request(st, user_id, from, scope),
+                        Ok(WsClientMsg::E2eeKey { to, scope, generation, envelope }) => crate::voice::forward_key(st, conn_id, user_id, to, scope, generation, envelope),
+                        Ok(WsClientMsg::E2eeKeyRequest { from, scope }) => crate::voice::forward_key_request(st, conn_id, user_id, from, scope),
                         Ok(WsClientMsg::VoiceLeave) => crate::voice::leave(st, user_id),
                         Ok(WsClientMsg::VoiceState { muted, deafened }) => crate::voice::set_state(st, user_id, muted, deafened),
                         Ok(WsClientMsg::VoiceKick { user_id: target }) => crate::voice::kick(st, user_id, is_admin, target).await,
