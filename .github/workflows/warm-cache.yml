@@ -1,6 +1,6 @@
 # Keeps the Rust build caches on main, where release tags can restore them (a cache saved by one tag
 # can't be read by the next). Without this the Windows release compiled everything from scratch (~18 min).
-# Only Windows and the server: the Mac build is quick anyway, and Mac minutes cost 10×.
+# Windows, Android and the server: the Mac build is quick anyway, and Mac minutes cost 10×.
 name: Warm cache
 
 on:
@@ -52,6 +52,45 @@ jobs:
       - name: Build
         working-directory: apps/desktop
         run: pnpm tauri build --target x86_64-pc-windows-msvc --no-bundle
+
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: apps/desktop/src-tauri/gen/android/**/*.gradle*
+      - name: Install the NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.13599879"
+          nd="$ANDROID_HOME/ndk/29.0.13599879"
+          { echo "NDK_HOME=$nd"; echo "ANDROID_NDK=$nd"; echo "ANDROID_NDK_ROOT=$nd"; } >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      # Same key as the release build in release.yml.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android-aarch64
+      - name: Install frontend deps
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+      # The release's exact compile; without the keystore the APK just comes out unsigned.
+      - name: Build
+        working-directory: apps/desktop
+        run: pnpm tauri android build --apk --target aarch64
 
   server:
     runs-on: ubuntu-24.04

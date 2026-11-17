@@ -161,6 +161,8 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle
+          cache-dependency-path: apps/desktop/src-tauri/gen/android/**/*.gradle*
 
       # The runner image already carries the Android SDK (ANDROID_HOME) and its sdkmanager.
       - name: Install the NDK
