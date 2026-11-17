@@ -210,8 +210,17 @@ impl StreamCtl {
 
     fn resolve_stun(&self) {
         let host = self.voice.host();
-        if host.is_empty() || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback()) || host == "localhost" {
-            return; // local test servers: no STUN, the relay carries everything
+        if host.is_empty() {
+            return;
+        }
+        if host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback()) || host == "localhost" {
+            // A local test server has no STUN: the relay carries everything, unless
+            // RYNUVO_LOCAL_P2P=1 asks to try the loopback address as a direct path first, so a
+            // two-instance test on one machine behaves like two homes on a real server.
+            if std::env::var("RYNUVO_LOCAL_P2P").is_ok_and(|v| v == "1") {
+                self.st.lock().unwrap().stun = vec![SocketAddr::from(([127, 0, 0, 1], STUN_PORTS[0]))];
+            }
+            return;
         }
         let st = Arc::downgrade(&self.st);
         self.rt.spawn(async move {
