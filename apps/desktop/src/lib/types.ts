@@ -9,7 +9,9 @@ export interface MemberSecurity { userId: Id; status: KeyStatus; pubkey: string 
 export interface CallSecurity { code: string; members: MemberSecurity[] }
 export interface PersonCode { code: string; pubkey: string }
 export type ChannelKind = 'text' | 'voice'
-export interface User { id: Id; nickname: string; isAdmin: boolean; avatarIcon?: string | null; avatarColor?: string | null }
+export interface User { id: Id; nickname: string; isAdmin: boolean; avatarIcon?: string | null; avatarColor?: string | null; avatarImage?: string | null }
+/** A profile edit: absent fields stay as they are, `null` clears one. */
+export type ProfilePatch = { avatarIcon?: string | null; avatarColor?: string | null; avatarImage?: string | null }
 export interface Channel { id: Id; kind: ChannelKind; name: string; topic: string | null; ownerId: Id; position: number }
 export interface ImageRef { id: string; width: number; height: number; mime: string }
 export interface Message { id: Id; channelId: Id; authorId: Id; content: string; image: ImageRef | null; createdAt: number; editedAt: number | null }

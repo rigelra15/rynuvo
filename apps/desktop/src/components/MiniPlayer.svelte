@@ -4,7 +4,7 @@
   import Icon from './Icon.svelte'
   import { store } from '../lib/state.svelte'
   import { frameClock } from '../lib/lyrics.svelte'
-  import { mayControl, positionMs, type MusicState } from '../lib/music'
+  import { mayControl, beforeStart, positionMs, type MusicState } from '../lib/music'
   import { membersOf } from '../lib/voice'
   import { videos } from '../lib/videos'
   import { follow } from '../lib/video'
@@ -23,8 +23,11 @@
   let videoUrl = $state<string | null>(null)
   let video = $state<HTMLVideoElement | null>(null)
   let ready = $state(false)
+  // Keyed on the id alone: every pause, resume or seek brings a new state object, and reloading the
+  // video on each one dropped back to the thumbnail.
+  const videoId = $derived(now.video ? now.videoId : null)
   $effect(() => {
-    const id = now.video ? now.videoId : null
+    const id = videoId
     videoUrl = null
     ready = false
     if (!id) return
@@ -34,7 +37,7 @@
   })
   $effect(() => {
     const v = video
-    if (v && ready) follow(v, pos, paused)
+    if (v && ready) follow(v, pos, paused || beforeStart(s, music.receivedAt, frame.now))
   })
 </script>
 

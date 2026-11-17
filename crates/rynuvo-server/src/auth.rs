@@ -70,15 +70,15 @@ impl AuthUser {
 /// Look up an active user by raw device token.
 pub async fn user_by_token(db: &sqlx::SqlitePool, token: &str) -> Result<Option<AuthUser>, AppError> {
     let h = hash(token);
-    let row: Option<(i64, i64, String, bool, Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT d.id, u.id, u.nickname, u.is_admin, u.avatar_icon, u.avatar_color FROM devices d JOIN users u ON u.id = d.user_id
+    let row: Option<(i64, i64, String, bool, Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT d.id, u.id, u.nickname, u.is_admin, u.avatar_icon, u.avatar_color, u.avatar_image FROM devices d JOIN users u ON u.id = d.user_id
          WHERE d.token_hash = ? AND u.removed_at IS NULL",
     )
     .bind(&h[..])
     .fetch_optional(db)
     .await?;
-    Ok(row.map(|(device_id, id, nickname, is_admin, avatar_icon, avatar_color)| AuthUser {
-        user: User { id, nickname, is_admin, avatar_icon, avatar_color },
+    Ok(row.map(|(device_id, id, nickname, is_admin, avatar_icon, avatar_color, avatar_image)| AuthUser {
+        user: User { id, nickname, is_admin, avatar_icon, avatar_color, avatar_image },
         device_id,
     }))
 }

@@ -78,6 +78,7 @@ async fn a_queued_song_plays_through_the_voice_engine_in_time() {
         Box::pin(async { rynuvo_desktop_lib::music::webm::demux(include_bytes!("fixtures/tone.webm")) })
     });
     let music = MusicCtl::new(Arc::new(Out(ctl.clone(), sets.clone())), load, Arc::new(|_| {}));
+    music.spawn_ticker(); // as the app does: moves playback on when the scheduled start passes
     let (c2, m2) = (ctl.clone(), music.clone());
     let emit = Arc::new(move |e: SessionEvent| {
         c2.on_session(&e);
@@ -110,7 +111,10 @@ async fn a_queued_song_plays_through_the_voice_engine_in_time() {
     ctl.send_ws(WsClientMsg::Music { cmd: MusicCmd::Add { entry }, text_channel_id: Some(text) });
     eventually("the song is set playing", || !sets.lock().unwrap().is_empty()).await;
     let (_, at, paused) = sets.lock().unwrap()[0];
-    assert!(!paused);
+    assert!(paused && at == 0, "held at 0:00 while every app loads it");
+    // Then it starts on schedule, from the top.
+    eventually("the song starts", || sets.lock().unwrap().iter().any(|(_, _, p)| !*p)).await;
+    let (_, at, _) = *sets.lock().unwrap().iter().find(|(_, _, p)| !*p).unwrap();
     assert!(at < 400, "starts near the beginning, at {at} ms");
 
     // The engine's output now carries the song.

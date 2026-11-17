@@ -36,6 +36,7 @@ fn prefs_roundtrip() {
         autostart: true,
         stream_preset: "1440p60".into(),
         music_volume: 0.3,
+        stream_cursor: false,
     };
     prefs::save(&f, &p).unwrap();
     assert_eq!(prefs::load(&f), p);

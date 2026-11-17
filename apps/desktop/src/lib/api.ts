@@ -1,6 +1,6 @@
 import { invoke, convertFileSrc, Channel as IpcChannel } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { CallSecurity, Channel, ChannelKind, Id, PersonCode, ImageRef, Message, User, WsServerMsg } from './types'
+import type { CallSecurity, Channel, ChannelKind, Id, PersonCode, ImageRef, Message, ProfilePatch, User, WsServerMsg } from './types'
 import type { MyVoice, Prefs, VoiceEvent } from './voice'
 import type { SelfCheck, Source, StreamEvent } from './stream'
 import type { Lyrics, MusicCmd, MusicStatus, SongResult, Annotation } from './music'
@@ -23,7 +23,7 @@ export const api = {
   logout: () => invoke<void>('logout'),
   renameMe: (nickname: string) => invoke<User>('rename_me', { nickname }),
   /** `undefined` leaves a field, `null` clears it. */
-  setProfile: (profile: { avatarIcon?: string | null; avatarColor?: string | null }) => invoke<User>('set_profile', { profile }),
+  setProfile: (profile: ProfilePatch) => invoke<User>('set_profile', { profile }),
   createChannel: (kind: ChannelKind, name: string) => invoke<Channel>('create_channel', { kind, name }),
   updateChannel: (id: Id, req: { name?: string; topic?: string | null; position?: number }) =>
     invoke<Channel>('update_channel', { id, req }),

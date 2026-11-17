@@ -2,7 +2,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity'
 import { api, errText, type ConnState, type SessionEvent } from './api'
 import { next } from './selection'
 import { dialog } from './dialog.svelte'
-import type { CallSecurity, Channel, Id, Message, User } from './types'
+import type { CallSecurity, Channel, Id, Message, ProfilePatch, User } from './types'
 import { applyVoice, type MyVoice, type VoiceEvent, type VoiceMember } from './voice'
 import { applyStreams, type StreamEvent, type StreamInfo } from './stream'
 import type { MusicCmd, MusicState, MusicStatus } from './music'
@@ -110,7 +110,7 @@ class Store {
   }
 
   /** Save my avatar choice; everyone else hears it through `userUpserted`. */
-  async setAvatar(p: { avatarIcon?: string | null; avatarColor?: string | null }) {
+  async setAvatar(p: ProfilePatch) {
     const u = await api.setProfile(p)
     this.me = u
     this.users.set(u.id, u)

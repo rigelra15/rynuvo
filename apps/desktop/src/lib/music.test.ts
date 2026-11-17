@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeLines, lyricsStatus, clock, withInterludes, lyricAt, mayControl, parseCommand, playQuery, positionMs, type MusicState, wordFill } from './music'
+import { activeLines, beforeStart, lyricsStatus, clock, withInterludes, lyricAt, mayControl, parseCommand, playQuery, positionMs, type MusicState, wordFill } from './music'
 
 describe('music commands', () => {
   it('play aliases take the rest as the query', () => {
@@ -53,6 +53,14 @@ describe('music position', () => {
     expect(positionMs(st({}), 0, 1e9)).toBe(180_000)
     expect(positionMs(st({ pausedAt: 4_321 }), 0, 99_999)).toBe(4_321)
     expect(positionMs(st({ now: null }), 0, 5)).toBe(0)
+  })
+  it('holds at 0:00 until a song scheduled ahead starts', () => {
+    const later = st({ startedAt: 15_000 }) // server clock 12_000: starts in 3 s
+    expect(positionMs(later, 0, 1_000)).toBe(0)
+    expect(beforeStart(later, 0, 2_999)).toBe(true)
+    expect(beforeStart(later, 0, 3_000)).toBe(false)
+    expect(beforeStart(st({}), 0, 0)).toBe(false)
+    expect(beforeStart(st({ startedAt: 15_000, pausedAt: 0 }), 0, 0)).toBe(false)
   })
   it('clock text', () => {
     expect(clock(0)).toBe('0:00')

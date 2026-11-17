@@ -9,6 +9,10 @@ pub mod wire;
 
 /// A finished song moves on this long after its end, so every app has played its last second.
 pub const END_GRACE_MS: i64 = 1500;
+/// A song started on an idle channel plays from this far in the future: nobody has it yet (later
+/// songs are fetched while the one before plays), and every app must download it first or its
+/// opening is cut off. Apps hold at 0:00 until then.
+pub const START_LEAD_MS: i64 = 3000;
 pub const MAX_QUEUE: usize = 50;
 pub const MAX_DURATION_MS: u32 = 20 * 60 * 1000;
 
@@ -275,7 +279,7 @@ impl Session {
                 };
                 if self.playing.is_none() {
                     let text = format!("▶ Now playing: {} · requested by {}", line(&e), nick(a.id));
-                    self.playing = Some(Playing { entry: e, started_at: now, paused_at: None });
+                    self.playing = Some(Playing { entry: e, started_at: now + START_LEAD_MS, paused_at: None });
                     did(text)
                 } else {
                     let text = format!("+ Added to queue (#{}): {}", self.queue.len() + 1, line(&e));
@@ -432,6 +436,8 @@ mod tests {
         let o = run(&mut s, Cmd::Add(req("ILYSB")), XENO, &[POKY, XENO], 2000);
         assert_eq!(o.reply.unwrap(), "+ Added to queue (#1): LANY — ILYSB (3:20)");
         assert_eq!(s.playing.as_ref().unwrap().entry.title, "Stuck");
+        assert_eq!(s.playing.as_ref().unwrap().started_at, 1000 + START_LEAD_MS, "first song waits for every app to load it");
+        assert_eq!(s.position(1500), 0);
         assert_eq!(s.queue.len(), 1);
     }
 
@@ -491,7 +497,7 @@ mod tests {
     #[test]
     fn position_follows_pause_resume_and_seek() {
         let mut s = Session::default();
-        run(&mut s, Cmd::Add(req("Stuck")), POKY, &[POKY], 1_000);
+        run(&mut s, Cmd::Add(req("Stuck")), POKY, &[POKY], 1_000 - START_LEAD_MS);
         assert_eq!(s.position(31_000), 30_000);
         run(&mut s, Cmd::Pause, POKY, &[POKY], 31_000);
         assert_eq!(s.position(90_000), 30_000, "frozen while paused");
@@ -506,7 +512,7 @@ mod tests {
     #[test]
     fn a_song_ends_after_its_duration_plus_grace() {
         let mut s = Session::default();
-        run(&mut s, Cmd::Add(req("Stuck")), POKY, &[POKY], 0);
+        run(&mut s, Cmd::Add(req("Stuck")), POKY, &[POKY], -START_LEAD_MS);
         assert!(!s.finished(200_000));
         assert!(s.finished(200_000 + END_GRACE_MS));
         run(&mut s, Cmd::Pause, POKY, &[POKY], 10_000);
@@ -551,7 +557,7 @@ mod tests {
             run(&mut s, Cmd::Queue, POKY, &[POKY], 0).reply.unwrap(),
             "▶ Now playing: LANY — Stuck (3:20)\n1. LANY — A (3:20) · Xeno"
         );
-        assert_eq!(run(&mut s, Cmd::NowPlaying, XENO, &[POKY], 76_000).reply.unwrap(), "▶ LANY — Stuck · 1:16 / 3:20 · requested by PokyVL");
+        assert_eq!(run(&mut s, Cmd::NowPlaying, XENO, &[POKY], 76_000 + START_LEAD_MS).reply.unwrap(), "▶ LANY — Stuck · 1:16 / 3:20 · requested by PokyVL");
     }
     #[test]
     fn loop_cycles_off_queue_song_and_takes_a_mode() {

@@ -211,13 +211,16 @@
   .composer { padding: 0 18px 16px; }
   .box { position: relative; background: var(--elev-2); border: 1px solid var(--line); border-radius: 18px; transition: border-color 140ms, box-shadow 140ms; }
   .box:focus-within { border-color: rgba(244, 184, 96, 0.55); box-shadow: 0 0 0 4px var(--accent-soft); }
-  textarea { width: 100%; resize: none; background: transparent; border: 0; border-radius: 18px; padding: 13px 52px 13px 16px; max-height: 200px; field-sizing: content; }
+  /* Block, not inline: an inline textarea sits on the text baseline and leaves a gap under it,
+     which pushed the box taller than the text and the music button out of line with it. */
+  textarea { display: block; width: 100%; resize: none; background: transparent; border: 0; border-radius: 18px; padding: 13px 52px 13px 16px; max-height: 200px; field-sizing: content; }
   .box.drag { outline: 2px dashed var(--accent); }
   .att { position: relative; display: inline-block; margin: 10px 12px 0; }
   .att img { max-height: 120px; max-width: 240px; border-radius: 6px; display: block; }
   .x { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; border-radius: 50%; background: var(--danger); color: #fff; font-size: 11px; display: grid; place-items: center; }
   .busy { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.55); color: #fff; font-size: 12px; border-radius: 6px; }
-  .song { position: absolute; right: 8px; bottom: 7px; width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; color: var(--muted); transition: color 120ms, background 120ms; }
+  /* Centred on the last line: 13px padding + half a 21px line − half the 34px button. */
+  .song { position: absolute; right: 8px; bottom: 6.5px; width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; color: var(--muted); transition: color 120ms, background 120ms; }
   .song:hover, .song.on { color: var(--text); background: var(--elev); }
   .song.on { color: var(--accent); }
   .count { position: absolute; right: 48px; bottom: 8px; font-size: 11px; color: var(--muted); }

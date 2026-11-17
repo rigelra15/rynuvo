@@ -81,7 +81,7 @@ pub async fn music_search(http: State<'_, MusicHttp>, query: String) -> Result<V
 /// Where to stream a music video's picture from (the sound comes through the music player).
 #[tauri::command]
 pub async fn music_video_url(http: State<'_, MusicHttp>, video_id: String) -> Result<String, String> {
-    ytm::resolve_video(&http.0, &video_id).await
+    ytm::resolve_video(&http.0, &video_id).await.inspect_err(|e| tracing::warn!("music video {video_id}: {e}"))
 }
 
 /// Any other music command (skip, pause, seek, queue, …).

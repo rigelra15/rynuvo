@@ -68,6 +68,7 @@ pub type EventSink = Arc<dyn Fn(VoiceEvent) + Send + Sync>;
 
 enum Cmd {
     Muted(bool),
+    Alone(bool),
     Deafened(bool),
     Threshold(f32),
     Volume(Id, f32),
@@ -126,6 +127,10 @@ impl VoiceEngine {
     }
     pub fn set_deafened(&self, v: bool) {
         self.send(Cmd::Deafened(v));
+    }
+    /// Nobody else is in the channel: nothing I say is heard, so the mic isn't cleaned up.
+    pub fn set_alone(&self, v: bool) {
+        self.send(Cmd::Alone(v));
     }
     pub fn set_threshold(&self, v: f32) {
         self.send(Cmd::Threshold(v));
@@ -235,6 +240,7 @@ struct Worker {
     enc: Option<Encoder>,
     mixer: Mixer,
     muted: bool,
+    alone: bool,
     mic_test: bool,
     frame: [f32; FRAME],
     filled: usize,
@@ -279,6 +285,7 @@ impl Worker {
             enc,
             mixer,
             muted: false,
+            alone: false,
             mic_test: false,
             frame: [0.0; FRAME],
             filled: 0,
@@ -352,6 +359,7 @@ impl Worker {
     fn handle(&mut self, c: Cmd) -> bool {
         match c {
             Cmd::Muted(v) => self.muted = v,
+            Cmd::Alone(v) => self.alone = v,
             Cmd::Deafened(v) => self.mixer.set_deafened(v),
             Cmd::Threshold(t) => self.gate.set_threshold(t),
             Cmd::Volume(u, v) => self.mixer.set_volume(u, v),
@@ -413,10 +421,13 @@ impl Worker {
         }
         let mut chunk = [0f32; DSP_FRAME];
         let mut done = 0;
+        // Muted or alone, nobody hears the mic: skip the echo/noise cleanup, the costliest part of
+        // the engine. The level meter still moves (from the raw mic). The mic test always cleans up.
+        let idle = (self.muted || self.alone) && !self.mic_test;
         while done < CAPTURE_PER_TICK && cap.occupied_len() >= DSP_FRAME {
             done += 1;
             cap.pop_slice(&mut chunk);
-            let vad = self.dsp.capture(&mut chunk);
+            let vad = if idle { 0.0 } else { self.dsp.capture(&mut chunk) };
             self.level_sum += chunk.iter().map(|x| (*x as f64) * (*x as f64)).sum::<f64>();
             self.level_n += DSP_FRAME;
             self.frame[self.filled..self.filled + DSP_FRAME].copy_from_slice(&chunk);

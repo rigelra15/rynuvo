@@ -25,6 +25,9 @@ pub struct User {
     /// One of [`AVATAR_COLORS`]; `None` picks a colour from the user id.
     #[serde(default)]
     pub avatar_color: Option<String>,
+    /// An uploaded picture (media id) shown instead of the icon; `None` uses the icon or letter.
+    #[serde(default)]
+    pub avatar_image: Option<String>,
 }
 
 /// Avatar icons a user can pick (drawn by the desktop app).
@@ -151,6 +154,8 @@ pub struct ProfileReq {
     pub avatar_icon: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "some")]
     pub avatar_color: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "some")]
+    pub avatar_image: Option<Option<String>>,
 }
 
 /// Present field (even `null`) → `Some`, so absent and `null` differ.

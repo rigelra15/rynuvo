@@ -23,7 +23,8 @@
     return () => clearInterval(iv)
   })
   const pos = $derived(music ? positionMs(music.state, music.receivedAt, t) : 0)
-  const lyrics = $derived(now ? lyricsOf(now, music?.state.lyrics ?? 'auto') : undefined)
+  // A music video has no lyrics (its timing is the video's, not the song's).
+  const lyrics = $derived(now && !now.video ? lyricsOf(now, music?.state.lyrics ?? 'auto') : undefined)
   const lineAt = $derived(lyrics?.lines.length ? lyricAt(lyrics.lines, pos + 150) : -1)
   const lyric = $derived(lineAt >= 0 ? lyrics!.lines[lineAt].text : '')
 

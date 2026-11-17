@@ -1,6 +1,7 @@
-//! Lyrics for the playing song, from the source the voice channel picked: SimpMusic (by video id),
-//! BetterLyrics and LrcRed (Apple Music style TTML, often word-synced), LRCLIB, NetEase; "auto" tries
-//! them in that order and takes the first with timed lines.
+//! Lyrics for the playing song, from the source the voice channel picked: LRCLIB, SimpMusic (by video
+//! id), BetterLyrics and LrcRed (Apple Music style TTML, often word-synced), NetEase. "auto" asks them
+//! all at once and takes LRCLIB when it is word-synced, else SimpMusic when it is, else any other
+//! word-synced source, else the first line-synced one, else plain text.
 use serde::Serialize;
 use serde_json::Value;
 
@@ -318,7 +319,7 @@ pub fn search_title(title: &str) -> String {
 
 /// Sources to ask, in order, for a channel's choice.
 pub fn order(source: &str) -> Vec<&'static str> {
-    const AUTO: [&str; 5] = ["simpmusic", "betterlyrics", "lrcred", "lrclib", "netease"];
+    const AUTO: [&str; 5] = ["lrclib", "simpmusic", "betterlyrics", "lrcred", "netease"];
     AUTO.iter().find(|s| **s == source).map_or_else(|| AUTO.to_vec(), |s| vec![*s])
 }
 
@@ -368,18 +369,23 @@ async fn from_source(http: &reqwest::Client, src: &str, video_id: &str, title: &
     }
 }
 
-/// Lyrics from the channel's `source`; with "auto", the first source that has timed lines (plain
-/// lyrics only when none does).
+fn word_synced(l: &Lyrics) -> bool {
+    l.lines.iter().any(|x| !x.words.is_empty())
+}
+
+/// The best of each source's answer (given in `order` order): word-synced first, in source order,
+/// so LRCLIB, then SimpMusic, then the rest; then the first line-synced; then plain text.
+pub fn choose(found: Vec<Option<Lyrics>>) -> Option<Lyrics> {
+    let found: Vec<Lyrics> = found.into_iter().flatten().collect();
+    let pick = found.iter().position(word_synced).or_else(|| found.iter().position(|l| !l.lines.is_empty())).or((!found.is_empty()).then_some(0))?;
+    found.into_iter().nth(pick)
+}
+
+/// Lyrics from the channel's `source`; with "auto", every source is asked at once and `choose`
+/// picks the best.
 pub async fn fetch(http: &reqwest::Client, source: &str, video_id: &str, title: &str, artist: &str, duration_ms: u32) -> Option<Lyrics> {
-    let mut plain_only = None;
-    for src in order(source) {
-        match from_source(http, src, video_id, title, artist, duration_ms).await {
-            Some(l) if !l.lines.is_empty() => return Some(l),
-            Some(l) => plain_only = plain_only.or(Some(l)),
-            None => {}
-        }
-    }
-    plain_only
+    let asks = order(source).into_iter().map(|src| from_source(http, src, video_id, title, artist, duration_ms));
+    choose(futures_util::future::join_all(asks).await)
 }
 
 #[cfg(test)]
@@ -431,10 +437,26 @@ mod tests {
     }
 
     #[test]
-    fn auto_tries_word_timed_sources_first() {
-        assert_eq!(order("auto"), vec!["simpmusic", "betterlyrics", "lrcred", "lrclib", "netease"]);
+    fn auto_puts_lrclib_then_simpmusic_first() {
+        assert_eq!(order("auto"), vec!["lrclib", "simpmusic", "betterlyrics", "lrcred", "netease"]);
         assert_eq!(order("lrclib"), vec!["lrclib"]);
         assert_eq!(order("bogus"), order("auto"));
+    }
+
+    #[test]
+    fn auto_prefers_word_sync_then_line_sync_then_plain() {
+        let word = |src| Some(Lyrics { lines: parse_lrc("[00:01.00] <00:01.00> hi <00:01.50> there"), plain: None, source: src });
+        let line = |src| Some(Lyrics { lines: parse_lrc("[00:01.00] hi there"), plain: None, source: src });
+        let plain = |src| Some(Lyrics { lines: vec![], plain: Some("hi".into()), source: src });
+        let src = |l: Option<Lyrics>| l.map(|l| l.source);
+        // Order: lrclib, simpmusic, betterlyrics, lrcred, netease.
+        assert_eq!(src(choose(vec![word("LRCLIB"), word("SimpMusic"), None, None, None])), Some("LRCLIB"));
+        assert_eq!(src(choose(vec![line("LRCLIB"), word("SimpMusic"), word("BetterLyrics"), None, None])), Some("SimpMusic"), "LRCLIB only line-synced");
+        assert_eq!(src(choose(vec![line("LRCLIB"), line("SimpMusic"), None, word("LrcRed"), None])), Some("LrcRed"), "word sync from anywhere beats lines");
+        assert_eq!(src(choose(vec![None, line("SimpMusic"), None, None, line("NetEase")])), Some("SimpMusic"), "else the first line-synced");
+        assert_eq!(src(choose(vec![plain("LRCLIB"), None, None, None, line("NetEase")])), Some("NetEase"), "timed beats plain");
+        assert_eq!(src(choose(vec![None, plain("SimpMusic"), None, None, None])), Some("SimpMusic"));
+        assert_eq!(choose(vec![None, None]), None);
     }
 
     #[test]

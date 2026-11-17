@@ -55,13 +55,13 @@ async fn read_hello(socket: &mut WebSocket) -> Option<(String, u32)> {
 }
 
 async fn snapshot(st: &AppState, me: User) -> anyhow::Result<WsServerMsg> {
-    let users: Vec<(i64, String, bool, Option<String>, Option<String>)> =
-        sqlx::query_as("SELECT id, nickname, is_admin, avatar_icon, avatar_color FROM users WHERE removed_at IS NULL ORDER BY id").fetch_all(&st.db).await?;
+    let users: Vec<(i64, String, bool, Option<String>, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT id, nickname, is_admin, avatar_icon, avatar_color, avatar_image FROM users WHERE removed_at IS NULL ORDER BY id").fetch_all(&st.db).await?;
     let channels = list_channels(&st.db).await.map_err(|e| anyhow::anyhow!("{e:?}"))?;
     let alerts = if me.is_admin { st.disk.alert().into_iter().chain(st.relay.quota.alert()).collect() } else { Vec::new() };
     Ok(WsServerMsg::Ready {
         me,
-        users: users.into_iter().map(|(id, nickname, is_admin, avatar_icon, avatar_color)| User { id, nickname, is_admin, avatar_icon, avatar_color }).collect(),
+        users: users.into_iter().map(|(id, nickname, is_admin, avatar_icon, avatar_color, avatar_image)| User { id, nickname, is_admin, avatar_icon, avatar_color, avatar_image }).collect(),
         channels,
         online: st.hub.online_ids(),
         alerts,

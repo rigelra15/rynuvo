@@ -50,6 +50,11 @@ pub fn position(s: &MusicState, received_at: i64, now: i64) -> u32 {
     at.clamp(0, dur as i64) as u32
 }
 
+/// The song is scheduled to start later (the server gives everyone time to load it): hold at 0:00.
+pub fn before_start(s: &MusicState, received_at: i64, now: i64) -> bool {
+    s.paused_at.is_none() && now - received_at + s.server_time < s.started_at
+}
+
 #[derive(Default)]
 struct St {
     /// Per voice channel: the state and the local time it arrived.
@@ -113,7 +118,8 @@ impl MusicCtl {
             Some(song) => {
                 st.playing = Some(entry.id);
                 drop(st);
-                self.out.set(entry.id, song, position(&s, at, now), s.paused_at.is_some());
+                let hold = s.paused_at.is_some() || before_start(&s, at, now);
+                self.out.set(entry.id, song, position(&s, at, now), hold);
             }
             None => {
                 if st.playing.take().is_some() {
@@ -209,6 +215,9 @@ mod tests {
         assert_eq!(position(&p, 0, 77_777), 4_321, "paused stays put");
         let early = state(Some(entry(1, "a")), vec![], 10_000, None, 9_000);
         assert_eq!(position(&early, 0, 0), 0);
+        assert!(before_start(&early, 0, 999), "held until the scheduled start");
+        assert!(!before_start(&early, 0, 1_000));
+        assert!(!before_start(&s, 500, 500));
     }
 
     #[derive(Default)]

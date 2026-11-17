@@ -90,3 +90,20 @@ async fn disk_block_returns_507() {
     assert_eq!(r.status(), 507);
     assert_eq!(r.json::<ApiError>().await.unwrap().code, "disk_full");
 }
+
+#[tokio::test]
+async fn profile_picture_must_be_an_uploaded_image() {
+    let app = TestApp::spawn().await;
+    let u = app.user("Dimas").await;
+    let patch = |body: serde_json::Value| app.client.patch(app.url("/api/v1/me")).bearer_auth(&u.token).json(&body).send();
+    let missing = "a".repeat(64);
+    assert_eq!(patch(serde_json::json!({ "avatarImage": missing })).await.unwrap().status(), 400);
+
+    let i: rynuvo_proto::ImageRef = upload(&app, &u.token, "image/png", encode(64, 64, ImageFormat::Png)).await.json().await.unwrap();
+    let me: rynuvo_proto::User = patch(serde_json::json!({ "avatarImage": i.id })).await.unwrap().json().await.unwrap();
+    assert_eq!(me.avatar_image.as_deref(), Some(i.id.as_str()));
+    let me: rynuvo_proto::User = patch(serde_json::json!({ "avatarColor": "teal" })).await.unwrap().json().await.unwrap();
+    assert_eq!(me.avatar_image.as_deref(), Some(i.id.as_str()), "other edits keep the picture");
+    let me: rynuvo_proto::User = patch(serde_json::json!({ "avatarImage": null })).await.unwrap().json().await.unwrap();
+    assert_eq!(me.avatar_image, None);
+}

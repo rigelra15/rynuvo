@@ -113,7 +113,7 @@ async fn join(State(st): State<AppState>, Json(req): Json<JoinReq>) -> AppResult
     tx.commit().await?;
 
     let token = issue_device(&st.db, id, &req.device_name).await?;
-    let user = User { id, nickname, is_admin, avatar_icon: None, avatar_color: None };
+    let user = User { id, nickname, is_admin, avatar_icon: None, avatar_color: None, avatar_image: None };
     st.hub.broadcast(WsServerMsg::UserUpserted(user.clone()));
     Ok(Json(JoinResp { token, user }))
 }
@@ -136,12 +136,21 @@ async fn update_me(State(st): State<AppState>, au: AuthUser, Json(req): Json<Pro
     };
     let icon = pick(req.avatar_icon, &AVATAR_ICONS, "icon")?;
     let color = pick(req.avatar_color, &AVATAR_COLORS, "colour")?;
+    // A picture must be one already uploaded here.
+    if let Some(Some(img)) = &req.avatar_image {
+        let found: Option<String> = sqlx::query_scalar("SELECT id FROM images WHERE id = ?").bind(img).fetch_optional(&st.db).await?;
+        if found.is_none() {
+            return Err(AppError::BadRequest("Unknown picture".into()));
+        }
+    }
+    let image = req.avatar_image;
     // Only the fields that were sent change, so two edits at once (or a rename on another device)
     // never write back a stale copy of the others.
-    let row: (i64, String, bool, Option<String>, Option<String>) = sqlx::query_as(
+    let row: (i64, String, bool, Option<String>, Option<String>, Option<String>) = sqlx::query_as(
         "UPDATE users SET nickname = COALESCE(?1, nickname), nickname_key = COALESCE(?2, nickname_key), \
-         avatar_icon = CASE WHEN ?3 THEN ?4 ELSE avatar_icon END, avatar_color = CASE WHEN ?5 THEN ?6 ELSE avatar_color END \
-         WHERE id = ?7 RETURNING id, nickname, is_admin, avatar_icon, avatar_color",
+         avatar_icon = CASE WHEN ?3 THEN ?4 ELSE avatar_icon END, avatar_color = CASE WHEN ?5 THEN ?6 ELSE avatar_color END, \
+         avatar_image = CASE WHEN ?8 THEN ?9 ELSE avatar_image END \
+         WHERE id = ?7 RETURNING id, nickname, is_admin, avatar_icon, avatar_color, avatar_image",
     )
     .bind(&nickname)
     .bind(&key)
@@ -150,11 +159,13 @@ async fn update_me(State(st): State<AppState>, au: AuthUser, Json(req): Json<Pro
     .bind(color.is_some())
     .bind(color.flatten())
     .bind(au.user.id)
+    .bind(image.is_some())
+    .bind(image.flatten())
     .fetch_one(&st.db)
     .await
     .map_err(|e| if is_unique_violation(&e) { nickname_taken() } else { AppError::from(e) })?;
-    let (id, nickname, is_admin, avatar_icon, avatar_color) = row;
-    let user = User { id, nickname, is_admin, avatar_icon, avatar_color };
+    let (id, nickname, is_admin, avatar_icon, avatar_color, avatar_image) = row;
+    let user = User { id, nickname, is_admin, avatar_icon, avatar_color, avatar_image };
     st.hub.broadcast(WsServerMsg::UserUpserted(user.clone()));
     Ok(Json(user))
 }
@@ -170,11 +181,11 @@ async fn claim_transfer(State(st): State<AppState>, Json(req): Json<ClaimTransfe
     .await?;
     let invalid = || AppError::Coded(axum::http::StatusCode::FORBIDDEN, "invalid_code", "Transfer code is wrong or expired".into());
     let user_id = user_id.ok_or_else(invalid)?;
-    let user: Option<(i64, String, bool, Option<String>, Option<String>)> = sqlx::query_as("SELECT id, nickname, is_admin, avatar_icon, avatar_color FROM users WHERE id = ? AND removed_at IS NULL")
+    let user: Option<(i64, String, bool, Option<String>, Option<String>, Option<String>)> = sqlx::query_as("SELECT id, nickname, is_admin, avatar_icon, avatar_color, avatar_image FROM users WHERE id = ? AND removed_at IS NULL")
         .bind(user_id)
         .fetch_optional(&st.db)
         .await?;
-    let (id, nickname, is_admin, avatar_icon, avatar_color) = user.ok_or_else(invalid)?;
+    let (id, nickname, is_admin, avatar_icon, avatar_color, avatar_image) = user.ok_or_else(invalid)?;
     let token = issue_device(&st.db, id, &req.device_name).await?;
-    Ok(Json(JoinResp { token, user: User { id, nickname, is_admin, avatar_icon, avatar_color } }))
+    Ok(Json(JoinResp { token, user: User { id, nickname, is_admin, avatar_icon, avatar_color, avatar_image } }))
 }

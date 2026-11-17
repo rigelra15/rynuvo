@@ -217,6 +217,14 @@ impl VoiceCtl {
         MyVoice { channel_id: s.want, muted: s.muted, deafened: s.deafened }
     }
 
+    /// Tell the engine whether anyone else is in my channel.
+    fn sync_alone(&self) {
+        let s = self.st.lock().unwrap();
+        if let (Some(e), Some(ch)) = (&s.engine, s.engine_channel) {
+            e.set_alone(alone(&s.members, ch, s.me));
+        }
+    }
+
     fn notify(&self) {
         let m = self.state();
         (self.events)(VoiceEvent::State { channel_id: m.channel_id, muted: m.muted, deafened: m.deafened });
@@ -689,6 +697,7 @@ impl VoiceCtl {
         engine.set_on_dead(Arc::new(move || rs.reconnect()));
         engine.set_muted(s.muted);
         engine.set_deafened(s.deafened);
+        engine.set_alone(alone(&s.members, channel_id, s.me));
         engine.play_tone(Tone::Join);
         let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
         session.set_binary_sink(Some(tx));
@@ -862,9 +871,15 @@ impl VoiceCtl {
                     self.send_keys(out);
                 }
             }
-            _ => {}
+            _ => return,
         }
+        self.sync_alone();
     }
+}
+
+/// Nobody but me in `channel`.
+pub fn alone(members: &[VoiceMember], channel: Id, me: Option<Id>) -> bool {
+    !members.iter().any(|m| m.channel_id == channel && Some(m.user_id) != me)
 }
 
 /// The sound for going from `(muted, deafened)` to the next: deafening wins (it mutes too).
@@ -931,5 +946,14 @@ mod tests {
         // Unmuting while deafened undeafens too.
         assert_eq!(toggle_tone((true, true), (false, false)), Some(Tone::Undeafen));
         assert_eq!(toggle_tone((true, false), (true, false)), None, "nothing changed, no sound");
+    }
+
+    #[test]
+    fn alone_means_nobody_else_in_my_channel() {
+        let m = |user_id, channel_id| VoiceMember { user_id, channel_id, muted: false, deafened: false, joined_at: 0, call_since: 0, pubkey: String::new() };
+        assert!(alone(&[m(1, 5)], 5, Some(1)), "just me");
+        assert!(alone(&[m(1, 5), m(2, 6)], 5, Some(1)), "someone in another channel");
+        assert!(!alone(&[m(1, 5), m(2, 5)], 5, Some(1)));
+        assert!(alone(&[], 5, Some(1)));
     }
 }

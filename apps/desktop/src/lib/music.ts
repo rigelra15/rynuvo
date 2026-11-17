@@ -139,6 +139,11 @@ export function positionMs(s: MusicState, receivedAt: number, now: number): numb
   return Math.max(0, Math.min(dur, at))
 }
 
+/** The song is scheduled to start later (everyone gets time to load it): hold at 0:00 until then. */
+export function beforeStart(s: MusicState, receivedAt: number, now: number): boolean {
+  return s.pausedAt === null && now - receivedAt + s.serverTime < s.startedAt
+}
+
 export function clock(ms: number): string {
   const s = Math.floor(ms / 1000)
   const h = Math.floor(s / 3600)

@@ -44,6 +44,7 @@ pub fn run() {
             }
         })
         .register_asynchronous_uri_scheme_protocol("rynuvo-media", media::protocol)
+        .register_asynchronous_uri_scheme_protocol("rynuvo-video", music::vproxy::protocol)
         .setup(move |app| {
             if let Ok(dir) = app.path().app_log_dir() {
                 let _ = core::logs::init(&dir);

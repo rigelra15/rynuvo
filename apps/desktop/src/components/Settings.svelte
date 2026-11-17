@@ -7,6 +7,7 @@
   import Avatar from './Avatar.svelte'
   import { onMount } from 'svelte'
   import { api, describeNet, errText, type TransferCode } from '../lib/api'
+  import type { ProfilePatch } from '../lib/types'
   import { store } from '../lib/state.svelte'
   import AdminPanel from './AdminPanel.svelte'
   import Countdown from './Countdown.svelte'
@@ -60,12 +61,31 @@
   }
 
   let avatarErr = $state<string | null>(null)
-  async function pick(p: { avatarIcon?: string | null; avatarColor?: string | null }) {
+  async function pick(p: ProfilePatch) {
     try {
       await store.setAvatar(p)
       avatarErr = null
     } catch (err) {
       avatarErr = errText(err)
+    }
+  }
+
+  // A photo from this computer: compressed and uploaded like a chat image, then set as my avatar.
+  let photoInput = $state<HTMLInputElement>()
+  let uploading = $state(false)
+  async function uploadPhoto() {
+    if (!photoInput) return
+    const file = photoInput.files?.[0]
+    photoInput.value = ''
+    if (!file) return
+    uploading = true
+    try {
+      const ref = await api.uploadImage(new Uint8Array(await file.arrayBuffer()))
+      await pick({ avatarImage: ref.id })
+    } catch (err) {
+      avatarErr = errText(err)
+    } finally {
+      uploading = false
     }
   }
 
@@ -170,12 +190,17 @@
           <div class="profile">
             <Avatar user={store.me} size={56} />
             <div class="pick">
+              <div class="photo">
+                <input bind:this={photoInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onchange={uploadPhoto} />
+                <button class="btn" disabled={uploading} onclick={() => photoInput?.click()}>{uploading ? 'Uploading…' : 'Upload photo'}</button>
+                {#if store.me?.avatarImage}<button class="btn" disabled={uploading} onclick={() => pick({ avatarImage: null })}>Remove photo</button>{/if}
+              </div>
               <div class="icons">
-                <button class="opt" class:sel={!store.me?.avatarIcon} title="Letter" onclick={() => pick({ avatarIcon: null })}>
+                <button class="opt" class:sel={!store.me?.avatarIcon && !store.me?.avatarImage} title="Letter" onclick={() => pick({ avatarIcon: null, avatarImage: null })}>
                   <span class="letter">{store.me?.nickname.slice(0, 1).toUpperCase()}</span>
                 </button>
                 {#each AVATAR_ICONS as name (name)}
-                  <button class="opt" class:sel={store.me?.avatarIcon === name} title={name} onclick={() => pick({ avatarIcon: name })}>
+                  <button class="opt" class:sel={!store.me?.avatarImage && store.me?.avatarIcon === name} title={name} onclick={() => pick({ avatarIcon: name, avatarImage: null })}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       {#each AVATAR_SHAPES[name] as sh, i (i)}
                         {#if 'd' in sh}<path d={sh.d} />{:else if 'c' in sh}<circle cx={sh.c[0]} cy={sh.c[1]} r={sh.c[2]} />{:else}<ellipse cx={sh.e[0]} cy={sh.e[1]} rx={sh.e[2]} ry={sh.e[3]} />{/if}
@@ -282,6 +307,7 @@
 </div>
 
 <style>
+  .photo { display: flex; gap: 8px; margin-bottom: 8px; }
   .overlay { position: fixed; inset: 0; background: rgba(8, 8, 12, 0.7); display: grid; place-items: center; z-index: 40; }
   .panel { width: min(580px, 92vw); max-height: 86vh; display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5); overflow: hidden; }
   header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 12px 16px; border-bottom: 1px solid var(--line); }

@@ -8,7 +8,7 @@
   import { videos } from '../lib/videos'
   import { follow } from '../lib/video'
   import { annotationsOf, frameClock, lyricExtras, lyricsOf } from '../lib/lyrics.svelte'
-  import { clock, LYRICS_SOURCES, lyricsStatus, mayControl, positionMs, type MusicState } from '../lib/music'
+  import { beforeStart, clock, LYRICS_SOURCES, lyricsStatus, mayControl, positionMs, type MusicState } from '../lib/music'
   import { membersOf } from '../lib/voice'
 
   let { music }: { music: { state: MusicState; receivedAt: number } } = $props()
@@ -43,10 +43,38 @@
   let videoUrl = $state<string | null>(null)
   let videoReady = $state(false)
   let video: HTMLVideoElement | undefined = $state()
+  // The video's own shape (4:3, 9:16, …), known once its metadata is in; 16:9 until then.
+  let ratio = $state(16 / 9)
+  function onMeta() {
+    if (video?.videoWidth && video.videoHeight) ratio = video.videoWidth / video.videoHeight
+  }
+
+  // Ambient light, as on YouTube: the picture, shrunk to a few pixels, glows around the video. Each
+  // sample is blended over the last, so the colours drift instead of flickering. Cheap on purpose:
+  // a few samples a second (each one makes the GPU blur the glow again), none while paused or hidden,
+  // and the stretched tiny canvas is already soft, so a light blur finishes it.
+  let glow: HTMLCanvasElement | undefined = $state()
   $effect(() => {
-    const id = now.video ? now.videoId : null
+    const v = video
+    const c = glow
+    if (!v || !c || !videoReady || paused) return
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    const iv = setInterval(() => {
+      if (v.readyState < 2 || document.hidden) return
+      ctx.globalAlpha = 0.4
+      ctx.drawImage(v, 0, 0, c.width, c.height)
+    }, 400)
+    return () => clearInterval(iv)
+  })
+  // Keyed on the id alone: every pause, resume or seek brings a new state object, and reloading the
+  // video on each one dropped back to the thumbnail.
+  const videoId = $derived(now.video ? now.videoId : null)
+  $effect(() => {
+    const id = videoId
     videoUrl = null
     videoReady = false
+    ratio = 16 / 9
     if (!id) return
     let live = true
     videos.get(id).then((u) => { if (live) videoUrl = u }, () => {})
@@ -54,7 +82,7 @@
   })
   $effect(() => {
     const v = video
-    if (v && videoReady) follow(v, pos, paused)
+    if (v && videoReady) follow(v, pos, paused || beforeStart(s, music.receivedAt, frame.now))
   })
 
   const sourceName = (id: string) => LYRICS_SOURCES.find((x) => x.id === id)?.name ?? id
@@ -73,7 +101,9 @@
   {#if now.video}
     <!-- Opens at once with the video's thumbnail; the picture fades in over it when the first frame is in. -->
     <div class="vid ready">
-      <div class="vbox" style="background-image:url('{now.artUrl}')">
+      <div class="vcell">
+      <canvas class="glow" class:on={videoReady} bind:this={glow} width="16" height={Math.max(1, Math.round(16 / ratio))} style="background-image:url('{now.artUrl}')" aria-hidden="true"></canvas>
+      <div class="vbox" style="background-image:url('{now.artUrl}'); aspect-ratio: {ratio}">
         {#if videoUrl}<video
           class:on={videoReady}
           bind:this={video}
@@ -82,9 +112,11 @@
           playsinline
           preload="auto"
           disablepictureinpicture
+          onloadedmetadata={onMeta}
           onloadeddata={() => (videoReady = true)}
           onerror={() => { videoUrl = null; videoReady = false }}
         ></video>{/if}
+      </div>
       </div>
     </div>
   {/if}
@@ -94,7 +126,7 @@
       <div class="cover" style="background-image:url('{now.artUrl}')"></div>
     </div>
     <div class="info">
-      {#if paused || repeat === 'song'}<div class="kicker">{paused ? 'Paused' : 'On loop'}{paused && repeat === 'song' ? ', on loop' : ''}</div>{/if}
+      {#if repeat === 'song'}<div class="kicker">On loop</div>{/if}
       <div class="title" title={now.title}>{now.title}</div>
       <div class="artist">{now.artist}{now.album ? ` · ${now.album}` : ''}</div>
       <span class="who" title="Requested by {store.nick(now.requestedBy)}"><Avatar user={store.user(now.requestedBy)} id={now.requestedBy} size={16} />{store.nick(now.requestedBy)}</span>
@@ -211,8 +243,15 @@
   }
   .vid { display: grid; grid-template-rows: 0fr; margin-bottom: -12px; opacity: 0; transition: grid-template-rows 650ms cubic-bezier(0.22, 1, 0.36, 1), margin 650ms cubic-bezier(0.22, 1, 0.36, 1), opacity 500ms ease-out; }
   .vid.ready { grid-template-rows: 1fr; margin-bottom: 0; opacity: 1; }
-  .vbox { min-height: 0; overflow: hidden; border-radius: 12px; aspect-ratio: 16 / 9; background: #000 center / cover no-repeat; }
-  video { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 12px; opacity: 0; transition: opacity 400ms ease-out; }
+  .vcell { min-height: 0; position: relative; }
+  /* Tall videos stop at 60% of the window; the picture keeps its shape, with black at the sides. */
+  .vbox { position: relative; overflow: hidden; border-radius: 12px; max-height: 60vh; background: #000 center / cover no-repeat; }
+  .glow {
+    position: absolute; left: -5%; top: -6%; width: 110%; height: 112%; pointer-events: none;
+    background: center / cover no-repeat; filter: blur(24px) saturate(1.5); opacity: 0.35; transition: opacity 800ms ease-out;
+  }
+  .glow.on { opacity: 0.6; }
+  video { display: block; width: 100%; height: 100%; object-fit: contain; border-radius: 12px; opacity: 0; transition: opacity 400ms ease-out; }
   video.on { opacity: 1; }
   /* With a video playing, the record and sleeve fold away and the title sits under the picture. */
   .sleeve { transition: width 650ms cubic-bezier(0.22, 1, 0.36, 1), height 650ms cubic-bezier(0.22, 1, 0.36, 1), margin 650ms cubic-bezier(0.22, 1, 0.36, 1), opacity 300ms ease-out; }

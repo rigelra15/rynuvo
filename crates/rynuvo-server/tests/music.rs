@@ -70,7 +70,7 @@ async fn listen_together_over_the_socket() {
     let s = music(&mut x, 3000).await;
     assert_eq!(s.channel_id, voice);
     assert_eq!(s.now.as_ref().unwrap().title, "Short");
-    assert!(s.server_time >= s.started_at);
+    assert_eq!(s.started_at - s.server_time, rynuvo_server::music::START_LEAD_MS, "the first song waits for every app to load it");
     p.send_json(add(text, "Next", 60_000)).await;
     assert_eq!(music(&mut x, 3000).await.queue.len(), 1);
 
