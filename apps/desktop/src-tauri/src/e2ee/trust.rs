@@ -1,7 +1,7 @@
 //! Which device keys I have seen and verified for each user, one JSON file per profile
 //! (`trust-<profile>.json`). Only public keys are stored.
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
 };
 
@@ -39,6 +39,8 @@ struct File {
 pub struct Trust {
     path: Option<PathBuf>,
     data: File,
+    /// (user, key) first recorded this voice session for a user who had other seen keys. Not saved.
+    fresh: HashSet<(Id, String)>,
 }
 
 impl Trust {
@@ -46,7 +48,10 @@ impl Trust {
     pub fn open(path: PathBuf) -> Self {
         let data = match std::fs::read(&path) {
             Ok(b) => serde_json::from_slice(&b).unwrap_or_else(|e| {
-                tracing::warn!("trust file {} is unreadable, starting empty: {e}", path.display());
+                let mut bad = path.clone().into_os_string();
+                bad.push(".bad");
+                let kept = std::fs::rename(&path, &bad).is_ok();
+                tracing::warn!("trust file {} is unreadable (kept as .bad: {kept}), starting empty: {e}", path.display());
                 File::default()
             }),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => File::default(),
@@ -55,32 +60,55 @@ impl Trust {
                 File::default()
             }
         };
-        Trust { path: Some(path), data }
+        Trust { path: Some(path), data, fresh: HashSet::new() }
     }
 
     /// Not saved anywhere (for tests).
     pub fn in_memory() -> Self {
-        Trust { path: None, data: File::default() }
+        Trust { path: None, data: File::default(), fresh: HashSet::new() }
     }
 
     /// The status of `pk` for `user`, recording it as seen.
     pub fn status(&mut self, user: Id, pk: &PublicKey) -> KeyStatus {
-        let b64 = pk.to_b64();
-        let u = self.data.users.entry(user).or_default();
-        let status = if u.verified.contains(&b64) {
-            KeyStatus::Verified
-        } else if !u.verified.is_empty() {
-            KeyStatus::Changed
-        } else if !u.seen.is_empty() && !u.seen.contains(&b64) {
-            KeyStatus::NewDevice
-        } else {
-            KeyStatus::Known
-        };
-        if !u.seen.contains(&b64) {
-            u.seen.push(b64);
+        self.statuses(&[(user, pk.clone())])[0]
+    }
+
+    /// Statuses for several keys with a single save.
+    pub fn statuses(&mut self, keys: &[(Id, PublicKey)]) -> Vec<KeyStatus> {
+        let mut changed = false;
+        let out = keys
+            .iter()
+            .map(|(user, pk)| {
+                let b64 = pk.to_b64();
+                let u = self.data.users.entry(*user).or_default();
+                let status = if u.verified.contains(&b64) {
+                    KeyStatus::Verified
+                } else if !u.verified.is_empty() {
+                    KeyStatus::Changed
+                } else if self.fresh.contains(&(*user, b64.clone())) || (!u.seen.is_empty() && !u.seen.contains(&b64)) {
+                    KeyStatus::NewDevice
+                } else {
+                    KeyStatus::Known
+                };
+                if !u.seen.contains(&b64) {
+                    if status == KeyStatus::NewDevice {
+                        self.fresh.insert((*user, b64.clone()));
+                    }
+                    u.seen.push(b64);
+                    changed = true;
+                }
+                status
+            })
+            .collect();
+        if changed {
             self.save();
         }
-        status
+        out
+    }
+
+    /// I left voice: keys first seen during the call are ordinary known keys from now on.
+    pub fn end_session(&mut self) {
+        self.fresh.clear();
     }
 
     /// Mark `pk` verified for `user` (and seen).
@@ -135,7 +163,34 @@ mod tests {
         let (a, b) = (pk(), pk());
         t.status(1, &a);
         assert_eq!(t.status(1, &b), KeyStatus::NewDevice);
+        assert_eq!(t.status(1, &b), KeyStatus::NewDevice);
         assert_eq!(t.status(1, &a), KeyStatus::Known);
+        t.end_session();
+        assert_eq!(t.status(1, &b), KeyStatus::Known);
+    }
+
+    #[test]
+    fn two_new_keys_in_one_read_are_both_new_device() {
+        let mut t = Trust::in_memory();
+        let (a, b, c) = (pk(), pk(), pk());
+        t.status(1, &a);
+        let r = t.statuses(&[(1, b.clone()), (1, c.clone())]);
+        assert_eq!(r, vec![KeyStatus::NewDevice, KeyStatus::NewDevice]);
+        assert_eq!(t.statuses(&[(1, b), (1, c)]), r);
+    }
+
+    #[test]
+    fn corrupt_file_is_kept_as_bad_and_starts_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trust-x.json");
+        std::fs::write(&path, b"{ nope").unwrap();
+        let mut t = Trust::open(path.clone());
+        assert_eq!(t.status(1, &pk()), KeyStatus::Known);
+        assert_eq!(std::fs::read(dir.path().join("trust-x.json.bad")).unwrap(), b"{ nope");
+        // An older .bad is overwritten.
+        std::fs::write(&path, b"again").unwrap();
+        Trust::open(path);
+        assert_eq!(std::fs::read(dir.path().join("trust-x.json.bad")).unwrap(), b"again");
     }
 
     #[test]

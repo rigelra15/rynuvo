@@ -63,6 +63,12 @@ pub fn run() {
                     if let voice::engine::VoiceEvent::State { muted, deafened, .. } = &e {
                         tray::update(&handle, *muted, *deafened);
                     }
+                    if let voice::engine::VoiceEvent::State { channel_id: None, .. } = &e {
+                        // Out of voice: keys first seen in that call stop counting as new.
+                        if let Some(t) = handle.try_state::<std::sync::Mutex<e2ee::trust::Trust>>() {
+                            t.lock().unwrap().end_session();
+                        }
+                    }
                     if matches!(e, voice::engine::VoiceEvent::E2eeChanged) {
                         let _ = handle.emit(voice_cmd::E2EE_EVENT, ());
                         return;
