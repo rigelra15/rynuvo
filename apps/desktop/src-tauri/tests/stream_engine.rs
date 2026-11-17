@@ -310,6 +310,8 @@ mod e2ee_lab {
         pub sent: Sent,
         bcast: Arc<Mutex<Option<Arc<Broadcast>>>>,
         watches: Arc<Mutex<HashMap<Id, Watch>>>,
+        /// Nets get no keys (and no test switch): nothing may be sent or shown.
+        pub keyless: bool,
     }
 
     impl Lab {
@@ -328,7 +330,7 @@ mod e2ee_lab {
                     (*u, Arc::new(Mutex::new(k)))
                 })
                 .collect();
-            Lab { keys: Arc::new(keys), sent: Arc::default(), bcast: Arc::default(), watches: Arc::default() }
+            Lab { keys: Arc::new(keys), sent: Arc::default(), bcast: Arc::default(), watches: Arc::default(), keyless: false }
         }
 
         fn route(&self, from: Id, to: Id, b: Vec<u8>) {
@@ -352,8 +354,9 @@ mod e2ee_lab {
                 relay: Arc::new(move |to, b| lab.route(me, to, b)),
                 stun: Vec::new(),
                 rt: tokio::runtime::Handle::current(),
-                keys: Some(self.keys[&me].clone()),
+                keys: (!self.keyless).then(|| self.keys[&me].clone()),
                 me,
+                unencrypted_for_tests: false,
             }
         }
 
@@ -520,7 +523,10 @@ async fn viewer_leave_rotates_stream_key() {
     lab.stop();
 
     let after: Vec<_> = lab.frames_to(B).into_iter().filter(|(at, _)| *at > left).collect();
-    assert!(after.iter().any(|(_, f)| f.key), "a key frame follows the rotation");
+    // The forced key frame is sealed under the new key (it waits for the key to become active).
+    let new_key = after.iter().find(|(_, f)| f.key && frame_generation(&f.data) == Some(gen0.wrapping_add(1)));
+    let (at, _) = new_key.expect("a key frame under the new key follows the rotation");
+    assert!(*at < left + Duration::from_millis(700), "promptly: {:?}", *at - left);
     let late: Vec<_> = after.iter().filter(|(at, _)| *at > left + Duration::from_secs(1)).collect();
     assert!(!late.is_empty());
     let now = std::time::Instant::now();
@@ -529,4 +535,27 @@ async fn viewer_leave_rotates_stream_key() {
         assert!(lab.keys[&B].lock().unwrap().open(&Lab::scope(), S, KIND_VIDEO, &f.data, now).is_some());
         assert!(lab.keys[&C].lock().unwrap().open(&Lab::scope(), S, KIND_VIDEO, &f.data, now).is_none(), "the viewer who left can't open new frames");
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn engine_without_keys_sends_nothing() {
+    use e2ee_lab::*;
+    use rynuvo_desktop_lib::stream::engine::{T_AUDIO, T_FEC, T_VIDEO};
+    const B: i64 = 2;
+    let mut lab = Lab::new(&[S, B]);
+    lab.keyless = true;
+    lab.go_live(synthetic_capture());
+    let (aus, out) = collector();
+    let _ = lab.watch(B, out);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    lab.stop();
+    let media = lab
+        .sent
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(from, _, _, m)| *from == S && matches!(m.first(), Some(&(T_VIDEO | T_AUDIO | T_FEC))))
+        .count();
+    assert_eq!(media, 0, "no media leaves without a stream key");
+    assert!(aus.lock().unwrap().is_empty());
 }

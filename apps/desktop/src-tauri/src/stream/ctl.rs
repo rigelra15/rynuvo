@@ -66,6 +66,7 @@ impl StreamCtl {
             rt: self.rt.clone(),
             keys: self.voice.e2ee_keys(),
             me: self.voice.me().unwrap_or(0),
+            unencrypted_for_tests: false,
         }
     }
 
@@ -80,6 +81,9 @@ impl StreamCtl {
     pub fn go_live(&self, source_id: &str, preset: &str) -> Result<(), String> {
         if self.voice.channel().is_none() {
             return Err("Join a voice channel first".into());
+        }
+        if self.voice.e2ee_keys().is_none() {
+            return Err("End-to-end encryption isn't ready yet".into());
         }
         self.stop_local();
         let p = engine::preset(preset);
@@ -122,6 +126,9 @@ impl StreamCtl {
     pub fn watch(&self, user_id: Id, codecs: Vec<String>, out: FrameOut) -> Result<(), String> {
         if self.voice.channel().is_none() {
             return Err("Join the voice channel to watch".into());
+        }
+        if self.voice.e2ee_keys().is_none() {
+            return Err("End-to-end encryption isn't ready yet".into());
         }
         let old = self.st.lock().unwrap().watches.insert(user_id, (Watch::new(user_id), Some(out)));
         if let Some((w, _)) = old {

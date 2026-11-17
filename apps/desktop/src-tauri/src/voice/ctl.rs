@@ -531,7 +531,7 @@ impl VoiceCtl {
             return;
         };
         let ws_session = session.clone();
-        let cfg = LinkCfg { host: s.host.clone(), udp_port, session: session_id, key, keys: Some(keys.clone()), channel: channel_id };
+        let cfg = LinkCfg { host: s.host.clone(), udp_port, session: session_id, key, keys: Some(keys.clone()), channel: channel_id, unencrypted_for_tests: false };
         let engine = Arc::new(VoiceEngine::start(
             (self.factory)(),
             self.opts(&s),

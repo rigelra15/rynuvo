@@ -382,7 +382,7 @@ async fn audio_is_end_to_end_encrypted() {
     };
     let swallow: WsSender = Arc::new(|_| {});
     let (down_tx, mut down) = mpsc::unbounded_channel();
-    let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port, session, key, keys: None, channel: ch };
+    let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port, session, key, keys: None, channel: ch, unencrypted_for_tests: true };
     let link = VoiceLink::start(cfg, swallow, down_tx);
     let (env_tx, mut env_rx) = mpsc::unbounded_channel();
     tokio::spawn(async move {

@@ -23,6 +23,12 @@ async fn until<T>(ws: &mut WsClient, mut f: impl FnMut(WsServerMsg) -> Option<T>
 
 /// Join voice over a test WebSocket and start a link; the WebSocket keeps carrying binary frames for the link.
 async fn client(app: &TestApp, nick: &str, ch: Option<i64>, udp_port_override: Option<u16>) -> (Client, i64) {
+    client_with(app, nick, ch, udp_port_override, true).await
+}
+
+/// `unencrypted`: no e2ee keys and audio passed as is (the relay-level checks here); false: a link
+/// with no keys at all, which must neither send nor play anything.
+async fn client_with(app: &TestApp, nick: &str, ch: Option<i64>, udp_port_override: Option<u16>, unencrypted: bool) -> (Client, i64) {
     let u = app.user(nick).await;
     let ch = match ch {
         Some(c) => c,
@@ -41,7 +47,7 @@ async fn client(app: &TestApp, nick: &str, ch: Option<i64>, udp_port_override: O
         let _ = ws_tx.send(b);
     });
     let (down_tx, down) = mpsc::unbounded_channel();
-    let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port: udp_port_override.unwrap_or(udp_port), session, key, keys: None, channel: 0 };
+    let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port: udp_port_override.unwrap_or(udp_port), session, key, keys: None, channel: 0, unencrypted_for_tests: unencrypted };
     let link = VoiceLink::start(cfg, sender, down_tx);
     let l2 = link.clone();
     let (json_tx, mut json_rx) = mpsc::unbounded_channel::<serde_json::Value>();
@@ -153,7 +159,7 @@ async fn dead_link_rebinds_and_asks_for_reconnect() {
     });
     let swallow: WsSender = Arc::new(|_| {});
     let (down_tx, _down) = mpsc::unbounded_channel();
-    let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port: port, session: 1, key: VoiceKey([1; 32]), keys: None, channel: 0 };
+    let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port: port, session: 1, key: VoiceKey([1; 32]), keys: None, channel: 0, unencrypted_for_tests: true };
     let link = VoiceLink::start(cfg, swallow, down_tx);
     let dead = Arc::new(AtomicUsize::new(0));
     let d2 = dead.clone();
@@ -194,4 +200,18 @@ async fn video_is_relayed_only_to_watchers() {
         }
     }
     panic!("video never arrived");
+}
+
+/// No media keys and no test switch: nothing is sealed to send, and plaintext audio is not played.
+#[tokio::test]
+async fn a_link_without_keys_sends_and_plays_nothing() {
+    let app = TestApp::spawn().await;
+    let (a, ch) = client(&app, "Dimas", None, None).await;
+    let (mut b, _) = client_with(&app, "Ayu", Some(ch), None, false).await;
+    assert!(b.link.seal_audio(b"opus").is_none(), "nothing to send without a key");
+    for _ in 0..20 {
+        a.link.send_audio(b"plain".to_vec());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(b.down.try_recv().is_err(), "unencrypted audio must not be played");
 }

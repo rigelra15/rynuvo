@@ -12,7 +12,7 @@ use rynuvo_proto::Id;
 /// How long a peer's replaced key still opens frames that were in flight.
 const PREVIOUS_KEY_TTL: Duration = Duration::from_secs(10);
 /// Delay between sending a new key's envelopes and sealing with it.
-const ACTIVATE_DELAY: Duration = Duration::from_millis(300);
+pub const ACTIVATE_DELAY: Duration = Duration::from_millis(300);
 /// How long a sender may go without a usable key before asking for one.
 const REQUEST_AFTER: Duration = Duration::from_secs(1);
 /// Minimum gap between two requests to the same sender.

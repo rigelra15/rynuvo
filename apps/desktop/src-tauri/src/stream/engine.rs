@@ -25,7 +25,7 @@ use rynuvo_proto::{
     voice_wire::VoiceKey,
 };
 
-use crate::e2ee::{Outgoing, SharedKeys};
+use crate::e2ee::{Outgoing, SharedKeys, state::ACTIVATE_DELAY};
 use serde::Serialize;
 use tokio::sync::mpsc;
 
@@ -57,6 +57,9 @@ pub const VIEWER_TIMEOUT: Duration = Duration::from_secs(8);
 const KEYREQ_EVERY: Duration = Duration::from_millis(400);
 /// Viewer: while frames can't be opened (no stream key yet), ask for a key frame at most this often.
 const UNREADABLE_KEYREQ_EVERY: Duration = Duration::from_millis(500);
+/// After a rotation, the key frame is forced this long after the new key becomes active, so it is
+/// sealed under the new key.
+const ROTATE_KEY_MARGIN: Duration = Duration::from_millis(50);
 const AUDIO_FRAME: usize = 960;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +110,9 @@ pub struct Net {
     pub keys: Option<SharedKeys>,
     /// My user id (the streamer's id names its stream scope).
     pub me: Id,
+    /// Tests only: with no `keys`, pass media unencrypted. Otherwise no keys means nothing is sent or shown.
+    #[doc(hidden)]
+    pub unencrypted_for_tests: bool,
 }
 
 impl Net {
@@ -201,6 +207,8 @@ struct BInner {
     preset: Preset,
     viewers: Mutex<HashMap<Id, ViewerConn>>,
     force_key: AtomicBool,
+    /// A key frame is due at this time (once the rotated stream key is in use).
+    key_at: Mutex<Option<Instant>>,
     stop: AtomicBool,
     audio_seq: AtomicU32,
     captured: AtomicU32,
@@ -215,7 +223,8 @@ impl BInner {
     /// Seal one frame or Opus chunk with my stream key. None: no key to seal with, don't send it.
     fn seal(&self, kind: u8, plain: Vec<u8>) -> Option<Vec<u8>> {
         match &self.net.keys {
-            None => Some(plain),
+            None if self.net.unencrypted_for_tests => Some(plain),
+            None => None,
             Some(k) => k.lock().unwrap().seal(&self.scope(), kind, &plain, Instant::now()),
         }
     }
@@ -263,6 +272,7 @@ impl Broadcast {
             preset,
             viewers: Mutex::new(HashMap::new()),
             force_key: AtomicBool::new(true),
+            key_at: Mutex::new(None),
             stop: AtomicBool::new(false),
             audio_seq: AtomicU32::new(0),
             captured: AtomicU32::new(0),
@@ -363,7 +373,7 @@ impl Broadcast {
             k.forget_peer(&scope, viewer);
             k.rotate(&scope, &rest, Instant::now())
         };
-        self.inner.force_key.store(true, Ordering::Relaxed);
+        *self.inner.key_at.lock().unwrap() = Some(Instant::now() + ACTIVATE_DELAY + ROTATE_KEY_MARGIN);
         out
     }
 
@@ -540,6 +550,13 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
             }
             continue; // nobody watching: capture keeps running, nothing is encoded or sent
         }
+        {
+            let mut at = inner.key_at.lock().unwrap();
+            if at.is_some_and(|t| Instant::now() >= t) {
+                *at = None;
+                inner.force_key.store(true, Ordering::Relaxed);
+            }
+        }
         let force = inner.force_key.load(Ordering::Relaxed);
         let idle = !fresh && last_new.elapsed() >= IDLE_REPEAT && last_sent.is_none_or(|t| t.elapsed() >= IDLE_REPEAT);
         if !fresh && !idle && !(force && last.is_some()) {
@@ -654,7 +671,7 @@ impl Watch {
         if let Some(old) = self.link.lock().unwrap().replace(link.clone()) {
             old.stop();
         }
-        net.rt.spawn(receive(self.streamer, net.keys.clone(), link, rx, out, audio, events, self.stop.clone()));
+        net.rt.spawn(receive(self.streamer, net.keys.clone(), net.unencrypted_for_tests, link, rx, out, audio, events, self.stop.clone()));
     }
 
     pub fn on_signal(&self, v: &serde_json::Value) {
@@ -689,10 +706,12 @@ impl Drop for Watch {
     }
 }
 
-/// Open a sealed frame or chunk from `streamer`. None: unreadable (no key yet, or tampered).
-fn open<'a>(keys: &Option<SharedKeys>, streamer: Id, kind: u8, ct: &'a [u8]) -> Option<Cow<'a, [u8]>> {
+/// Open a sealed frame or chunk from `streamer`. None: unreadable (no key yet, or tampered); without
+/// keys always None, unless a test asked for plaintext.
+fn open<'a>(keys: &Option<SharedKeys>, plain: bool, streamer: Id, kind: u8, ct: &'a [u8]) -> Option<Cow<'a, [u8]>> {
     match keys {
-        None => Some(Cow::Borrowed(ct)),
+        None if plain => Some(Cow::Borrowed(ct)),
+        None => None,
         Some(k) => k.lock().unwrap().open(&Scope::Stream(streamer), streamer, kind, ct, Instant::now()).map(Cow::Owned),
     }
 }
@@ -701,6 +720,7 @@ fn open<'a>(keys: &Option<SharedKeys>, streamer: Id, kind: u8, ct: &'a [u8]) -> 
 async fn receive(
     streamer: Id,
     keys: Option<SharedKeys>,
+    unencrypted: bool,
     link: PeerLink,
     mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
     out: FrameOut,
@@ -734,7 +754,7 @@ async fn receive(
                             link.send(&[T_KEYREQ]);
                         }
                         for a in ready {
-                            let data = open(&keys, streamer, KIND_VIDEO, &a.data);
+                            let data = open(&keys, unencrypted, streamer, KIND_VIDEO, &a.data);
                             if data.is_none() {
                                 unreadable = true;
                             }
@@ -758,7 +778,7 @@ async fn receive(
                         }
                     }
                     Some(&T_AUDIO) if m.len() > 5 => {
-                        if let (Some(d), Some(opus)) = (dec.as_mut(), open(&keys, streamer, KIND_STREAM_AUDIO, &m[5..])) {
+                        if let (Some(d), Some(opus)) = (dec.as_mut(), open(&keys, unencrypted, streamer, KIND_STREAM_AUDIO, &m[5..])) {
                             if let Ok(n) = d.decode_float(&opus, &mut pcm, false) {
                                 let mono: Vec<f32> = pcm[..n * 2].chunks_exact(2).map(|s| (s[0] + s[1]) * 0.5).collect();
                                 audio(streamer, mono);

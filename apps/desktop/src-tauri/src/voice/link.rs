@@ -42,10 +42,13 @@ pub struct LinkCfg {
     pub udp_port: u16,
     pub session: u32,
     pub key: VoiceKey,
-    /// Media keys for end-to-end encrypted audio in voice channel `channel`. None: audio is passed as is
-    /// (only tests and the relay-level link checks run like that).
+    /// Media keys for end-to-end encrypted audio in voice channel `channel`. None: nothing is sent or
+    /// played, unless `unencrypted_for_tests`.
     pub keys: Option<SharedKeys>,
     pub channel: Id,
+    /// Tests only (relay-level link checks): with no `keys`, audio is passed as is.
+    #[doc(hidden)]
+    pub unencrypted_for_tests: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +69,7 @@ struct Inner {
     session: u32,
     key: VoiceKey,
     keys: Option<SharedKeys>,
+    unencrypted: bool,
     scope: Scope,
     seq: AtomicU32,
     audio_seq: super::jitter::AudioClock,
@@ -93,6 +97,7 @@ impl VoiceLink {
             session: cfg.session,
             key: cfg.key.clone(),
             keys: cfg.keys.clone(),
+            unencrypted: cfg.unencrypted_for_tests,
             scope: Scope::Voice(cfg.channel),
             seq: AtomicU32::new(0),
             audio_seq: Default::default(),
@@ -125,11 +130,12 @@ impl VoiceLink {
     }
 
     /// Encrypt one Opus frame for the call. None: no key yet (send nothing, `skip_audio`).
-    /// Without e2ee keys the frame is returned as is.
+    /// Without e2ee keys nothing is sent (tests may opt into plaintext).
     pub fn seal_audio(&self, opus: &[u8]) -> Option<Vec<u8>> {
         match &self.inner.keys {
             Some(k) => k.lock().unwrap().seal(&self.inner.scope, KIND_VOICE, opus, Instant::now()),
-            None => Some(opus.to_vec()),
+            None if self.inner.unencrypted => Some(opus.to_vec()),
+            None => None,
         }
     }
 
@@ -210,7 +216,9 @@ impl Inner {
                         Some(p) => p,
                         None => return,
                     },
-                    None => body.to_vec(),
+                    None if self.unencrypted => body.to_vec(),
+                    // No keys: never play audio that wasn't end-to-end encrypted.
+                    None => return,
                 };
                 let _ = self.down.send(DownAudio { from: d.from_user, seq, payload });
             }
