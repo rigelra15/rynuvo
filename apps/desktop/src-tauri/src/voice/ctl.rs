@@ -138,7 +138,7 @@ impl VoiceCtl {
 
     pub fn join(&self, channel_id: Id) {
         self.st.lock().unwrap().want = Some(channel_id);
-        self.send(WsClientMsg::VoiceJoin { channel_id });
+        self.send(WsClientMsg::VoiceJoin { channel_id, pubkey: String::new() });
         self.notify();
     }
 
@@ -458,7 +458,7 @@ impl VoiceCtl {
                 // The old connection's voice session is gone with it: join again, same channel.
                 self.stop_engine();
                 if let Some(channel_id) = want {
-                    self.send(WsClientMsg::VoiceJoin { channel_id });
+                    self.send(WsClientMsg::VoiceJoin { channel_id, pubkey: String::new() });
                 }
             }
             WsServerMsg::VoiceJoined { channel_id, session, key, udp_port } => {

@@ -144,7 +144,7 @@ async fn run(
                             }
                         }
                         Ok(WsClientMsg::Ping) => if !send(socket, &WsServerMsg::Pong).await { return },
-                        Ok(WsClientMsg::VoiceJoin { channel_id }) => crate::voice::join(st, user_id, conn_id, channel_id).await,
+                        Ok(WsClientMsg::VoiceJoin { channel_id, .. }) => crate::voice::join(st, user_id, conn_id, channel_id).await,
                         Ok(WsClientMsg::VoiceLeave) => crate::voice::leave(st, user_id),
                         Ok(WsClientMsg::VoiceState { muted, deafened }) => crate::voice::set_state(st, user_id, muted, deafened),
                         Ok(WsClientMsg::VoiceKick { user_id: target }) => crate::voice::kick(st, user_id, is_admin, target).await,

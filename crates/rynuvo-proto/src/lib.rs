@@ -5,7 +5,9 @@ pub mod voice_wire;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
+/// Max length of a base64 key envelope relayed by the server.
+pub const MAX_ENVELOPE_B64: usize = 128;
 pub const CLOSE_AUTH_REVOKED: u16 = 4001;
 pub const CLOSE_PROTOCOL_OLD: u16 = 4002;
 
@@ -83,6 +85,9 @@ pub struct VoiceMember {
     /// Server time (ms) the call in this channel began: when someone joined it empty. 0 from older servers.
     #[serde(default)]
     pub call_since: i64,
+    /// Base64 X25519 public key for E2EE key exchange; empty from older clients.
+    #[serde(default)]
+    pub pubkey: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -319,7 +324,11 @@ pub enum WsClientMsg {
     Typing { channel_id: Id },
     Ping,
     #[serde(rename_all = "camelCase")]
-    VoiceJoin { channel_id: Id },
+    VoiceJoin { channel_id: Id, pubkey: String },
+    #[serde(rename_all = "camelCase")]
+    E2eeKey { to: Id, scope: e2ee::Scope, generation: u32, envelope: String },
+    #[serde(rename_all = "camelCase")]
+    E2eeKeyRequest { from: Id, scope: e2ee::Scope },
     VoiceLeave,
     #[serde(rename_all = "camelCase")]
     VoiceState { muted: bool, deafened: bool },
@@ -408,6 +417,10 @@ pub enum WsServerMsg {
     #[serde(rename_all = "camelCase")]
     StreamSignal { from: Id, data: serde_json::Value },
     MusicState(MusicState),
+    #[serde(rename_all = "camelCase")]
+    E2eeKey { from: Id, scope: e2ee::Scope, generation: u32, envelope: String },
+    #[serde(rename_all = "camelCase")]
+    E2eeKeyRequest { by: Id, scope: e2ee::Scope },
 }
 
 #[cfg(test)]
@@ -438,16 +451,38 @@ mod tests {
     }
 
     #[test]
+    fn e2ee_msgs_roundtrip() {
+        use crate::e2ee::Scope;
+        let m = WsClientMsg::E2eeKey { to: 7, scope: Scope::Stream(3), generation: 2, envelope: "AAAA".into() };
+        let v = serde_json::to_value(&m).unwrap();
+        assert_eq!(v, json!({"t":"e2eeKey","d":{"to":7,"scope":{"kind":"stream","id":3},"generation":2,"envelope":"AAAA"}}));
+        assert_eq!(serde_json::from_value::<WsClientMsg>(v).unwrap(), m);
+        let r = WsClientMsg::E2eeKeyRequest { from: 4, scope: Scope::Voice(9) };
+        assert_eq!(serde_json::from_value::<WsClientMsg>(serde_json::to_value(&r).unwrap()).unwrap(), r);
+        let s = WsServerMsg::E2eeKey { from: 1, scope: Scope::Stream(3), generation: 0, envelope: "x".into() };
+        assert_eq!(serde_json::from_value::<WsServerMsg>(serde_json::to_value(&s).unwrap()).unwrap(), s);
+        let q = WsServerMsg::E2eeKeyRequest { by: 2, scope: Scope::Voice(1) };
+        assert_eq!(serde_json::from_value::<WsServerMsg>(serde_json::to_value(&q).unwrap()).unwrap(), q);
+        assert_eq!(PROTOCOL_VERSION, 4);
+    }
+
+    #[test]
+    fn voice_member_without_pubkey_defaults_empty() {
+        let m: VoiceMember = serde_json::from_value(json!({"userId":1,"channelId":2,"muted":false,"deafened":false})).unwrap();
+        assert_eq!(m.pubkey, "");
+    }
+
+    #[test]
     fn voice_msgs_shape() {
-        let v = serde_json::to_value(WsClientMsg::VoiceJoin { channel_id: 5 }).unwrap();
-        assert_eq!(v, json!({"t":"voiceJoin","d":{"channelId":5}}));
+        let v = serde_json::to_value(WsClientMsg::VoiceJoin { channel_id: 5, pubkey: "pk".into() }).unwrap();
+        assert_eq!(v, json!({"t":"voiceJoin","d":{"channelId":5,"pubkey":"pk"}}));
         let v = serde_json::to_value(WsClientMsg::VoiceState { muted: true, deafened: false }).unwrap();
         assert_eq!(v, json!({"t":"voiceState","d":{"muted":true,"deafened":false}}));
         let leave: WsClientMsg = serde_json::from_str(r#"{"t":"voiceLeave"}"#).unwrap();
         assert_eq!(leave, WsClientMsg::VoiceLeave);
-        let m = VoiceMember { user_id: 1, channel_id: 2, muted: false, deafened: true, joined_at: 10, call_since: 5 };
+        let m = VoiceMember { user_id: 1, channel_id: 2, muted: false, deafened: true, joined_at: 10, call_since: 5, pubkey: String::new() };
         let v = serde_json::to_value(WsServerMsg::VoiceMemberUpdated(m)).unwrap();
-        assert_eq!(v, json!({"t":"voiceMemberUpdated","d":{"userId":1,"channelId":2,"muted":false,"deafened":true,"joinedAt":10,"callSince":5}}));
+        assert_eq!(v, json!({"t":"voiceMemberUpdated","d":{"userId":1,"channelId":2,"muted":false,"deafened":true,"joinedAt":10,"callSince":5,"pubkey":""}}));
         let old: VoiceMember = serde_json::from_value(json!({"userId":1,"channelId":2,"muted":false,"deafened":true})).unwrap();
         assert_eq!((old.joined_at, old.call_since), (0, 0));
         let v = serde_json::to_value(WsServerMsg::VoiceJoined { channel_id: 2, session: 9, key: "k".into(), udp_port: 3478 }).unwrap();
@@ -473,7 +508,7 @@ mod tests {
     fn ws_client_hello_roundtrip() {
         let m = WsClientMsg::Hello { token: "abc".into(), protocol: PROTOCOL_VERSION };
         let s = serde_json::to_string(&m).unwrap();
-        assert_eq!(s, r#"{"t":"hello","d":{"token":"abc","protocol":3}}"#);
+        assert_eq!(s, r#"{"t":"hello","d":{"token":"abc","protocol":4}}"#);
         assert_eq!(serde_json::from_str::<WsClientMsg>(&s).unwrap(), m);
         let ping: WsClientMsg = serde_json::from_str(r#"{"t":"ping"}"#).unwrap();
         assert_eq!(ping, WsClientMsg::Ping);

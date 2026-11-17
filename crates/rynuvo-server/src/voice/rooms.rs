@@ -67,7 +67,7 @@ impl Member {
     }
 
     pub fn public(&self) -> VoiceMember {
-        VoiceMember { user_id: self.user_id, channel_id: self.channel_id, muted: self.muted, deafened: self.deafened, joined_at: self.joined_at, call_since: self.call_since }
+        VoiceMember { user_id: self.user_id, channel_id: self.channel_id, muted: self.muted, deafened: self.deafened, joined_at: self.joined_at, call_since: self.call_since, pubkey: String::new() }
     }
 }
 

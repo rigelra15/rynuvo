@@ -166,7 +166,7 @@ async fn session_routes_binary_frames() {
     wait_for(&ev, |e| e.iter().any(|x| matches!(x, SessionEvent::Conn(ConnState::Online)))).await;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     h.set_binary_sink(Some(tx));
-    h.send(WsClientMsg::VoiceJoin { channel_id: v.id });
+    h.send(WsClientMsg::VoiceJoin { channel_id: v.id, pubkey: String::new() });
     wait_for(&ev, |e| e.iter().any(|x| matches!(x, SessionEvent::Server(WsServerMsg::VoiceJoined { .. })))).await;
     let (session, key) = ev
         .lock()
