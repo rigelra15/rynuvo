@@ -10,6 +10,7 @@ use std::{
 
 use rynuvo_proto::{
     Id,
+    e2ee::{KIND_VOICE, Scope},
     voice_wire::{DOWN_AUDIO, DOWN_KEEPALIVE_ACK, DOWN_VIDEO, UP_AUDIO, UP_KEEPALIVE, UP_VIDEO, VoiceKey, open_down, seal_up},
 };
 use serde::Serialize;
@@ -17,6 +18,8 @@ use tokio::{
     net::UdpSocket,
     sync::{mpsc, watch},
 };
+
+use crate::e2ee::SharedKeys;
 
 /// No UDP acknowledgement for this long → switch to the WebSocket path.
 pub const UDP_SILENCE: Duration = Duration::from_secs(3);
@@ -33,12 +36,16 @@ pub type WsSender = Arc<dyn Fn(Vec<u8>) + Send + Sync>;
 /// Relayed Go Live data: (other user, payload).
 pub type VideoSink = Arc<dyn Fn(Id, &[u8]) + Send + Sync>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LinkCfg {
     pub host: String,
     pub udp_port: u16,
     pub session: u32,
     pub key: VoiceKey,
+    /// Media keys for end-to-end encrypted audio in voice channel `channel`. None: audio is passed as is
+    /// (only tests and the relay-level link checks run like that).
+    pub keys: Option<SharedKeys>,
+    pub channel: Id,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +65,8 @@ pub enum LinkPath {
 struct Inner {
     session: u32,
     key: VoiceKey,
+    keys: Option<SharedKeys>,
+    scope: Scope,
     seq: AtomicU32,
     audio_seq: super::jitter::AudioClock,
     /// 0 = UDP, 1 = WebSocket
@@ -83,6 +92,8 @@ impl VoiceLink {
         let inner = Arc::new(Inner {
             session: cfg.session,
             key: cfg.key.clone(),
+            keys: cfg.keys.clone(),
+            scope: Scope::Voice(cfg.channel),
             seq: AtomicU32::new(0),
             audio_seq: Default::default(),
             path: AtomicU8::new(0),
@@ -111,6 +122,15 @@ impl VoiceLink {
         p.extend_from_slice(&n.to_be_bytes());
         p.extend_from_slice(&opus);
         self.inner.send(UP_AUDIO, &p, self.path());
+    }
+
+    /// Encrypt one Opus frame for the call. None: no key yet (send nothing, `skip_audio`).
+    /// Without e2ee keys the frame is returned as is.
+    pub fn seal_audio(&self, opus: &[u8]) -> Option<Vec<u8>> {
+        match &self.inner.keys {
+            Some(k) => k.lock().unwrap().seal(&self.inner.scope, KIND_VOICE, opus, Instant::now()),
+            None => Some(opus.to_vec()),
+        }
     }
 
     /// A 20 ms frame passed without audio (voice gate closed or muted): keeps the frame counter on time.
@@ -183,7 +203,16 @@ impl Inner {
             }
             DOWN_AUDIO if d.payload.len() >= 4 => {
                 let seq = u32::from_be_bytes(d.payload[..4].try_into().unwrap());
-                let _ = self.down.send(DownAudio { from: d.from_user, seq, payload: d.payload[4..].to_vec() });
+                let body = &d.payload[4..];
+                let payload = match &self.keys {
+                    // A frame that does not open is dropped: the jitter buffer conceals it as lost.
+                    Some(k) => match k.lock().unwrap().open(&self.scope, d.from_user, KIND_VOICE, body, Instant::now()) {
+                        Some(p) => p,
+                        None => return,
+                    },
+                    None => body.to_vec(),
+                };
+                let _ = self.down.send(DownAudio { from: d.from_user, seq, payload });
             }
             DOWN_VIDEO => {
                 let sink = self.video.lock().unwrap().clone();

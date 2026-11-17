@@ -104,6 +104,7 @@ impl Core {
         });
         let server = api.base();
         let host = url::Url::parse(&server).ok().and_then(|u| u.host_str().map(|h| h.trim_matches(['[', ']']).to_string())).unwrap_or_default();
+        self.voice.set_device(crate::e2ee::device::load_or_create(&*self.store, &server));
         let s = Session::start(api.clone(), self.store.clone(), server, emit);
         self.voice.attach(s.clone(), host);
         g.session = Some(s);

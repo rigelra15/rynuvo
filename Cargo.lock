@@ -4705,6 +4705,7 @@ version = "0.8.3"
 dependencies = [
  "anyhow",
  "apple-cf",
+ "base64 0.22.1",
  "block2",
  "cpal",
  "futures-util",

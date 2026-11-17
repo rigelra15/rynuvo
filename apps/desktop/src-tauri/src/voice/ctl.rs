@@ -3,9 +3,15 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
-use rynuvo_proto::{Id, VoiceMember, WsClientMsg, WsServerMsg, voice_wire::VoiceKey};
+use base64::{Engine, engine::general_purpose::STANDARD as B64};
+use rynuvo_proto::{
+    Id, VoiceMember, WsClientMsg, WsServerMsg,
+    e2ee::{DeviceKey, PublicKey, Scope},
+    voice_wire::VoiceKey,
+};
 use tokio::sync::mpsc;
 
 use super::{
@@ -13,7 +19,13 @@ use super::{
     engine::{EngineOpts, EventSink, Tone, VoiceEngine, VoiceEvent},
     link::{LinkCfg, VideoSink},
 };
-use crate::core::session::{SessionEvent, SessionHandle};
+use crate::{
+    core::session::{SessionEvent, SessionHandle},
+    e2ee::{KeyState, Outgoing, SharedKeys},
+};
+
+/// How often missing media keys are asked for again while in voice.
+const KEY_REQUEST_TICK: Duration = Duration::from_millis(250);
 
 pub type BackendFactory = Arc<dyn Fn() -> Box<dyn AudioBackend> + Send + Sync>;
 
@@ -60,6 +72,35 @@ struct State {
     prefs: AudioPrefs,
     /// Where relayed Go Live data goes (the stream controller); survives engine restarts.
     video_sink: Option<VideoSink>,
+    /// This device's identity key (from the keychain). Without one, a key for this run is made.
+    device: Option<DeviceKey>,
+    /// Media keys, made for the user id beside them.
+    keys: Option<(Id, SharedKeys)>,
+}
+
+impl State {
+    fn device(&mut self) -> &DeviceKey {
+        self.device.get_or_insert_with(DeviceKey::generate)
+    }
+
+    /// The media-key state, made on first use once my user id is known.
+    fn keys(&mut self) -> Option<SharedKeys> {
+        let me = self.me?;
+        if self.keys.as_ref().is_none_or(|(m, _)| *m != me) {
+            let dev = self.device().clone();
+            self.keys = Some((me, Arc::new(Mutex::new(KeyState::new(me, dev)))));
+        }
+        self.keys.as_ref().map(|(_, k)| k.clone())
+    }
+
+    /// Everyone else in voice channel `ch`, with their device keys.
+    fn others_in(&self, ch: Id) -> Vec<(Id, String)> {
+        self.members
+            .iter()
+            .filter(|m| m.channel_id == ch && Some(m.user_id) != self.me)
+            .map(|m| (m.user_id, m.pubkey.clone()))
+            .collect()
+    }
 }
 
 #[derive(Clone)]
@@ -125,6 +166,83 @@ impl VoiceCtl {
         self.st.lock().unwrap().want
     }
 
+    /// This device's end-to-end encryption identity key (see `e2ee::device`). Set it before `attach`.
+    pub fn set_device(&self, key: DeviceKey) {
+        let mut s = self.st.lock().unwrap();
+        s.device = Some(key);
+        s.keys = None;
+    }
+
+    fn voice_join(&self, channel_id: Id) {
+        let pubkey = self.st.lock().unwrap().device().public().to_b64();
+        self.send(WsClientMsg::VoiceJoin { channel_id, pubkey });
+    }
+
+    fn send_keys(&self, out: Vec<Outgoing>) {
+        for o in out {
+            let envelope = B64.encode(&o.envelope);
+            self.send(WsClientMsg::E2eeKey { to: o.to, scope: o.scope, generation: o.generation, envelope });
+        }
+    }
+
+    /// My engine for `ch` just started: learn everyone's device key, send them my (new) media key, and
+    /// ask for theirs (after a reconnect on the same device nobody else sees a change to react to).
+    fn e2ee_start(&self, ch: Id) {
+        let (keys, others) = {
+            let mut s = self.st.lock().unwrap();
+            (s.keys(), s.others_in(ch))
+        };
+        let Some(keys) = keys else { return };
+        let scope = Scope::Voice(ch);
+        let ids: Vec<Id> = others.iter().map(|(u, _)| *u).collect();
+        let out = {
+            let mut k = keys.lock().unwrap();
+            for (u, pk) in &others {
+                k.forget_peer(&scope, *u);
+                if let Some(pk) = PublicKey::from_b64(pk) {
+                    k.set_peer_pubkey(*u, pk);
+                }
+            }
+            k.share_current(&scope, &ids, Instant::now())
+        };
+        self.send_keys(out);
+        for from in ids {
+            self.send(WsClientMsg::E2eeKeyRequest { from, scope: scope.clone() });
+        }
+    }
+
+    /// `user` appeared in my call: start them fresh and send them my current key (no rotation).
+    fn e2ee_joined(&self, ch: Id, user: Id, pubkey: &str) {
+        let Some(keys) = self.st.lock().unwrap().keys() else { return };
+        let scope = Scope::Voice(ch);
+        let out = {
+            let mut k = keys.lock().unwrap();
+            k.forget_peer(&scope, user);
+            if let Some(pk) = PublicKey::from_b64(pubkey) {
+                k.set_peer_pubkey(user, pk);
+            }
+            k.share_current(&scope, &[user], Instant::now())
+        };
+        self.send_keys(out);
+    }
+
+    /// `user` left my call: drop their keys and give everyone left a new key of mine.
+    fn e2ee_left(&self, ch: Id, user: Id) {
+        let (keys, others) = {
+            let mut s = self.st.lock().unwrap();
+            (s.keys(), s.others_in(ch))
+        };
+        let Some(keys) = keys else { return };
+        let scope = Scope::Voice(ch);
+        let ids: Vec<Id> = others.into_iter().map(|(u, _)| u).filter(|u| *u != user).collect();
+        let out = {
+            let mut k = keys.lock().unwrap();
+            k.forget_peer(&scope, user);
+            k.rotate(&scope, &ids, Instant::now())
+        };
+        self.send_keys(out);
+    }
+
     /// Any message on the current session (used by the stream controller).
     pub fn send_ws(&self, m: WsClientMsg) {
         self.send(m);
@@ -138,7 +256,7 @@ impl VoiceCtl {
 
     pub fn join(&self, channel_id: Id) {
         self.st.lock().unwrap().want = Some(channel_id);
-        self.send(WsClientMsg::VoiceJoin { channel_id, pubkey: String::new() });
+        self.voice_join(channel_id);
         self.notify();
     }
 
@@ -366,11 +484,16 @@ impl VoiceCtl {
 
     /// Stop the engine; with a `farewell` sound, play it first and stop once it has rung out.
     fn stop_engine_after(&self, farewell: Option<Tone>) {
-        let (engine, session) = {
+        let (engine, session, forget) = {
             let mut s = self.st.lock().unwrap();
-            s.engine_channel = None;
-            (s.engine.take(), s.session.clone())
+            let ch = s.engine_channel.take();
+            let keys = s.keys.as_ref().map(|(_, k)| k.clone());
+            (s.engine.take(), s.session.clone(), ch.zip(keys))
         };
+        // A new engine makes a new key; nothing of this call's keys is kept.
+        if let Some((ch, k)) = forget {
+            k.lock().unwrap().forget_scope(&Scope::Voice(ch));
+        }
         if let Some(se) = session {
             se.set_binary_sink(None);
         }
@@ -397,8 +520,12 @@ impl VoiceCtl {
         }
         let mut s = self.st.lock().unwrap();
         let Some(session) = s.session.clone() else { return };
+        let Some(keys) = s.keys() else {
+            tracing::warn!("voice: joined before the session was ready");
+            return;
+        };
         let ws_session = session.clone();
-        let cfg = LinkCfg { host: s.host.clone(), udp_port, session: session_id, key };
+        let cfg = LinkCfg { host: s.host.clone(), udp_port, session: session_id, key, keys: Some(keys.clone()), channel: channel_id };
         let engine = Arc::new(VoiceEngine::start(
             (self.factory)(),
             self.opts(&s),
@@ -422,6 +549,21 @@ impl VoiceCtl {
                 match weak.upgrade() {
                     Some(e) => e.feed_ws(&b),
                     None => return,
+                }
+            }
+        });
+        // Ask senders whose frames I can't open for their key, until this engine is gone.
+        let (weak, rs) = (Arc::downgrade(&engine), session.clone());
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(KEY_REQUEST_TICK);
+            loop {
+                tick.tick().await;
+                if weak.strong_count() == 0 {
+                    return;
+                }
+                let due = keys.lock().unwrap().due_requests(Instant::now());
+                for (scope, from) in due {
+                    rs.send(WsClientMsg::E2eeKeyRequest { from, scope });
                 }
             }
         });
@@ -458,7 +600,7 @@ impl VoiceCtl {
                 // The old connection's voice session is gone with it: join again, same channel.
                 self.stop_engine();
                 if let Some(channel_id) = want {
-                    self.send(WsClientMsg::VoiceJoin { channel_id, pubkey: String::new() });
+                    self.voice_join(channel_id);
                 }
             }
             WsServerMsg::VoiceJoined { channel_id, session, key, udp_port } => {
@@ -474,6 +616,7 @@ impl VoiceCtl {
                     return;
                 };
                 self.start_engine(*channel_id, *session, key, *udp_port);
+                self.e2ee_start(*channel_id);
                 if muted || deafened {
                     self.send(WsClientMsg::VoiceState { muted, deafened });
                 }
@@ -503,6 +646,7 @@ impl VoiceCtl {
                         e.remove_peer(*user_id);
                         e.play_tone(Tone::Leave);
                     }
+                    self.e2ee_left(*channel_id, *user_id);
                 }
             }
             WsServerMsg::StreamStarted(info) => {
@@ -526,6 +670,24 @@ impl VoiceCtl {
                     if let Some(e) = engine {
                         e.play_tone(Tone::Join);
                     }
+                    self.e2ee_joined(m.channel_id, m.user_id, &m.pubkey);
+                }
+            }
+            WsServerMsg::E2eeKey { from, scope, generation, envelope } => {
+                let Ok(env) = B64.decode(envelope) else { return };
+                let Some(keys) = self.st.lock().unwrap().keys() else { return };
+                keys.lock().unwrap().on_envelope(*from, scope, *generation, &env, Instant::now());
+            }
+            WsServerMsg::E2eeKeyRequest { by, scope } => {
+                // Only for the call my engine is in, and only to someone in it.
+                let keys = {
+                    let mut s = self.st.lock().unwrap();
+                    let ok = matches!(scope, Scope::Voice(ch) if s.engine_channel == Some(*ch) && s.others_in(*ch).iter().any(|(u, _)| u == by));
+                    if ok { s.keys() } else { None }
+                };
+                if let Some(keys) = keys {
+                    let out = keys.lock().unwrap().share_current(scope, &[*by], Instant::now());
+                    self.send_keys(out);
                 }
             }
             _ => {}

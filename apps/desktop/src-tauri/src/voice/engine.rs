@@ -432,7 +432,10 @@ impl Worker {
         }
         if let Some(link) = &self.link {
             match self.enc.as_mut() {
-                Some(enc) if self.open && !self.muted => link.send_audio(enc.encode(&self.frame)),
+                Some(enc) if self.open && !self.muted => match link.seal_audio(&enc.encode(&self.frame)) {
+                    Some(ct) => link.send_audio(ct),
+                    None => link.skip_audio(),
+                },
                 _ => link.skip_audio(),
             }
         }

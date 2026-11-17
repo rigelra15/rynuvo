@@ -48,7 +48,7 @@ async fn rig(threshold: f32, with_link: bool) -> Rig {
     let ws: WsSender = Arc::new(|_| {});
     let (udp, link) = if with_link {
         let s = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-        let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port: s.local_addr().unwrap().port(), session: 9, key: VoiceKey::random() };
+        let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port: s.local_addr().unwrap().port(), session: 9, key: VoiceKey::random(), keys: None, channel: 0 };
         (Some(s), Some(cfg))
     } else {
         (None, None)

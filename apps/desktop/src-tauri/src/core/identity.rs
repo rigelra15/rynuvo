@@ -5,6 +5,17 @@ pub trait SecretStore: Send + Sync {
     fn get(&self, server: &str) -> Option<String>;
     fn set(&self, server: &str, token: &str);
     fn clear(&self, server: &str);
+    /// This device's end-to-end encryption private key (base64), in the entry `<server>#e2ee`.
+    fn get_e2ee(&self, server: &str) -> Option<String> {
+        self.get(&e2ee_entry(server))
+    }
+    fn set_e2ee(&self, server: &str, b64: &str) {
+        self.set(&e2ee_entry(server), b64)
+    }
+}
+
+fn e2ee_entry(server: &str) -> String {
+    format!("{server}#e2ee")
 }
 
 /// OS keychain (macOS Keychain / Windows Credential Manager).

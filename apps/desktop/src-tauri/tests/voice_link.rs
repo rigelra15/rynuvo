@@ -30,7 +30,7 @@ async fn client(app: &TestApp, nick: &str, ch: Option<i64>, udp_port_override: O
     };
     let mut ws = app.ws(&u.token).await;
     until(&mut ws, |m| matches!(m, WsServerMsg::Ready { .. }).then_some(())).await;
-    ws.send_json(json!({"t":"voiceJoin","d":{"channelId":ch}})).await;
+    ws.send_json(json!({"t":"voiceJoin","d":{"channelId":ch,"pubkey":rynuvo_proto::e2ee::DeviceKey::generate().public().to_b64()}})).await;
     let (session, key, udp_port) = until(&mut ws, |m| match m {
         WsServerMsg::VoiceJoined { session, key, udp_port, .. } => Some((session, VoiceKey::from_b64(&key).unwrap(), udp_port)),
         _ => None,
@@ -41,7 +41,7 @@ async fn client(app: &TestApp, nick: &str, ch: Option<i64>, udp_port_override: O
         let _ = ws_tx.send(b);
     });
     let (down_tx, down) = mpsc::unbounded_channel();
-    let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port: udp_port_override.unwrap_or(udp_port), session, key };
+    let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port: udp_port_override.unwrap_or(udp_port), session, key, keys: None, channel: 0 };
     let link = VoiceLink::start(cfg, sender, down_tx);
     let l2 = link.clone();
     let (json_tx, mut json_rx) = mpsc::unbounded_channel::<serde_json::Value>();
@@ -153,7 +153,7 @@ async fn dead_link_rebinds_and_asks_for_reconnect() {
     });
     let swallow: WsSender = Arc::new(|_| {});
     let (down_tx, _down) = mpsc::unbounded_channel();
-    let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port: port, session: 1, key: VoiceKey([1; 32]) };
+    let cfg = LinkCfg { host: "127.0.0.1".into(), udp_port: port, session: 1, key: VoiceKey([1; 32]), keys: None, channel: 0 };
     let link = VoiceLink::start(cfg, swallow, down_tx);
     let dead = Arc::new(AtomicUsize::new(0));
     let d2 = dead.clone();
