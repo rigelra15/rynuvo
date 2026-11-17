@@ -17,9 +17,8 @@
     </div>
   </div>
   <div class="find">
-    <SongSearch glass autofocus={false} />
+    <SongSearch glass keep autofocus={false} />
   </div>
-  <p class="tip">Or type <code>!p</code> and a song in the chat</p>
 </aside>
 
 <style>
@@ -48,6 +47,4 @@
   .sub { color: rgba(255, 255, 255, 0.75); font-size: 13px; line-height: 1.4; }
   .find { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .find :global(.ss) { flex: 1; }
-  .tip { margin: 0; font-size: 12px; color: rgba(255, 255, 255, 0.55); }
-  .tip code { font: inherit; font-weight: 700; color: rgba(255, 255, 255, 0.8); }
 </style>

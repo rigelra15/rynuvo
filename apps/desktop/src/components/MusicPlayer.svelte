@@ -209,7 +209,7 @@
   <div class="below">
     {#if store.queueOpen || now.video}
       <div class="queue">
-        <div class="add"><SongSearch glass autofocus={false} /></div>
+        <div class="add"><SongSearch glass keep autofocus={false} /></div>
         <h3>Queue</h3>
         {#if !s.queue.length}<p class="empty">The queue is empty</p>{/if}
         <ol>

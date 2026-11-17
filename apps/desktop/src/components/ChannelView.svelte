@@ -28,6 +28,13 @@
   let showMembers = $state(false)
   const joinedHere = $derived(channel.kind === 'voice' && store.inVoice(channel.id))
   const music = $derived(channel.kind === 'voice' ? store.musicIn(channel.id) : null)
+  // The call's encryption details exist only for the call I'm in.
+  const sec = $derived(joinedHere ? store.security : null)
+  const codeGroups = $derived(sec ? sec.code.split(/\s+/).filter(Boolean) : [])
+  let showCode = $state(false)
+  $effect(() => {
+    if (!sec) showCode = false
+  })
   const inRoom = $derived(channel.kind === 'voice' ? membersOf(store.voice, channel.id).length : 0)
 </script>
 
@@ -43,7 +50,22 @@
   {:else}
     <span class="ico"><Icon name="volume" size={22} /></span>
     <h1 class="title-xl">{channel.name}</h1>
-    {#if inRoom}<span class="topic">{inRoom} inside<CallTimer channelId={channel.id} prefix=", going for " /></span>{/if}
+    {#if inRoom}
+      <span class="callchip">
+        <button class="chip" class:open={showCode} disabled={!sec} aria-expanded={sec ? showCode : undefined}
+          title={sec ? 'End-to-end encrypted. Click for the call code' : 'End-to-end encrypted'}
+          onclick={() => (showCode = !showCode)}>
+          <Icon name="lock" size={12} /><CallTimer channelId={channel.id} />
+        </button>
+        {#if showCode && sec}
+          <div class="codepop" role="dialog" aria-label="Call code" transition:fly={{ y: -4, duration: 160 }}>
+            <b>End-to-end encrypted</b>
+            <div class="code">{#each codeGroups as g}<span>{g}</span>{/each}</div>
+            <p>Everyone in this call sees the same code.</p>
+          </div>
+        {/if}
+      </span>
+    {/if}
     {#if joinedHere}
       <div class="tools">
         <!-- One control: while the panel is hidden and a song plays, the mini player stands in for the button. -->
@@ -88,6 +110,14 @@
   }
   .top.compact h1 { font-size: 22px; }
   h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .callchip { position: relative; flex: none; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--elev-2); border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; font-weight: 600; }
+  .chip:not(:disabled):hover, .chip.open { color: var(--text); border-color: #43384f; }
+  .chip:disabled { cursor: default; opacity: 1; }
+  .codepop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 40; width: 300px; padding: 12px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35); }
+  .codepop b { font-size: 13px; }
+  .codepop .code { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 2px 10px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 13px; font-variant-numeric: tabular-nums; user-select: text; }
+  .codepop p { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
   .topic { color: var(--muted); font-size: 13.5px; padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .crowd { margin-left: auto; flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 5px; border-radius: 999px; background: var(--elev-2); border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; font-weight: 600; }
   .crowd:hover, .crowd.active { color: var(--text); border-color: #43384f; }

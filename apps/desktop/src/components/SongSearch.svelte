@@ -1,3 +1,11 @@
+<script lang="ts" module>
+  import type { SongResult as Song } from '../lib/music'
+  // The music panel's search outlives the panel itself: when a song ends and the panel switches
+  // between the player and the idle view, what I was typing and its results stay.
+  const kept = $state({ text: '', results: [] as Song[], focused: false, caret: 0 })
+  const recent = new Map<string, Song[]>()
+</script>
+
 <script lang="ts">
   // Search YouTube Music and queue a song in my voice channel. Used in the chat composer's picker
   // and in the empty music panel.
@@ -14,6 +22,7 @@
     glass = false,
     autofocus = true,
     query = null,
+    keep = false,
   }: {
     textChannelId?: Id | null
     onPlayed?: () => void
@@ -22,13 +31,17 @@
     autofocus?: boolean
     /** Search this text instead of an own search box (the chat's "!p …" being typed). */
     query?: string | null
+    /** Share the typed text and results with the other music-panel search (see `kept`). */
+    keep?: boolean
   } = $props()
 
   const voice = $derived(store.myVoice.channelId)
   const voiceName = $derived(store.channels.find((c) => c.id === voice)?.name ?? 'voice')
-  let own = $state('')
+  // svelte-ignore state_referenced_locally
+  let own = $state(keep ? kept.text : '')
   const q = $derived(query ?? own)
-  let results = $state<SongResult[]>([])
+  // svelte-ignore state_referenced_locally
+  let results = $state<SongResult[]>(keep ? kept.results : [])
   let busy = $state(false)
   let error = $state<string | null>(null)
   let pick = $state(0)
@@ -38,6 +51,25 @@
   $effect(() => {
     if (autofocus) input?.focus()
   })
+
+  $effect(() => {
+    if (!keep) return
+    kept.text = own
+    kept.results = results
+  })
+  // Typing when the panel swapped under me: keep the caret where it was.
+  $effect(() => {
+    if (keep && kept.focused && input) {
+      input.focus()
+      input.setSelectionRange(kept.caret, kept.caret)
+    }
+  })
+  function remember() {
+    if (keep && input) {
+      kept.focused = document.activeElement === input
+      kept.caret = input.selectionStart ?? own.length
+    }
+  }
 
   // Search as you type, after a short pause.
   let seq = 0
@@ -50,11 +82,22 @@
       return
     }
     const mine = ++seq
+    const hit = recent.get(term)
+    if (hit) {
+      results = hit
+      busy = false
+      return
+    }
     busy = true
     const t = setTimeout(() => {
       api.musicSearch(term).then(
         // Songs first, then music videos: the keys walk them in the order they are shown.
-        (r) => { if (mine === seq) { results = [...r.filter((x) => !x.video), ...r.filter((x) => x.video)]; pick = 0; busy = false } },
+        (r) => {
+          const sorted = [...r.filter((x) => !x.video), ...r.filter((x) => x.video)]
+          recent.set(term, sorted)
+          if (recent.size > 30) recent.delete(recent.keys().next().value!)
+          if (mine === seq) { results = sorted; pick = 0; busy = false }
+        },
         (e) => { if (mine === seq) { error = String(e); results = []; busy = false } },
       )
     }, 350)
@@ -93,7 +136,7 @@
   {#if query === null}
     <div class="search">
       <Icon name="music" size={16} />
-      <input bind:this={input} bind:value={own} onkeydown={key} placeholder="Search a song or artist" aria-label="Search a song or artist" />
+      <input bind:this={input} bind:value={own} onkeydown={key} onkeyup={remember} onfocus={remember} onblur={() => { if (keep && input?.isConnected) kept.focused = false }} oninput={remember} placeholder="Search a song or artist" aria-label="Search a song or artist" />
       {#if busy}<span class="spin" aria-label="Searching"></span>{/if}
     </div>
   {:else}

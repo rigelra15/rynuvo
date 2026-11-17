@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { avatarColor } from '../lib/avatar'
   import Avatar from './Avatar.svelte'
   import { store } from '../lib/state.svelte'
   import { membersOf } from '../lib/voice'
@@ -78,6 +79,7 @@
               transition:pop
               class="seat"
               class:talk={talking}
+              style="--uc:{avatarColor(store.user(m.userId) ?? { id: m.userId })}"
               class:me={mine}
               class:screen={streaming && !strip}
               class:watchable={streaming && !mine}
@@ -95,7 +97,7 @@
                     {:else if m.muted}<span class="state sm" title="Muted"><Icon name="micOff" size={10} /></span>{/if}
                   </span>
                   {#if mine}
-                    <span class="tvl">You're sharing your screen{store.live?.viewers.length ? `, ${store.live.viewers.length} watching` : ''}</span>
+                    <span class="tvl">You're sharing your screen{#if store.live?.viewers.length}<span class="eyes" title="{store.live.viewers.length} watching"><Icon name="eye" size={14} />{store.live.viewers.length}</span>{/if}</span>
                   {:else}
                     <button class="watch" onclick={(e) => { e.stopPropagation(); open(m.userId) }}><Icon name="screen" size={15} /> Watch</button>
                   {/if}
@@ -134,7 +136,7 @@
     <div class="dock-row">
       {#if store.voicePath === 'ws' || store.live}
         <p class="path">
-          {#if store.live}You're live{store.live.viewers.length ? `, ${store.live.viewers.length} watching` : ''}{store.live.codec ? ` (${store.live.codec.toUpperCase()}${store.live.relay ? ', via server, 1080p30 cap' : ''})` : store.live.relay ? ' (via server, 1080p30 cap)' : ''}{/if}
+          {#if store.live}You're live{#if store.live.viewers.length}<span class="eyes" title="{store.live.viewers.length} watching"><Icon name="eye" size={13} />{store.live.viewers.length}</span>{/if}{store.live.codec ? ` (${store.live.codec.toUpperCase()}${store.live.relay ? ', via server, 1080p30 cap' : ''})` : store.live.relay ? ' (via server, 1080p30 cap)' : ''}{/if}
           {#if store.voicePath === 'ws'}{store.live ? '. ' : ''}Voice is going through the server{/if}
         </p>
       {/if}
@@ -193,7 +195,7 @@
   .seat { display: flex; flex-direction: column; align-items: center; gap: 10px; width: var(--sz); }
   .face { position: relative; display: inline-flex; border-radius: 50%; transition: box-shadow 220ms ease-out, transform 220ms ease-out; }
   /* Talking: lit by the lamp. */
-  .seat.talk .face { box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--accent), 0 0 40px rgba(244, 184, 96, 0.35); transform: scale(1.03); }
+  .seat.talk .face { box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--uc), 0 0 40px color-mix(in srgb, var(--uc) 40%, transparent); transform: scale(1.03); }
   .state {
     position: absolute; right: 4%; bottom: 4%; z-index: 2; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
     background: var(--elev); color: var(--danger); box-shadow: 0 0 0 3px var(--bg);
@@ -205,6 +207,7 @@
   .n { max-width: 100%; font-weight: 650; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .seat.me .n { color: var(--accent); }
   .seat.watchable { cursor: pointer; }
+  .eyes { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--elev-2); font-variant-numeric: tabular-nums; vertical-align: middle; }
 
   /* Someone's screen: a little TV on the table, as wide as two seats. */
   .seat.screen { width: calc(var(--sz) * 1.78); }
@@ -213,7 +216,7 @@
     background: linear-gradient(160deg, var(--elev), var(--panel-2)); box-shadow: inset 0 0 0 1px var(--line), 0 18px 40px rgba(0, 0, 0, 0.35);
     transition: transform 160ms ease-out;
   }
-  .seat.talk .tv { box-shadow: inset 0 0 0 2px var(--accent), 0 18px 40px rgba(0, 0, 0, 0.35); }
+  .seat.talk .tv { box-shadow: inset 0 0 0 2px var(--uc), 0 18px 40px rgba(0, 0, 0, 0.35); }
   .seat.watchable:hover .tv { transform: translateY(-2px); }
   .live { position: absolute; top: 10px; left: 12px; background: var(--danger); color: #fff; font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
   .tva { position: relative; display: inline-flex; }

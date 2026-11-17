@@ -32,8 +32,6 @@
   const sec = $derived(store.inVoice(channelId) ? store.security : null)
   const statusOf = (id: Id) => sec?.members.find((m) => m.userId === id)?.status
   const badgeText = (id: Id) => { const st = statusOf(id); return st ? (badgeOf(st) ?? undefined) : undefined }
-  const codeGroups = $derived(sec ? sec.code.split(/\s+/).filter(Boolean) : [])
-  let showCode = $state(false)
 </script>
 
 {#if now}
@@ -47,15 +45,6 @@
     </span>
     <span class="prog" style="transform:scaleX({now.durationMs ? pos / now.durationMs : 0})"></span>
   </div>
-{/if}
-{#if sec}
-  <button class="lock" aria-expanded={showCode} onclick={() => (showCode = !showCode)}><Icon name="lock" size={12} /><span>End-to-end encrypted</span></button>
-  {#if showCode}
-    <div class="codebox" transition:fade={{ duration: 160 }}>
-      <div class="code" aria-label="Call code">{#each codeGroups as g}<span>{g}</span>{/each}</div>
-      <p>Everyone in this call sees the same code.</p>
-    </div>
-  {/if}
 {/if}
 {#if list.length}
   <ul class="vm">
@@ -96,11 +85,6 @@
   li { display: flex; align-items: center; gap: 7px; padding: 3px 6px; border-radius: 6px; color: var(--muted); font-size: 13px; }
   li:hover { background: var(--elev-2); color: var(--text); }
   .n { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .lock { display: flex; align-items: center; gap: 5px; margin: 0 6px 2px 28px; padding: 2px 6px; border-radius: 6px; font-size: 11.5px; color: var(--faint); }
-  .lock:hover { background: var(--elev-2); color: var(--muted); }
-  .codebox { margin: 0 6px 6px 28px; padding: 8px 10px; border-radius: 10px; background: var(--elev-2); }
-  .code { display: flex; flex-wrap: wrap; gap: 2px 10px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12.5px; color: var(--text); font-variant-numeric: tabular-nums; user-select: text; }
-  .codebox p { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); }
   .bd { display: grid; }
   .bd.ok { color: #4ade80; }
   .bd.warn { color: var(--danger); }
