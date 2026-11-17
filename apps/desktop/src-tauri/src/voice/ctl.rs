@@ -178,7 +178,13 @@ impl VoiceCtl {
         self.send(WsClientMsg::VoiceJoin { channel_id, pubkey });
     }
 
-    fn send_keys(&self, out: Vec<Outgoing>) {
+    /// My media-key state (shared with the stream controller for Go Live). None until signed in.
+    pub fn e2ee_keys(&self) -> Option<SharedKeys> {
+        self.st.lock().unwrap().keys()
+    }
+
+    /// Send key envelopes over the current session, in order.
+    pub fn send_keys(&self, out: Vec<Outgoing>) {
         for o in out {
             let envelope = B64.encode(&o.envelope);
             self.send(WsClientMsg::E2eeKey { to: o.to, scope: o.scope, generation: o.generation, envelope });

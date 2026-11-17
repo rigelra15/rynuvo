@@ -4,7 +4,11 @@
 //!
 //! Pair messages (inside the encrypted peer/relay packet), first byte is the type:
 //! `VIDEO` + fragment · `AUDIO` + seq u32 + Opus (stereo) · `REPORT` + loss f32 · `KEYREQ` · `FEC` + spare.
+//!
+//! End to end: each encoded frame is sealed with the streamer's stream key (`Scope::Stream`) before
+//! it is fragmented, and opened after reassembly; each Opus chunk is sealed behind its clear seq.
 use std::{
+    borrow::Cow,
     collections::HashMap,
     net::SocketAddr,
     sync::{
@@ -15,7 +19,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rynuvo_proto::{Id, voice_wire::VoiceKey};
+use rynuvo_proto::{
+    Id,
+    e2ee::{KIND_STREAM_AUDIO, KIND_VIDEO, Scope},
+    voice_wire::VoiceKey,
+};
+
+use crate::e2ee::{Outgoing, SharedKeys};
 use serde::Serialize;
 use tokio::sync::mpsc;
 
@@ -45,6 +55,8 @@ const IDLE_REPEAT: Duration = Duration::from_millis(500);
 /// Viewer: no video for this long means the streamer is gone.
 pub const VIEWER_TIMEOUT: Duration = Duration::from_secs(8);
 const KEYREQ_EVERY: Duration = Duration::from_millis(400);
+/// Viewer: while frames can't be opened (no stream key yet), ask for a key frame at most this often.
+const UNREADABLE_KEYREQ_EVERY: Duration = Duration::from_millis(500);
 const AUDIO_FRAME: usize = 960;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +103,10 @@ pub struct Net {
     pub relay: Arc<dyn Fn(Id, Vec<u8>) + Send + Sync>,
     pub stun: Vec<SocketAddr>,
     pub rt: tokio::runtime::Handle,
+    /// Media keys for end-to-end encrypted frames. None: frames are passed as is.
+    pub keys: Option<SharedKeys>,
+    /// My user id (the streamer's id names its stream scope).
+    pub me: Id,
 }
 
 impl Net {
@@ -192,6 +208,18 @@ struct BInner {
 }
 
 impl BInner {
+    fn scope(&self) -> Scope {
+        Scope::Stream(self.net.me)
+    }
+
+    /// Seal one frame or Opus chunk with my stream key. None: no key to seal with, don't send it.
+    fn seal(&self, kind: u8, plain: Vec<u8>) -> Option<Vec<u8>> {
+        match &self.net.keys {
+            None => Some(plain),
+            Some(k) => k.lock().unwrap().seal(&self.scope(), kind, &plain, Instant::now()),
+        }
+    }
+
     fn fan_out(&self, msgs: &[Vec<u8>]) {
         let links: Vec<PeerLink> = self.viewers.lock().unwrap().values().map(|v| v.link.clone()).collect();
         for l in links {
@@ -262,6 +290,10 @@ impl Broadcast {
             let (w, h) = if capped { (preset.width.min(RELAY_MAX.0), preset.height.min(RELAY_MAX.1)) } else { (preset.width, preset.height) };
             CaptureOpts { max_width: w, max_height: h, fps: if capped { preset.fps.min(RELAY_FPS) } else { preset.fps } }
         };
+        if let Some(k) = &inner.net.keys {
+            // My stream key, made now so the first frame can be sealed; sent to each viewer on join.
+            k.lock().unwrap().share_current(&inner.scope(), &[], Instant::now());
+        }
         let stopper = start_capture(opts(false), video.clone(), audio.clone(), ended.clone())?;
         let capture = Arc::new(Mutex::new(Some(stopper)));
         let (i2, c2, i4) = (inner.clone(), capture.clone(), inner.clone());
@@ -285,8 +317,8 @@ impl Broadcast {
         Ok(Broadcast { inner, capture, thread: Some(thread) })
     }
 
-    /// The server paired a new viewer with me.
-    pub fn add_viewer(&self, viewer: Id, codecs: &[String], key: VoiceKey) {
+    /// The server paired a new viewer with me. Returns my stream key's envelopes for them (send in order).
+    pub fn add_viewer(&self, viewer: Id, codecs: &[String], key: VoiceKey) -> Vec<Outgoing> {
         let (link, mut rx) = self.inner.net.link(Role::Streamer, viewer, key);
         let codecs: Vec<Codec> = codecs.iter().filter_map(|c| Codec::from_name(c)).collect();
         let old = self.inner.viewers.lock().unwrap().insert(viewer, ViewerConn { link, codecs, loss: 0.0, last_keyreq: None });
@@ -303,12 +335,36 @@ impl Broadcast {
                 }
             }
         });
+        self.key_for(viewer)
     }
 
-    pub fn remove_viewer(&self, viewer: Id) {
-        if let Some(v) = self.inner.viewers.lock().unwrap().remove(&viewer) {
-            v.link.stop();
+    /// My current stream key for `viewer` (who asked for it), if they are watching.
+    pub fn key_for(&self, viewer: Id) -> Vec<Outgoing> {
+        match &self.inner.net.keys {
+            Some(k) if self.has_viewer(viewer) => k.lock().unwrap().share_current(&self.inner.scope(), &[viewer], Instant::now()),
+            _ => Vec::new(),
         }
+    }
+
+    /// `viewer` stopped watching: the ones left get a new stream key (returned, to send) and a key
+    /// frame, so the leaver can't follow the stream any more.
+    pub fn remove_viewer(&self, viewer: Id) -> Vec<Outgoing> {
+        let (gone, rest) = {
+            let mut vs = self.inner.viewers.lock().unwrap();
+            let gone = vs.remove(&viewer);
+            (gone, vs.keys().copied().collect::<Vec<Id>>())
+        };
+        let Some(v) = gone else { return Vec::new() };
+        v.link.stop();
+        let Some(k) = &self.inner.net.keys else { return Vec::new() };
+        let scope = self.inner.scope();
+        let out = {
+            let mut k = k.lock().unwrap();
+            k.forget_peer(&scope, viewer);
+            k.rotate(&scope, &rest, Instant::now())
+        };
+        self.inner.force_key.store(true, Ordering::Relaxed);
+        out
     }
 
     pub fn has_viewer(&self, viewer: Id) -> bool {
@@ -338,6 +394,9 @@ impl Broadcast {
         }
         for (_, v) in self.inner.viewers.lock().unwrap().drain() {
             v.link.stop();
+        }
+        if let Some(k) = &self.inner.net.keys {
+            k.lock().unwrap().forget_scope(&self.inner.scope());
         }
         if let Some(t) = self.thread.take() {
             // The encoder notices `stop` within 100 ms; don't hold the caller (often async) on it.
@@ -375,14 +434,16 @@ fn audio_sink(inner: Arc<BInner>) -> AudioSink {
         let mut out = [0u8; 1500];
         let mut msgs = Vec::new();
         while buf.len() >= AUDIO_FRAME * 2 {
-            if let Ok(n) = enc.encode_float(&buf[..AUDIO_FRAME * 2], &mut out) {
+            let encoded = enc.encode_float(&buf[..AUDIO_FRAME * 2], &mut out).ok();
+            buf.drain(..AUDIO_FRAME * 2);
+            // No stream key yet: the chunk is dropped, not sent in the clear.
+            if let Some(sealed) = encoded.and_then(|n| inner.seal(KIND_STREAM_AUDIO, out[..n].to_vec())) {
                 let seq = inner.audio_seq.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
                 let mut m = vec![T_AUDIO];
                 m.extend_from_slice(&seq.to_be_bytes());
-                m.extend_from_slice(&out[..n]);
+                m.extend_from_slice(&sealed);
                 msgs.push(m);
             }
-            buf.drain(..AUDIO_FRAME * 2);
         }
         if buf.len() > 48_000 {
             buf.clear();
@@ -521,7 +582,17 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
         encode_total_us += encode_at.elapsed().as_micros() as u64;
         encode_calls += 1;
         match result {
-            Ok(Some(out)) => {
+            Ok(Some(mut out)) => {
+                // Sealed once for every viewer, before fragmenting: 24 bytes more per frame.
+                match inner.seal(KIND_VIDEO, std::mem::take(&mut out.data)) {
+                    Some(sealed) => out.data = sealed,
+                    None => {
+                        // No stream key: nothing leaves, and the next frame must stand on its own.
+                        inner.force_key.store(true, Ordering::Relaxed);
+                        encode_skips += 1;
+                        continue;
+                    }
+                }
                 encoded += 1;
                 frame_no = frame_no.wrapping_add(1);
                 let ts = started.elapsed().as_millis() as u16;
@@ -583,7 +654,7 @@ impl Watch {
         if let Some(old) = self.link.lock().unwrap().replace(link.clone()) {
             old.stop();
         }
-        net.rt.spawn(receive(self.streamer, link, rx, out, audio, events, self.stop.clone()));
+        net.rt.spawn(receive(self.streamer, net.keys.clone(), link, rx, out, audio, events, self.stop.clone()));
     }
 
     pub fn on_signal(&self, v: &serde_json::Value) {
@@ -618,8 +689,18 @@ impl Drop for Watch {
     }
 }
 
+/// Open a sealed frame or chunk from `streamer`. None: unreadable (no key yet, or tampered).
+fn open<'a>(keys: &Option<SharedKeys>, streamer: Id, kind: u8, ct: &'a [u8]) -> Option<Cow<'a, [u8]>> {
+    match keys {
+        None => Some(Cow::Borrowed(ct)),
+        Some(k) => k.lock().unwrap().open(&Scope::Stream(streamer), streamer, kind, ct, Instant::now()).map(Cow::Owned),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn receive(
     streamer: Id,
+    keys: Option<SharedKeys>,
     link: PeerLink,
     mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
     out: FrameOut,
@@ -635,6 +716,9 @@ async fn receive(
     let (mut frames, mut bytes, mut codec) = (0u32, 0usize, 0u8);
     let mut window = Instant::now();
     let mut max_loss = 0.0f32;
+    // A frame couldn't be opened: show nothing until a key frame can, asking for one meanwhile.
+    let mut unreadable = false;
+    let mut last_unreadable_req: Option<Instant> = None;
     loop {
         tokio::select! {
             m = rx.recv() => {
@@ -650,20 +734,32 @@ async fn receive(
                             link.send(&[T_KEYREQ]);
                         }
                         for a in ready {
+                            let data = open(&keys, streamer, KIND_VIDEO, &a.data);
+                            if data.is_none() {
+                                unreadable = true;
+                            }
+                            let Some(data) = data.filter(|_| a.key || !unreadable) else {
+                                if last_unreadable_req.is_none_or(|t| t.elapsed() >= UNREADABLE_KEYREQ_EVERY) {
+                                    last_unreadable_req = Some(Instant::now());
+                                    link.send(&[T_KEYREQ]);
+                                }
+                                continue;
+                            };
+                            unreadable = false;
                             last_video = Instant::now();
                             frames += 1;
                             codec = a.codec;
-                            let mut b = Vec::with_capacity(6 + a.data.len());
+                            let mut b = Vec::with_capacity(6 + data.len());
                             b.push(a.codec);
                             b.push(a.key as u8);
                             b.extend_from_slice(&(a.ts_ms as u32).to_be_bytes());
-                            b.extend_from_slice(&a.data);
+                            b.extend_from_slice(&data);
                             out(b);
                         }
                     }
                     Some(&T_AUDIO) if m.len() > 5 => {
-                        if let Some(d) = dec.as_mut() {
-                            if let Ok(n) = d.decode_float(&m[5..], &mut pcm, false) {
+                        if let (Some(d), Some(opus)) = (dec.as_mut(), open(&keys, streamer, KIND_STREAM_AUDIO, &m[5..])) {
+                            if let Ok(n) = d.decode_float(&opus, &mut pcm, false) {
                                 let mono: Vec<f32> = pcm[..n * 2].chunks_exact(2).map(|s| (s[0] + s[1]) * 0.5).collect();
                                 audio(streamer, mono);
                             }

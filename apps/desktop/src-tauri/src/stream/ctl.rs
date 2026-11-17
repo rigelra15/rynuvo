@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use rynuvo_proto::{Id, WsClientMsg, WsServerMsg, voice_wire::VoiceKey};
+use rynuvo_proto::{Id, WsClientMsg, WsServerMsg, e2ee::Scope, voice_wire::VoiceKey};
 
 use super::{
     capture::{AudioSink, CaptureOpts, EndedSink, VideoSink},
@@ -64,6 +64,8 @@ impl StreamCtl {
             relay: Arc::new(move |to, b| v2.relay_video(to, &b)),
             stun: self.st.lock().unwrap().stun.clone(),
             rt: self.rt.clone(),
+            keys: self.voice.e2ee_keys(),
+            me: self.voice.me().unwrap_or(0),
         }
     }
 
@@ -129,10 +131,18 @@ impl StreamCtl {
         Ok(())
     }
 
+    /// A watch of `streamer` ended: their stream key is no use any more.
+    fn forget_stream_key(&self, streamer: Id) {
+        if let Some(k) = self.voice.e2ee_keys() {
+            k.lock().unwrap().forget_peer(&Scope::Stream(streamer), streamer);
+        }
+    }
+
     pub fn unwatch(&self, user_id: Id) {
         let w = self.st.lock().unwrap().watches.remove(&user_id);
         if let Some((w, _)) = w {
             w.stop();
+            self.forget_stream_key(user_id);
             self.voice.remove_stream(user_id);
             self.voice.send_ws(WsClientMsg::StreamUnwatch { user_id });
         }
@@ -153,6 +163,7 @@ impl StreamCtl {
         let w = self.st.lock().unwrap().watches.remove(&user_id);
         if let Some((w, _)) = w {
             w.stop();
+            self.forget_stream_key(user_id);
             self.voice.remove_stream(user_id);
             if local {
                 self.voice.send_ws(WsClientMsg::StreamUnwatch { user_id });
@@ -212,16 +223,23 @@ impl StreamCtl {
             }
             WsServerMsg::StreamViewer { streamer, viewer, codecs, key, joined } => {
                 if Some(*streamer) == me {
-                    let s = self.st.lock().unwrap();
-                    let Some(b) = s.live.as_ref() else { return };
-                    if *joined {
-                        match VoiceKey::from_b64(key) {
-                            Some(k) => b.add_viewer(*viewer, codecs, k),
-                            None => tracing::warn!("stream: bad pair key"),
+                    // The new viewer gets my stream key; a leaver leaves the rest with a new one.
+                    let out = {
+                        let s = self.st.lock().unwrap();
+                        let Some(b) = s.live.as_ref() else { return };
+                        if *joined {
+                            match VoiceKey::from_b64(key) {
+                                Some(k) => b.add_viewer(*viewer, codecs, k),
+                                None => {
+                                    tracing::warn!("stream: bad pair key");
+                                    return;
+                                }
+                            }
+                        } else {
+                            b.remove_viewer(*viewer)
                         }
-                    } else {
-                        b.remove_viewer(*viewer);
-                    }
+                    };
+                    self.voice.send_keys(out);
                 } else if Some(*viewer) == me {
                     if !*joined {
                         self.end_watch(*streamer, "The stream ended", false);
@@ -257,6 +275,11 @@ impl StreamCtl {
                 } else {
                     self.end_watch(*user_id, "The stream ended", false);
                 }
+            }
+            WsServerMsg::E2eeKeyRequest { by, scope: Scope::Stream(s) } if Some(*s) == me => {
+                // A viewer can't open my frames: send them my current stream key (only to viewers).
+                let out = self.st.lock().unwrap().live.as_ref().map(|b| b.key_for(*by)).unwrap_or_default();
+                self.voice.send_keys(out);
             }
             WsServerMsg::VoiceEnded { .. } => self.end_all("You left voice"),
             _ => {}

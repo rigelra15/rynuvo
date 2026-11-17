@@ -274,3 +274,259 @@ async fn viewer_timeout_releases_the_watch() {
     })
     .await;
 }
+
+// ---------------------------------------------------------------------------------------------
+// End-to-end encryption, at the engine level: a broadcast and its watches wired through a test
+// relay that records every pair message (what the server would see), with no direct path.
+
+mod e2ee_lab {
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+        time::Instant,
+    };
+
+    use rynuvo_desktop_lib::{
+        e2ee::{KeyState, Outgoing, SharedKeys},
+        stream::{
+            engine::{self, Broadcast, CaptureFn, Net, StreamEvent, Watch},
+            frag::{Assembled, Reassembler},
+        },
+    };
+    use rynuvo_proto::{
+        Id,
+        e2ee::{DeviceKey, Scope},
+        voice_wire::VoiceKey,
+    };
+
+    pub const S: Id = 1;
+
+    /// (from, to, when, message)
+    pub type Sent = Arc<Mutex<Vec<(Id, Id, Instant, Vec<u8>)>>>;
+
+    #[derive(Clone)]
+    pub struct Lab {
+        pub keys: Arc<HashMap<Id, SharedKeys>>,
+        pub sent: Sent,
+        bcast: Arc<Mutex<Option<Arc<Broadcast>>>>,
+        watches: Arc<Mutex<HashMap<Id, Watch>>>,
+    }
+
+    impl Lab {
+        /// Everyone knows everyone's device key; nobody holds a media key yet.
+        pub fn new(users: &[Id]) -> Lab {
+            let devs: Vec<(Id, DeviceKey)> = users.iter().map(|&u| (u, DeviceKey::generate())).collect();
+            let keys = devs
+                .iter()
+                .map(|(u, dk)| {
+                    let mut k = KeyState::new(*u, dk.clone());
+                    for (o, odk) in &devs {
+                        if o != u {
+                            k.set_peer_pubkey(*o, odk.public());
+                        }
+                    }
+                    (*u, Arc::new(Mutex::new(k)))
+                })
+                .collect();
+            Lab { keys: Arc::new(keys), sent: Arc::default(), bcast: Arc::default(), watches: Arc::default() }
+        }
+
+        fn route(&self, from: Id, to: Id, b: Vec<u8>) {
+            self.sent.lock().unwrap().push((from, to, Instant::now(), b.clone()));
+            if from == S {
+                if let Some(w) = self.watches.lock().unwrap().get(&to) {
+                    w.on_relay(&b);
+                }
+            } else {
+                let bc = self.bcast.lock().unwrap().clone();
+                if let Some(bc) = bc {
+                    bc.on_relay(from, &b);
+                }
+            }
+        }
+
+        pub fn net(&self, me: Id) -> Net {
+            let lab = self.clone();
+            Net {
+                signal: Arc::new(|_, _| {}), // no candidates swapped: everything rides the relay
+                relay: Arc::new(move |to, b| lab.route(me, to, b)),
+                stun: Vec::new(),
+                rt: tokio::runtime::Handle::current(),
+                keys: Some(self.keys[&me].clone()),
+                me,
+            }
+        }
+
+        /// What the server does with an envelope: hand it to its recipient.
+        pub fn deliver(&self, from: Id, out: Vec<Outgoing>) -> Vec<(Id, u32, bool)> {
+            out.into_iter()
+                .map(|o| {
+                    let ok = self.keys[&o.to].lock().unwrap().on_envelope(from, &o.scope, o.generation, &o.envelope, Instant::now());
+                    (o.to, o.generation, ok)
+                })
+                .collect()
+        }
+
+        pub fn go_live(&self, capture: CaptureFn) -> Arc<Broadcast> {
+            let b = Arc::new(Broadcast::start(capture, engine::preset("720p30"), self.net(S), Arc::new(|_: StreamEvent| {})).unwrap());
+            *self.bcast.lock().unwrap() = Some(b.clone());
+            b
+        }
+
+        /// `viewer` starts watching; returns the streamer's envelopes for them (not yet delivered).
+        pub fn watch(&self, viewer: Id, out: engine::FrameOut) -> Vec<Outgoing> {
+            let key = VoiceKey::random();
+            let w = Watch::new(S);
+            w.connect(key.clone(), &self.net(viewer), out, Arc::new(|_, _| {}), Arc::new(|_| {}));
+            self.watches.lock().unwrap().insert(viewer, w);
+            let bc = self.bcast.lock().unwrap().clone().unwrap();
+            bc.add_viewer(viewer, &["h264".to_string()], key)
+        }
+
+        pub fn stop_watch(&self, viewer: Id) -> Vec<Outgoing> {
+            if let Some(w) = self.watches.lock().unwrap().remove(&viewer) {
+                w.stop();
+            }
+            let bc = self.bcast.lock().unwrap().clone().unwrap();
+            bc.remove_viewer(viewer)
+        }
+
+        pub fn stop(&self) {
+            self.watches.lock().unwrap().clear();
+            self.bcast.lock().unwrap().take();
+        }
+
+        /// Whole (sealed) frames the streamer sent `to`, each with when its last fragment left.
+        pub fn frames_to(&self, to: Id) -> Vec<(Instant, Assembled)> {
+            let mut r = Reassembler::new();
+            let mut out = Vec::new();
+            for (from, t, at, m) in self.sent.lock().unwrap().iter() {
+                if *from != S || *t != to {
+                    continue;
+                }
+                let ready = match m.first() {
+                    Some(&engine::T_VIDEO) => r.push(&m[1..]),
+                    Some(&engine::T_FEC) => r.push_fec(&m[1..]),
+                    _ => continue,
+                };
+                out.extend(ready.into_iter().map(|a| (*at, a)));
+            }
+            out
+        }
+
+        pub fn scope() -> Scope {
+            Scope::Stream(S)
+        }
+    }
+}
+
+fn synthetic_capture() -> rynuvo_desktop_lib::stream::engine::CaptureFn {
+    let s = synthetic();
+    Arc::new(move |opts, video, audio, ended| s("synthetic:0", opts, video, audio, ended))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stream_frames_are_end_to_end_encrypted() {
+    use e2ee_lab::*;
+    use rynuvo_proto::e2ee::{FRAME_OVERHEAD, KIND_VIDEO, frame_generation};
+    const B: i64 = 2;
+    let lab = Lab::new(&[S, B]);
+    lab.go_live(synthetic_capture());
+    let (aus, out) = collector();
+    let env = lab.watch(B, out);
+    assert!(lab.deliver(S, env).iter().all(|(to, _, ok)| *to == B && *ok));
+    eventually("viewer gets frames", 10, || aus.lock().unwrap().len() >= 10).await;
+    let got = aus.lock().unwrap().clone();
+    assert!(is_key(&got[0]), "first access unit is a key frame");
+    assert_eq!(&got[0][6..10], &[0, 0, 0, 1], "decrypted back to Annex B");
+    lab.stop();
+
+    // Nothing the relay carried holds a piece of any picture.
+    let sent = lab.sent.lock().unwrap().clone();
+    for au in &got {
+        let plain = &au[6..];
+        let probe = &plain[..plain.len().min(32)];
+        for (_, _, _, m) in &sent {
+            assert!(!m.windows(probe.len()).any(|w| w == probe), "a pair message carries plaintext video");
+        }
+    }
+    // Each frame on the wire is the viewer's frame sealed with the stream key (24 bytes more).
+    let frames = lab.frames_to(B);
+    assert!(frames.len() >= 10);
+    let plains: Vec<&[u8]> = got.iter().map(|au| &au[6..]).collect();
+    let mut matched = 0;
+    for (_, f) in frames.iter().take(10) {
+        assert!(frame_generation(&f.data).is_some());
+        let opened = lab.keys[&B].lock().unwrap().open(&Lab::scope(), S, KIND_VIDEO, &f.data, std::time::Instant::now());
+        let opened = opened.expect("the viewer's key opens what the streamer sent");
+        assert_eq!(f.data.len(), opened.len() + FRAME_OVERHEAD);
+        assert!(!plains.contains(&f.data.as_slice()));
+        if plains.contains(&opened.as_slice()) {
+            matched += 1;
+        }
+    }
+    assert!(matched >= 5, "the viewer outputs the original frames: {matched}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn viewer_without_key_gets_no_picture_and_asks_keyframe() {
+    use e2ee_lab::*;
+    const B: i64 = 2;
+    let lab = Lab::new(&[S, B]);
+    lab.go_live(synthetic_capture());
+    let (aus, out) = collector();
+    let _never_delivered = lab.watch(B, out);
+    eventually("frames reach the viewer", 10, || !lab.frames_to(B).is_empty()).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(aus.lock().unwrap().is_empty(), "no picture without the stream key");
+    let keyreqs = lab
+        .sent
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(from, to, _, m)| *from == B && *to == S && m.as_slice() == [rynuvo_desktop_lib::stream::engine::T_KEYREQ])
+        .count();
+    assert!(keyreqs >= 1, "the viewer asks for a key frame");
+    assert!(keyreqs <= 10, "but not for every frame: {keyreqs} in ~3 s");
+    lab.stop();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn viewer_leave_rotates_stream_key() {
+    use e2ee_lab::*;
+    use rynuvo_proto::e2ee::{KIND_VIDEO, frame_generation};
+    const B: i64 = 2;
+    const C: i64 = 3;
+    let lab = Lab::new(&[S, B, C]);
+    lab.go_live(synthetic_capture());
+    let (b_aus, b_out) = collector();
+    let (c_aus, c_out) = collector();
+    let env = lab.watch(B, b_out);
+    lab.deliver(S, env);
+    let env = lab.watch(C, c_out);
+    lab.deliver(S, env);
+    eventually("both watch", 10, || b_aus.lock().unwrap().len() >= 10 && c_aus.lock().unwrap().len() >= 10).await;
+    let gen0 = frame_generation(&lab.frames_to(B).last().unwrap().1.data).unwrap();
+
+    let left = std::time::Instant::now();
+    let env = lab.stop_watch(C);
+    let got = lab.deliver(S, env);
+    assert_eq!(got.len(), 1, "only the remaining viewer gets the new key: {got:?}");
+    assert_eq!(got[0], (B, gen0.wrapping_add(1), true));
+
+    let n = b_aus.lock().unwrap().len();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    eventually("B keeps watching", 5, || b_aus.lock().unwrap().len() > n + 10).await;
+    lab.stop();
+
+    let after: Vec<_> = lab.frames_to(B).into_iter().filter(|(at, _)| *at > left).collect();
+    assert!(after.iter().any(|(_, f)| f.key), "a key frame follows the rotation");
+    let late: Vec<_> = after.iter().filter(|(at, _)| *at > left + Duration::from_secs(1)).collect();
+    assert!(!late.is_empty());
+    let now = std::time::Instant::now();
+    for (_, f) in late {
+        assert_eq!(frame_generation(&f.data), Some(gen0.wrapping_add(1)));
+        assert!(lab.keys[&B].lock().unwrap().open(&Lab::scope(), S, KIND_VIDEO, &f.data, now).is_some());
+        assert!(lab.keys[&C].lock().unwrap().open(&Lab::scope(), S, KIND_VIDEO, &f.data, now).is_none(), "the viewer who left can't open new frames");
+    }
+}
