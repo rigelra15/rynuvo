@@ -162,11 +162,11 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
-
+      # The runner image already carries the Android SDK (ANDROID_HOME) and its sdkmanager.
       - name: Install the NDK
         run: |
-          sdkmanager --install "ndk;29.0.13599879"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.13599879"
           nd="$ANDROID_HOME/ndk/29.0.13599879"
           { echo "NDK_HOME=$nd"; echo "ANDROID_NDK=$nd"; echo "ANDROID_NDK_ROOT=$nd"; } >> "$GITHUB_ENV"
 
