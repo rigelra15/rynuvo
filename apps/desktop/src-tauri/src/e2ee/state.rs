@@ -127,10 +127,8 @@ impl KeyState {
             return false;
         };
         let peer = self.peers.entry((scope.clone(), from)).or_default();
-        if let Some((cur, _)) = &peer.current {
-            if !newer(generation, *cur) {
-                return false;
-            }
+        if peer.current.as_ref().is_some_and(|(cur, _)| !newer(generation, *cur)) {
+            return false;
         }
         if let Some((g, k)) = peer.current.take() {
             peer.previous = Some((g, k, now + PREVIOUS_KEY_TTL));
