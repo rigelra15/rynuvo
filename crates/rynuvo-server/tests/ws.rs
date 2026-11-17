@@ -31,6 +31,15 @@ async fn bad_token_closed_4001() {
 }
 
 #[tokio::test]
+async fn protocol_3_is_refused() {
+    let app = TestApp::spawn().await;
+    let a = app.user("Dimas").await;
+    let mut ws = app.ws_raw().await;
+    ws.send_json(json!({"t":"hello","d":{"token":a.token,"protocol":3}})).await;
+    assert_eq!(ws.expect_close().await, CLOSE_PROTOCOL_OLD);
+}
+
+#[tokio::test]
 async fn old_protocol_closed_4002() {
     let app = TestApp::spawn().await;
     let a = app.user("Dimas").await;

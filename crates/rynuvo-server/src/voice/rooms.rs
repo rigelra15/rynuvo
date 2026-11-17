@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use rynuvo_proto::{Id, StreamInfo, VoiceMember, voice_wire::VoiceKey};
+use rynuvo_proto::{Id, StreamInfo, VoiceMember, e2ee::Scope, voice_wire::VoiceKey};
 
 /// Most people allowed in one voice channel.
 pub const MAX_PER_CHANNEL: usize = 10;
@@ -54,6 +54,8 @@ pub struct Member {
     pub bytes_in: u64,
     pub bytes_out: u64,
     pub stream: Option<Stream>,
+    /// The device's public key (base64), used by others to seal media keys to it.
+    pub pubkey: String,
 }
 
 impl Member {
@@ -67,7 +69,7 @@ impl Member {
     }
 
     pub fn public(&self) -> VoiceMember {
-        VoiceMember { user_id: self.user_id, channel_id: self.channel_id, muted: self.muted, deafened: self.deafened, joined_at: self.joined_at, call_since: self.call_since, pubkey: String::new() }
+        VoiceMember { user_id: self.user_id, channel_id: self.channel_id, muted: self.muted, deafened: self.deafened, joined_at: self.joined_at, call_since: self.call_since, pubkey: self.pubkey.clone() }
     }
 }
 
@@ -99,7 +101,7 @@ fn new_session(taken: &[Member]) -> u32 {
 }
 
 impl VoiceRooms {
-    pub fn join(&self, user_id: Id, conn_id: u64, channel_id: Id, now_ms: i64) -> Result<Joined, JoinError> {
+    pub fn join(&self, user_id: Id, conn_id: u64, channel_id: Id, pubkey: String, now_ms: i64) -> Result<Joined, JoinError> {
         let mut g = self.inner.lock().unwrap();
         let in_channel = g.iter().filter(|m| m.channel_id == channel_id && m.user_id != user_id).count();
         if in_channel >= MAX_PER_CHANNEL {
@@ -123,6 +125,7 @@ impl VoiceRooms {
             bytes_in: 0,
             bytes_out: 0,
             stream: None,
+            pubkey,
         };
         g.push(member.clone());
         Ok(Joined { member, previous })
@@ -240,6 +243,20 @@ impl VoiceRooms {
         if watches(from, to) || watches(to, from) { g.iter().find(|m| m.user_id == to).map(|m| m.conn_id) } else { None }
     }
 
+    /// Whether `a` and `b` both belong to `scope`: members of the same voice channel, or a
+    /// streamer and one of their viewers.
+    pub fn shares_scope(&self, a: Id, b: Id, scope: &Scope) -> bool {
+        let g = self.inner.lock().unwrap();
+        match *scope {
+            Scope::Voice(ch) => [a, b].iter().all(|u| g.iter().any(|m| m.user_id == *u && m.channel_id == ch)),
+            Scope::Stream(streamer) => {
+                let (other, here) = if a == streamer { (b, true) } else if b == streamer { (a, true) } else { (0, false) };
+                here && other != streamer
+                    && g.iter().any(|m| m.user_id == streamer && m.stream.as_ref().is_some_and(|s| s.viewers.iter().any(|v| v.user_id == other)))
+            }
+        }
+    }
+
     /// Run `f` with the member list locked (used by the relay hot path).
     pub fn with<R>(&self, f: impl FnOnce(&mut Vec<Member>) -> R) -> R {
         f(&mut self.inner.lock().unwrap())
@@ -253,16 +270,16 @@ mod tests {
     #[test]
     fn the_call_keeps_its_start_while_anyone_stays() {
         let r = VoiceRooms::default();
-        let a = r.join(1, 1, 7, 1_000).unwrap().member;
+        let a = r.join(1, 1, 7, String::new(), 1_000).unwrap().member;
         assert_eq!(a.call_since, 1_000, "the first one in starts the call");
-        let b = r.join(2, 2, 7, 5_000).unwrap().member;
+        let b = r.join(2, 2, 7, String::new(), 5_000).unwrap().member;
         assert_eq!(b.call_since, 1_000, "later joiners share the call's start");
         r.leave_user(1);
-        let c = r.join(3, 3, 7, 9_000).unwrap().member;
+        let c = r.join(3, 3, 7, String::new(), 9_000).unwrap().member;
         assert_eq!(c.call_since, 1_000, "the first one leaving doesn't restart it");
         r.leave_user(2);
         r.leave_user(3);
-        let d = r.join(4, 4, 7, 20_000).unwrap().member;
+        let d = r.join(4, 4, 7, String::new(), 20_000).unwrap().member;
         assert_eq!(d.call_since, 20_000, "an empty channel starts a new call");
     }
 }

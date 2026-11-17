@@ -4,7 +4,7 @@ pub mod rooms;
 
 pub use rooms::{Member, VoiceRooms};
 
-use rynuvo_proto::{ChannelKind, Id, WsServerMsg};
+use rynuvo_proto::{ChannelKind, Id, MAX_ENVELOPE_B64, WsServerMsg, e2ee::{PublicKey, Scope}};
 use rooms::Viewer;
 
 use crate::{app::AppState, now_ms, ws::hub::Outgoing};
@@ -13,6 +13,7 @@ pub const GONE: &str = "That voice channel is gone";
 pub const FULL: &str = "This voice channel is full";
 pub const KICKED: &str = "You were disconnected from the voice channel";
 pub const DELETED: &str = "The voice channel was deleted";
+pub const OLD_CLIENT: &str = "Update Rynuvo to join voice";
 pub const MOVED: &str = "You joined voice from another device";
 
 fn ended(st: &AppState, conn_id: u64, reason: &str) {
@@ -100,11 +101,14 @@ async fn channel_info(st: &AppState, channel_id: Id) -> Option<(ChannelKind, Id)
     row.and_then(|(k, o)| ChannelKind::parse(&k).map(|k| (k, o)))
 }
 
-pub async fn join(st: &AppState, user_id: Id, conn_id: u64, channel_id: Id) {
+pub async fn join(st: &AppState, user_id: Id, conn_id: u64, channel_id: Id, pubkey: String) {
+    if PublicKey::from_b64(&pubkey).is_none() {
+        return ended(st, conn_id, OLD_CLIENT);
+    }
     if !matches!(channel_info(st, channel_id).await, Some((ChannelKind::Voice, _))) {
         return ended(st, conn_id, GONE);
     }
-    let j = match st.voice.join(user_id, conn_id, channel_id, now_ms()) {
+    let j = match st.voice.join(user_id, conn_id, channel_id, pubkey, now_ms()) {
         Ok(j) => j,
         Err(rooms::JoinError::Full) => return ended(st, conn_id, FULL),
     };
@@ -112,8 +116,8 @@ pub async fn join(st: &AppState, user_id: Id, conn_id: u64, channel_id: Id) {
         if prev.conn_id != conn_id {
             ended(st, prev.conn_id, MOVED);
         }
-        if prev.channel_id == channel_id {
-            // Same channel (typically a reconnect): the member never really left.
+        if prev.channel_id == channel_id && prev.pubkey == j.member.pubkey {
+            // Same channel and same device key (a reconnect): the member never really left.
             store_usage(st, prev);
         } else {
             left(st, prev);
@@ -208,6 +212,31 @@ pub fn stream_watch(st: &AppState, viewer: Id, streamer: Id, codecs: Vec<String>
 pub fn stream_unwatch(st: &AppState, viewer: Id, streamer: Id) {
     if let Some((v, s_conn)) = st.voice.unwatch(viewer, streamer) {
         viewer_left(st, streamer, s_conn, viewer, v);
+    }
+}
+
+/// Whether `scope` is one the two users share, so keys may pass between them.
+fn may_exchange(st: &AppState, a: Id, b: Id, scope: &Scope) -> bool {
+    a != b && st.voice.shares_scope(a, b, scope)
+}
+
+/// Pass a sealed key envelope from `from` to `to`; the server never reads it.
+pub fn forward_key(st: &AppState, from: Id, to: Id, scope: Scope, generation: u32, envelope: String) {
+    if envelope.len() > MAX_ENVELOPE_B64 || !may_exchange(st, from, to, &scope) {
+        return;
+    }
+    if let Some(m) = st.voice.member(to) {
+        st.hub.send_to_conn(m.conn_id, Outgoing::Msg(WsServerMsg::E2eeKey { from, scope, generation, envelope }));
+    }
+}
+
+/// `by` wants the key of `from` for `scope`: tell `from`.
+pub fn forward_key_request(st: &AppState, by: Id, from: Id, scope: Scope) {
+    if !may_exchange(st, by, from, &scope) {
+        return;
+    }
+    if let Some(m) = st.voice.member(from) {
+        st.hub.send_to_conn(m.conn_id, Outgoing::Msg(WsServerMsg::E2eeKeyRequest { by, scope }));
     }
 }
 

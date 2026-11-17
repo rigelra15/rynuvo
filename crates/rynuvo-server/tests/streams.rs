@@ -29,7 +29,7 @@ impl Peer {
     async fn join(app: &TestApp, token: &str, ch: i64) -> Peer {
         let mut ws = app.ws(token).await;
         until(&mut ws, |m| matches!(m, WsServerMsg::Ready { .. }).then_some(())).await;
-        ws.send_json(json!({"t":"voiceJoin","d":{"channelId":ch}})).await;
+        ws.send_json(json!({"t":"voiceJoin","d":{"channelId":ch,"pubkey":rynuvo_proto::e2ee::DeviceKey::generate().public().to_b64()}})).await;
         let (session, key) = until(&mut ws, |m| match m {
             WsServerMsg::VoiceJoined { session, key, .. } => Some((session, VoiceKey::from_b64(&key).unwrap())),
             _ => None,

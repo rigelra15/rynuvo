@@ -24,7 +24,7 @@ async fn ready(app: &TestApp, token: &str) -> (WsClient, Option<i64>) {
 }
 
 async fn join_voice(ws: &mut WsClient, ch: i64) {
-    ws.send_json(json!({"t":"voiceJoin","d":{"channelId":ch}})).await;
+    ws.send_json(json!({"t":"voiceJoin","d":{"channelId":ch,"pubkey":rynuvo_proto::e2ee::DeviceKey::generate().public().to_b64()}})).await;
     until(ws, 3000, |m| matches!(m, WsServerMsg::VoiceJoined { .. }).then_some(())).await;
 }
 

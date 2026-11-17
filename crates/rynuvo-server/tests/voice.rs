@@ -1,4 +1,4 @@
-use rynuvo_proto::{VoiceMember, WsServerMsg, voice_wire::VoiceKey};
+use rynuvo_proto::{VoiceMember, e2ee::{DeviceKey, Scope}, WsServerMsg, voice_wire::VoiceKey};
 use rynuvo_server::testutil::{TestApp, WsClient};
 use serde_json::json;
 
@@ -18,8 +18,16 @@ async fn ready(app: &TestApp, token: &str) -> WsClient {
     ws
 }
 
+fn key() -> String {
+    DeviceKey::generate().public().to_b64()
+}
+
 fn join(ch: i64) -> serde_json::Value {
-    json!({"t":"voiceJoin","d":{"channelId":ch}})
+    join_as(ch, &key())
+}
+
+fn join_as(ch: i64, pubkey: &str) -> serde_json::Value {
+    json!({"t":"voiceJoin","d":{"channelId":ch,"pubkey":pubkey}})
 }
 
 async fn member_update(ws: &mut WsClient, user: i64) -> VoiceMember {
@@ -65,7 +73,7 @@ async fn join_broadcasts_member_and_returns_key() {
     assert_eq!(port, app.state.cfg.stun_ports[0]);
     let m = member_update(&mut wb, a.user.id).await;
     assert!(m.joined_at > 0, "members carry when they joined, for the call timer");
-    assert_eq!(m, VoiceMember { user_id: a.user.id, channel_id: v.id, muted: false, deafened: false, joined_at: m.joined_at, call_since: m.joined_at, pubkey: String::new() });
+    assert_eq!(m, VoiceMember { user_id: a.user.id, channel_id: v.id, muted: false, deafened: false, joined_at: m.joined_at, call_since: m.joined_at, pubkey: m.pubkey.clone() });
 }
 
 #[tokio::test]
@@ -239,10 +247,11 @@ async fn rejoin_same_channel_does_not_announce_leave() {
     let v = app.create_channel(&a.token, "voice", "One").await;
     let mut wa = ready(&app, &a.token).await;
     let mut wb = ready(&app, &b.token).await;
-    wa.send_json(join(v.id)).await;
+    let k = key();
+    wa.send_json(join_as(v.id, &k)).await;
     member_update(&mut wb, a.user.id).await;
     let mut wa2 = ready(&app, &a.token).await;
-    wa2.send_json(join(v.id)).await;
+    wa2.send_json(join_as(v.id, &k)).await;
     let mut saw_left = false;
     loop {
         match wa2.try_next(1500).await {
@@ -258,4 +267,130 @@ async fn rejoin_same_channel_does_not_announce_leave() {
         assert!(!matches!(m, WsServerMsg::VoiceMemberLeft { .. }), "peer saw a leave");
     }
     assert_eq!(app.state.voice.members().len(), 1);
+}
+
+async fn a_and_b() -> (TestApp, rynuvo_proto::JoinResp, rynuvo_proto::JoinResp) {
+    let app = TestApp::spawn().await;
+    let a = app.user("Dimas").await;
+    let b = app.user("Ayu").await;
+    (app, a, b)
+}
+
+#[tokio::test]
+async fn members_carry_their_pubkey() {
+    let (app, a, b) = a_and_b().await;
+    let v = app.create_channel(&a.token, "voice", "Mabar").await;
+    let mut wa = ready(&app, &a.token).await;
+    let mut wb = ready(&app, &b.token).await;
+    let k = key();
+    wa.send_json(join_as(v.id, &k)).await;
+    assert_eq!(member_update(&mut wb, a.user.id).await.pubkey, k);
+}
+
+#[tokio::test]
+async fn bad_pubkey_cannot_join() {
+    let (app, a, _) = a_and_b().await;
+    let v = app.create_channel(&a.token, "voice", "Mabar").await;
+    let mut wa = ready(&app, &a.token).await;
+    wa.send_json(join_as(v.id, "x")).await;
+    assert_eq!(voice_ended(&mut wa).await, "Update Rynuvo to join voice");
+    assert!(app.state.voice.members().is_empty());
+}
+
+#[tokio::test]
+async fn envelopes_only_flow_within_a_scope() {
+    let app = TestApp::spawn().await;
+    let a = app.user("Dimas").await;
+    let b = app.user("Ayu").await;
+    let c = app.user("Budi").await;
+    let v1 = app.create_channel(&a.token, "voice", "One").await;
+    let v2 = app.create_channel(&a.token, "voice", "Two").await;
+    let (mut wa, mut wb, mut wc) = (ready(&app, &a.token).await, ready(&app, &b.token).await, ready(&app, &c.token).await);
+    wa.send_json(join(v1.id)).await;
+    wb.send_json(join(v1.id)).await;
+    wc.send_json(join(v2.id)).await;
+    member_update(&mut wc, b.user.id).await;
+    let send = |to: i64, envelope: String| json!({"t":"e2eeKey","d":{"to":to,"scope":{"kind":"voice","id":v1.id},"generation":1,"envelope":envelope}});
+    // Other channel and oversized envelopes are dropped; the in-scope one must still arrive.
+    wa.send_json(send(c.user.id, "AAAA".into())).await;
+    wa.send_json(send(b.user.id, "A".repeat(rynuvo_proto::MAX_ENVELOPE_B64 + 1))).await;
+    wa.send_json(send(b.user.id, "AAAA".into())).await;
+    let mut got = Vec::new();
+    while let Some(m) = wb.try_next(400).await {
+        if let WsServerMsg::E2eeKey { from, generation, envelope, .. } = m {
+            got.push((from, generation, envelope));
+        }
+    }
+    assert_eq!(got, vec![(a.user.id, 1, "AAAA".to_string())], "only the in-size envelope arrives");
+    while let Some(m) = wc.try_next(300).await {
+        assert!(!matches!(m, WsServerMsg::E2eeKey { .. }), "key crossed channels");
+    }
+}
+
+#[tokio::test]
+async fn key_requests_are_forwarded_to_the_sender_asked() {
+    let (app, a, b) = a_and_b().await;
+    let v = app.create_channel(&a.token, "voice", "Mabar").await;
+    let (mut wa, mut wb) = (ready(&app, &a.token).await, ready(&app, &b.token).await);
+    wa.send_json(join(v.id)).await;
+    wb.send_json(join(v.id)).await;
+    member_update(&mut wa, b.user.id).await;
+    wb.send_json(json!({"t":"e2eeKeyRequest","d":{"from":a.user.id,"scope":{"kind":"voice","id":v.id}}})).await;
+    let (by, scope) = until(&mut wa, |m| match m {
+        WsServerMsg::E2eeKeyRequest { by, scope } => Some((by, scope)),
+        _ => None,
+    })
+    .await;
+    assert_eq!((by, scope), (b.user.id, Scope::Voice(v.id)));
+}
+
+#[tokio::test]
+async fn takeover_from_another_device_is_a_leave() {
+    let (app, a, b) = a_and_b().await;
+    let v = app.create_channel(&a.token, "voice", "Mabar").await;
+    let mut wa = ready(&app, &a.token).await;
+    let mut wb = ready(&app, &b.token).await;
+    wa.send_json(join(v.id)).await;
+    member_update(&mut wb, a.user.id).await;
+    let mut wa2 = ready(&app, &a.token).await;
+    let k2 = key();
+    wa2.send_json(join_as(v.id, &k2)).await;
+    // The leave must come before the new member's update.
+    let mut saw_left = false;
+    let m = until(&mut wb, |m| match m {
+        WsServerMsg::VoiceMemberLeft { user_id, .. } if user_id == a.user.id => {
+            saw_left = true;
+            None
+        }
+        WsServerMsg::VoiceMemberUpdated(v) if v.user_id == a.user.id => Some(v),
+        _ => None,
+    })
+    .await;
+    assert!(saw_left, "takeover must be announced as a leave first");
+    assert_eq!(m.pubkey, k2);
+    assert_eq!(voice_ended(&mut wa).await, "You joined voice from another device");
+}
+
+#[tokio::test]
+async fn reconnect_same_key_is_not_a_leave() {
+    let (app, a, b) = a_and_b().await;
+    let v = app.create_channel(&a.token, "voice", "Mabar").await;
+    let mut wa = ready(&app, &a.token).await;
+    let mut wb = ready(&app, &b.token).await;
+    let k = key();
+    wa.send_json(join_as(v.id, &k)).await;
+    member_update(&mut wb, a.user.id).await;
+    let mut wa2 = ready(&app, &a.token).await;
+    wa2.send_json(join_as(v.id, &k)).await;
+    let mut left = false;
+    until(&mut wb, |m| match m {
+        WsServerMsg::VoiceMemberLeft { .. } => {
+            left = true;
+            None
+        }
+        WsServerMsg::VoiceMemberUpdated(v) if v.user_id == a.user.id => Some(()),
+        _ => None,
+    })
+    .await;
+    assert!(!left, "a same-key reconnect is not a leave");
 }
