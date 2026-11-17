@@ -394,6 +394,12 @@ mod e2ee_lab {
             bc.remove_viewer(viewer)
         }
 
+        /// The streamer learned a new device key for `viewer` (as `VoiceCtl` does): returns the rotation.
+        pub fn rekey_viewer(&self, viewer: Id) -> Vec<Outgoing> {
+            let bc = self.bcast.lock().unwrap().clone().unwrap();
+            bc.rekey_viewer(viewer)
+        }
+
         pub fn stop(&self) {
             self.watches.lock().unwrap().clear();
             self.bcast.lock().unwrap().take();
@@ -558,4 +564,35 @@ async fn engine_without_keys_sends_nothing() {
         .count();
     assert_eq!(media, 0, "no media leaves without a stream key");
     assert!(aus.lock().unwrap().is_empty());
+}
+
+/// A viewer's device key changed without leaving: every viewer gets a new stream key, the changed one
+/// sealed to their new device key only.
+#[tokio::test(flavor = "multi_thread")]
+async fn viewer_device_key_change_rotates_stream_key() {
+    use e2ee_lab::*;
+    use rynuvo_proto::e2ee::{DeviceKey, frame_generation, open_envelope};
+    const B: i64 = 2;
+    const C: i64 = 3;
+    let lab = Lab::new(&[S, B, C]);
+    lab.go_live(synthetic_capture());
+    let (b_aus, b_out) = collector();
+    let (c_aus, c_out) = collector();
+    lab.deliver(S, lab.watch(B, b_out));
+    lab.deliver(S, lab.watch(C, c_out));
+    eventually("both watch", 10, || b_aus.lock().unwrap().len() >= 5 && c_aus.lock().unwrap().len() >= 5).await;
+    let gen0 = frame_generation(&lab.frames_to(B).last().unwrap().1.data).unwrap();
+
+    let new_dev = DeviceKey::generate();
+    lab.keys[&S].lock().unwrap().set_peer_pubkey(B, new_dev.public());
+    let out = lab.rekey_viewer(B);
+    let mut to: Vec<i64> = out.iter().map(|o| o.to).collect();
+    to.sort();
+    assert_eq!(to, vec![B, C], "every viewer gets the new key");
+    assert!(out.iter().all(|o| o.generation == gen0.wrapping_add(1)));
+    let s_pub = lab.keys[&S].lock().unwrap().my_public();
+    let o = out.iter().find(|o| o.to == B).unwrap();
+    assert!(open_envelope(&new_dev, S, &s_pub, B, &Lab::scope(), o.generation, &o.envelope).is_some());
+    assert!(lab.rekey_viewer(9).is_empty(), "not a viewer: nothing");
+    lab.stop();
 }

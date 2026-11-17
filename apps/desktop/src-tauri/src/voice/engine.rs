@@ -56,6 +56,8 @@ pub enum VoiceEvent {
     Level { db: f32, open: bool },
     Path { via: LinkPath },
     DeviceError { message: String },
+    /// Something about the call the UI should show (like `DeviceError`, but not about audio devices).
+    Notice { message: String },
     /// My own voice state changed (from the UI, a shortcut, the tray or the server).
     State { channel_id: Option<Id>, muted: bool, deafened: bool },
     /// Who is in my call, or someone's device key in it, changed: the UI re-reads `e2ee_call`.

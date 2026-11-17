@@ -54,12 +54,55 @@ pub struct MyVoice {
     pub deafened: bool,
 }
 
-/// Device public keys in my current call, for verification codes. Public keys only.
+/// Device public keys in my current call, for verification codes. Public keys only, and exactly the
+/// ones my media keys are sealed to and opened from.
 #[derive(Debug, Clone)]
 pub struct CallKeys {
     pub me: (Id, PublicKey),
     pub others: Vec<(Id, PublicKey)>,
 }
+
+impl CallKeys {
+    /// `user`'s key in use, if it is still `pubkey` (the one the UI showed and the person compared).
+    pub fn verify_target(&self, user: Id, pubkey: &str) -> Result<PublicKey, String> {
+        let (_, pk) = self.others.iter().find(|(u, _)| *u == user).ok_or("not in your call")?;
+        if pk.to_b64() != pubkey {
+            return Err("their key changed, compare the code again".into());
+        }
+        Ok(pk.clone())
+    }
+}
+
+/// What the UI shows when someone in my call has no usable device key (an older server drops it).
+pub const E2EE_UNSUPPORTED: &str = "The server needs an update for encrypted calls";
+
+/// Others in channel `ch` without a usable device key: their media can't be end-to-end encrypted, so
+/// it is never sent to nor played from them.
+pub fn members_without_e2ee(me: Id, ch: Id, members: &[VoiceMember]) -> Vec<Id> {
+    members
+        .iter()
+        .filter(|m| m.channel_id == ch && m.user_id != me && PublicKey::from_b64(&m.pubkey).is_none())
+        .map(|m| m.user_id)
+        .collect()
+}
+
+/// The keys for verification codes: for each announced (user, key), the key my crypto uses for them.
+/// Users my crypto has no key for yet are left out; None if any key in use differs from the announced
+/// one (codes would then vouch for a key that isn't the one in use).
+pub fn agreed_keys(announced: &[(Id, String)], in_use: impl Fn(Id) -> Option<PublicKey>) -> Option<Vec<(Id, PublicKey)>> {
+    let mut out = Vec::new();
+    for (u, b64) in announced {
+        let Some(used) = in_use(*u) else { continue };
+        if PublicKey::from_b64(b64).as_ref() != Some(&used) {
+            return None;
+        }
+        out.push((*u, used));
+    }
+    Some(out)
+}
+
+/// Asked when a member's device key changed in my call; returns stream-key envelopes to send.
+pub type RekeyHook = Arc<dyn Fn(Id) -> Vec<Outgoing> + Send + Sync>;
 
 #[derive(Default)]
 struct State {
@@ -83,6 +126,10 @@ struct State {
     device: Option<DeviceKey>,
     /// Media keys, made for the user id beside them.
     keys: Option<(Id, SharedKeys)>,
+    /// Go Live's part when a member's device key changes (rotate my stream key).
+    on_rekey: Option<RekeyHook>,
+    /// The "server needs an update" notice was shown for this call.
+    unsupported_warned: bool,
 }
 
 impl State {
@@ -100,19 +147,20 @@ impl State {
         self.keys.as_ref().map(|(_, k)| k.clone())
     }
 
-    /// Public keys of everyone in my current voice channel, me included (members without a valid key
-    /// are left out). None when not in voice.
+    /// Public keys of everyone in my current voice channel, me included, read from the key state my
+    /// media keys are sealed with (members it has no key for are left out). None when not in voice, or
+    /// when a key in use differs from the one the server announced.
     fn call_keys(&mut self) -> Option<CallKeys> {
         let ch = self.want?;
         let me = self.me?;
-        let mine = self.device().public();
-        let others = self
-            .members
-            .iter()
-            .filter(|m| m.channel_id == ch && m.user_id != me)
-            .filter_map(|m| Some((m.user_id, PublicKey::from_b64(&m.pubkey)?)))
-            .collect();
-        Some(CallKeys { me: (me, mine), others })
+        let keys = self.keys()?;
+        let announced = self.others_in(ch);
+        let k = keys.lock().unwrap();
+        let Some(others) = agreed_keys(&announced, |u| k.peer_pubkey(u)) else {
+            tracing::warn!("e2ee: a key in use differs from the announced one, no verification code");
+            return None;
+        };
+        Some(CallKeys { me: (me, k.my_public()), others })
     }
 
     /// Everyone else in voice channel `ch`, with their device keys.
@@ -194,6 +242,32 @@ impl VoiceCtl {
         self.st.lock().unwrap().call_keys()
     }
 
+    /// Go Live's hook for a member's device key change (see `RekeyHook`).
+    pub fn set_on_peer_rekeyed(&self, f: RekeyHook) {
+        self.st.lock().unwrap().on_rekey = Some(f);
+    }
+
+    /// Someone in my call has no usable device key (a server too old for encrypted calls): their media
+    /// stays dropped; say why, once per call.
+    fn check_e2ee_support(&self) {
+        let missing = {
+            let mut s = self.st.lock().unwrap();
+            let (Some(ch), Some(me)) = (s.want, s.me) else {
+                s.unsupported_warned = false;
+                return;
+            };
+            let missing = members_without_e2ee(me, ch, &s.members);
+            if missing.is_empty() || s.unsupported_warned {
+                s.unsupported_warned &= !missing.is_empty();
+                return;
+            }
+            s.unsupported_warned = true;
+            missing
+        };
+        tracing::warn!("e2ee: members {missing:?} have no device key (server too old?); their audio is dropped");
+        (self.events)(VoiceEvent::Notice { message: E2EE_UNSUPPORTED.into() });
+    }
+
     pub fn channel(&self) -> Option<Id> {
         self.st.lock().unwrap().want
     }
@@ -237,8 +311,9 @@ impl VoiceCtl {
             let mut k = keys.lock().unwrap();
             for (u, pk) in &others {
                 k.forget_peer(&scope, *u);
-                if let Some(pk) = PublicKey::from_b64(pk) {
-                    k.set_peer_pubkey(*u, pk);
+                match PublicKey::from_b64(pk) {
+                    Some(pk) => k.set_peer_pubkey(*u, pk),
+                    None => k.remove_peer_pubkey(*u),
                 }
             }
             k.share_current(&scope, &ids, Instant::now())
@@ -247,6 +322,8 @@ impl VoiceCtl {
         for from in ids {
             self.send(WsClientMsg::E2eeKeyRequest { from, scope: scope.clone() });
         }
+        // The codes come from the keys now in use.
+        self.e2ee_changed();
     }
 
     /// `user` appeared in my call: start them fresh and send them my current key (no rotation).
@@ -256,12 +333,44 @@ impl VoiceCtl {
         let out = {
             let mut k = keys.lock().unwrap();
             k.forget_peer(&scope, user);
-            if let Some(pk) = PublicKey::from_b64(pubkey) {
-                k.set_peer_pubkey(user, pk);
+            match PublicKey::from_b64(pubkey) {
+                Some(pk) => k.set_peer_pubkey(user, pk),
+                None => k.remove_peer_pubkey(user),
             }
             k.share_current(&scope, &[user], Instant::now())
         };
         self.send_keys(out);
+    }
+
+    /// `user`'s device key changed while they stayed in my call. Handled as a leave and a join: nothing
+    /// of theirs is kept, everyone else gets a new key of mine, they get my keys sealed to the new device
+    /// key, and if they watch my stream, all viewers get a new stream key.
+    fn e2ee_rekeyed(&self, ch: Id, user: Id, pubkey: &str) {
+        tracing::warn!("e2ee: user {user}'s device key changed without a leave; treating it as a new device");
+        let (keys, others) = {
+            let mut s = self.st.lock().unwrap();
+            (s.keys(), s.others_in(ch))
+        };
+        let Some(keys) = keys else { return };
+        let scope = Scope::Voice(ch);
+        let rest: Vec<Id> = others.into_iter().map(|(u, _)| u).filter(|u| *u != user).collect();
+        let out = {
+            let mut k = keys.lock().unwrap();
+            k.forget_peer(&scope, user);
+            match PublicKey::from_b64(pubkey) {
+                Some(pk) => k.set_peer_pubkey(user, pk),
+                None => k.remove_peer_pubkey(user),
+            }
+            let now = Instant::now();
+            let mut out = k.rotate(&scope, &rest, now);
+            out.extend(k.share_current(&scope, &[user], now));
+            out
+        };
+        self.send_keys(out);
+        let hook = self.st.lock().unwrap().on_rekey.clone();
+        if let Some(h) = hook {
+            self.send_keys(h(user));
+        }
     }
 
     /// `user` left my call: drop their keys and give everyone left a new key of mine.
@@ -658,6 +767,7 @@ impl VoiceCtl {
                 };
                 self.start_engine(*channel_id, *session, key, *udp_port);
                 self.e2ee_start(*channel_id);
+                self.check_e2ee_support();
                 if muted || deafened {
                     self.send(WsClientMsg::VoiceState { muted, deafened });
                 }
@@ -694,6 +804,7 @@ impl VoiceCtl {
                 if Some(*user_id) != me && want == Some(*channel_id) {
                     self.e2ee_changed();
                 }
+                self.check_e2ee_support();
             }
             WsServerMsg::StreamStarted(info) => {
                 let (engine, engine_ch) = {
@@ -705,7 +816,7 @@ impl VoiceCtl {
                 }
             }
             WsServerMsg::VoiceMemberUpdated(m) => {
-                let (fresh, e2ee_changed, me, engine, engine_ch) = {
+                let (fresh, key_changed, e2ee_changed, me, engine, engine_ch) = {
                     let mut s = self.st.lock().unwrap();
                     let old = s.members.iter().find(|x| x.user_id == m.user_id && x.channel_id == m.channel_id);
                     let fresh = old.is_none();
@@ -716,17 +827,23 @@ impl VoiceCtl {
                     let e2ee_changed = (in_mine && (fresh || key_changed)) || moved_out;
                     s.members.retain(|x| x.user_id != m.user_id);
                     s.members.push(m.clone());
-                    (fresh, e2ee_changed, s.me, s.engine.clone(), s.engine_channel)
+                    (fresh, key_changed, e2ee_changed, s.me, s.engine.clone(), s.engine_channel)
                 };
+                if Some(m.user_id) != me && engine_ch == Some(m.channel_id) {
+                    if fresh {
+                        if let Some(e) = engine {
+                            e.play_tone(Tone::Join);
+                        }
+                        self.e2ee_joined(m.channel_id, m.user_id, &m.pubkey);
+                    } else if key_changed {
+                        self.e2ee_rekeyed(m.channel_id, m.user_id, &m.pubkey);
+                    }
+                }
+                // After the key state is updated: the UI re-reads codes from the keys in use.
                 if e2ee_changed {
                     self.e2ee_changed();
                 }
-                if fresh && Some(m.user_id) != me && engine_ch == Some(m.channel_id) {
-                    if let Some(e) = engine {
-                        e.play_tone(Tone::Join);
-                    }
-                    self.e2ee_joined(m.channel_id, m.user_id, &m.pubkey);
-                }
+                self.check_e2ee_support();
             }
             WsServerMsg::E2eeKey { from, scope, generation, envelope } => {
                 let Ok(env) = B64.decode(envelope) else { return };
@@ -764,6 +881,44 @@ fn toggle_tone(before: (bool, bool), after: (bool, bool)) -> Option<Tone> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn member(user_id: Id, channel_id: Id, pubkey: &str) -> VoiceMember {
+        VoiceMember { user_id, channel_id, muted: false, deafened: false, joined_at: 0, call_since: 0, pubkey: pubkey.into() }
+    }
+
+    #[test]
+    fn members_without_a_device_key_are_found() {
+        let good = DeviceKey::generate().public().to_b64();
+        let ms = vec![member(1, 10, ""), member(2, 10, &good), member(3, 10, "garbage"), member(4, 11, ""), member(5, 10, "")];
+        // 5 is me; 4 is in another channel.
+        assert_eq!(members_without_e2ee(5, 10, &ms), vec![1, 3]);
+        assert!(members_without_e2ee(5, 11, &[member(4, 11, &good)]).is_empty());
+    }
+
+    #[test]
+    fn codes_use_only_keys_both_sides_agree_on() {
+        let (k1, k2) = (DeviceKey::generate().public(), DeviceKey::generate().public());
+        let announced = vec![(1, k1.to_b64()), (2, k2.to_b64())];
+        let (a1, a2) = (k1.clone(), k2.clone());
+        let same = agreed_keys(&announced, |u| if u == 1 { Some(a1.clone()) } else { Some(a2.clone()) });
+        assert_eq!(same, Some(vec![(1, k1.clone()), (2, k2.clone())]));
+        // Not yet in use (engine not started): left out, not a mismatch.
+        let a1 = k1.clone();
+        assert_eq!(agreed_keys(&announced, |u| (u == 1).then(|| a1.clone())), Some(vec![(1, k1.clone())]));
+        // The crypto uses another key than the one announced: no code at all.
+        let other = DeviceKey::generate().public();
+        assert_eq!(agreed_keys(&announced, |u| if u == 1 { Some(other.clone()) } else { Some(k2.clone()) }), None);
+    }
+
+    #[test]
+    fn verify_refuses_a_key_that_is_not_the_one_in_use() {
+        let (me, them) = (DeviceKey::generate().public(), DeviceKey::generate().public());
+        let keys = CallKeys { me: (1, me), others: vec![(2, them.clone())] };
+        assert_eq!(keys.verify_target(2, &them.to_b64()), Ok(them.clone()));
+        let shown = DeviceKey::generate().public().to_b64();
+        assert!(keys.verify_target(2, &shown).is_err(), "the UI showed another key than the one in use");
+        assert!(keys.verify_target(3, &them.to_b64()).is_err(), "not in the call");
+    }
 
     #[test]
     fn the_sound_for_a_mute_or_deafen_change() {

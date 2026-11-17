@@ -38,6 +38,13 @@ pub struct StreamCtl {
 impl StreamCtl {
     pub fn new(voice: VoiceCtl, capture: StartCapture, events: EventSink, rt: tokio::runtime::Handle) -> StreamCtl {
         let ctl = StreamCtl { st: Arc::default(), voice: voice.clone(), capture, events, rt };
+        // A viewer's device key changed in my call: rotate my stream key (the voice controller sends it).
+        let weak_rekey = Arc::downgrade(&ctl.st);
+        voice.set_on_peer_rekeyed(Arc::new(move |user| {
+            let Some(st) = weak_rekey.upgrade() else { return Vec::new() };
+            let s = st.lock().unwrap();
+            s.live.as_ref().map(|b| b.rekey_viewer(user)).unwrap_or_default()
+        }));
         let weak = Arc::downgrade(&ctl.st);
         voice.set_video_sink(Arc::new(move |from, data: &[u8]| {
             let Some(st) = weak.upgrade() else { return };

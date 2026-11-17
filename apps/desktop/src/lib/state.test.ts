@@ -72,6 +72,11 @@ describe('voice ownership', () => {
     expect(store.myVoice.channelId).toBe(5)
   })
 
+  test('voice_notice_shows_the_server_update_message', () => {
+    store.applyVoiceEvent({ kind: 'notice', message: 'The server needs an update for encrypted calls' })
+    expect(store.voiceNotice).toBe('The server needs an update for encrypted calls')
+  })
+
   test('ready_after_channels_and_first_page', async () => {
     store.phase = 'boot'
     expect(store.ready).toBe(false)

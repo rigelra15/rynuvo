@@ -366,12 +366,31 @@ impl Broadcast {
         };
         let Some(v) = gone else { return Vec::new() };
         v.link.stop();
+        self.rotate_key(viewer, &rest)
+    }
+
+    /// `viewer`'s device key changed while watching (a new device, or the server swapped it): my stream
+    /// key may have been sealed to a key that isn't theirs, so every viewer gets a new one (theirs sealed
+    /// to the device key now held) and a key frame follows.
+    pub fn rekey_viewer(&self, viewer: Id) -> Vec<Outgoing> {
+        let all: Vec<Id> = {
+            let vs = self.inner.viewers.lock().unwrap();
+            if !vs.contains_key(&viewer) {
+                return Vec::new();
+            }
+            vs.keys().copied().collect()
+        };
+        self.rotate_key(viewer, &all)
+    }
+
+    /// Drop what I hold from `forget` and send `to` a new stream key, in use (with a key frame) shortly.
+    fn rotate_key(&self, forget: Id, to: &[Id]) -> Vec<Outgoing> {
         let Some(k) = &self.inner.net.keys else { return Vec::new() };
         let scope = self.inner.scope();
         let out = {
             let mut k = k.lock().unwrap();
-            k.forget_peer(&scope, viewer);
-            k.rotate(&scope, &rest, Instant::now())
+            k.forget_peer(&scope, forget);
+            k.rotate(&scope, to, Instant::now())
         };
         *self.inner.key_at.lock().unwrap() = Some(Instant::now() + ACTIVATE_DELAY + ROTATE_KEY_MARGIN);
         out

@@ -158,11 +158,8 @@ pub fn e2ee_person_code(core: State<'_, Core>, user_id: Id) -> Option<PersonCode
 #[tauri::command]
 pub fn e2ee_verify(app: AppHandle, core: State<'_, Core>, trust: State<'_, Mutex<Trust>>, user_id: Id, pubkey: String) -> Result<(), String> {
     let keys = core.voice.call_keys().ok_or("not in a call")?;
-    let (_, pk) = keys.others.iter().find(|(u, _)| *u == user_id).ok_or("not in your call")?;
-    if pk.to_b64() != pubkey {
-        return Err("their key changed, compare the code again".into());
-    }
-    trust.lock().unwrap().verify(user_id, pk);
+    let pk = keys.verify_target(user_id, &pubkey)?;
+    trust.lock().unwrap().verify(user_id, &pk);
     let _ = app.emit(E2EE_EVENT, ());
     Ok(())
 }

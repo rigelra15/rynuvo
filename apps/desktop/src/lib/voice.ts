@@ -7,6 +7,7 @@ export type VoiceEvent =
   | { kind: 'level'; db: number; open: boolean }
   | { kind: 'path'; via: 'udp' | 'ws' }
   | { kind: 'deviceError'; message: string }
+  | { kind: 'notice'; message: string }
   | { kind: 'state'; channelId: Id | null; muted: boolean; deafened: boolean }
 
 export interface Prefs {

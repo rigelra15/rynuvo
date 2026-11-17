@@ -527,3 +527,48 @@ fn memory_key_when_keyring_fails() {
     let env = seal_envelope(&k1, 1, 2, &k2.public(), &scope, 7, &mk).expect("seal");
     assert_eq!(open_envelope(&k2, 1, &k1.public(), 2, &scope, 7, &env), Some(mk));
 }
+
+/// The server swaps B's announced device key without a leave (e.g. after first announcing an attacker
+/// key): A must treat it as a new device. The key A's crypto uses and the code A shows both follow the
+/// new key, A rotates its call key to the others, and nothing new is sealed to the old key.
+#[tokio::test(flavor = "multi_thread")]
+async fn reannounced_pubkey_replaces_the_key_in_use() {
+    use rynuvo_proto::{VoiceMember, e2ee::PublicKey};
+    let app = TestApp::spawn().await;
+    let owner = app.user("Dimas").await;
+    let ch = app.create_channel(&owner.token, "voice", "Mabar").await.id;
+    let (a, a_id) = (tapped_as(&app, &owner.token, owner.user.id, None).await, owner.user.id);
+    a.ctl.join(ch);
+    eventually("A engine", || a.counts.lock().unwrap().starts == 1).await;
+    let b_dev = DeviceKey::generate();
+    let bu = app.user("Raka").await;
+    let b = tapped_as(&app, &bu.token, bu.user.id, Some(b_dev.clone())).await;
+    let b_id = bu.user.id;
+    b.ctl.join(ch);
+    eventually("B engine", || b.counts.lock().unwrap().starts == 1).await;
+    let (c, c_id) = tapped(&app, "Ayu", ch).await;
+    eventually("B and C have A's key", || !keys_from(&b.log, a_id).is_empty() && !keys_from(&c.log, a_id).is_empty()).await;
+    let keys = a.ctl.e2ee_keys().unwrap();
+    eventually("A uses B's real key", || keys.lock().unwrap().peer_pubkey(b_id) == Some(b_dev.public())).await;
+    let g_a = keys_from(&c.log, a_id)[0];
+
+    let new_dev = DeviceKey::generate();
+    let m = VoiceMember { user_id: b_id, channel_id: ch, muted: false, deafened: false, joined_at: 0, call_since: 0, pubkey: new_dev.public().to_b64() };
+    a.ctl.on_server(&WsServerMsg::VoiceMemberUpdated(m));
+
+    assert_eq!(keys.lock().unwrap().peer_pubkey(b_id), Some(new_dev.public()), "crypto follows the announced key");
+    let ck = a.ctl.call_keys().expect("in a call");
+    assert_eq!(ck.others.iter().find(|(u, _)| *u == b_id).map(|(_, k)| k.clone()), Some(new_dev.public()), "the code covers the key in use");
+    let scope = Scope::Voice(ch);
+    let out = keys.lock().unwrap().share_current(&scope, &[b_id], std::time::Instant::now());
+    let a_pub: PublicKey = keys.lock().unwrap().my_public();
+    for o in &out {
+        assert!(open_envelope(&new_dev, a_id, &a_pub, b_id, &scope, o.generation, &o.envelope).is_some(), "sealed to the new key");
+        assert!(open_envelope(&b_dev, a_id, &a_pub, b_id, &scope, o.generation, &o.envelope).is_none(), "not to the old one");
+    }
+    eventually("A rotated its key to C", || keys_from(&c.log, a_id).contains(&g_a.wrapping_add(1))).await;
+    let _ = c_id;
+    a.ctl.leave();
+    b.ctl.leave();
+    c.ctl.leave();
+}

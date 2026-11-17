@@ -376,6 +376,7 @@ class Store {
         this.voicePath = e.via
         return
       case 'deviceError':
+      case 'notice':
         this.voiceNotice = e.message
         return
       case 'state':
