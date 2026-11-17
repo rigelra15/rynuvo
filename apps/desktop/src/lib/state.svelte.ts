@@ -2,7 +2,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity'
 import { api, errText, type ConnState, type SessionEvent } from './api'
 import { next } from './selection'
 import { dialog } from './dialog.svelte'
-import type { Channel, Id, Message, User } from './types'
+import type { CallSecurity, Channel, Id, Message, User } from './types'
 import { applyVoice, type MyVoice, type VoiceEvent, type VoiceMember } from './voice'
 import { applyStreams, type StreamEvent, type StreamInfo } from './stream'
 import type { MusicCmd, MusicState, MusicStatus } from './music'
@@ -173,6 +173,8 @@ class Store {
     this.myVoice = { channelId: null, muted: false, deafened: false }
     this.speaking.clear()
     this.voicePath = null
+    this.security = null
+    this.verifying = null
     this.streams = []
     this.live = null
     this.watching = null
@@ -259,7 +261,24 @@ class Store {
   joinVoice(channel: Id) {
     if (this.inVoice(channel)) return
     this.voicePath = null
-    void this.voiceCall(() => api.voiceJoin(channel))
+    void this.voiceCall(() => api.voiceJoin(channel)).then(() => this.refreshSecurity())
+  }
+
+  /** Who in my call has which key status, and the call code. Null outside a call. */
+  security = $state<CallSecurity | null>(null)
+  /** The member whose person code is on screen, if any. */
+  verifying = $state<Id | null>(null)
+  private securitySeq = 0
+
+  /** Re-read the call's verification data (on join and whenever the backend says it changed). */
+  async refreshSecurity() {
+    const seq = ++this.securitySeq
+    try {
+      const s = await api.e2eeCall()
+      if (seq === this.securitySeq) this.security = s
+    } catch {
+      if (seq === this.securitySeq) this.security = null
+    }
   }
   isLive(user: Id): boolean {
     return this.streams.some((s) => s.userId === user)
@@ -324,6 +343,9 @@ class Store {
     this.speaking.clear()
     this.micLevel = { db: -100, open: false }
     this.voicePath = null
+    this.securitySeq++
+    this.security = null
+    this.verifying = null
   }
 
   leaveVoice() {

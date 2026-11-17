@@ -1,6 +1,6 @@
 import { invoke, convertFileSrc, Channel as IpcChannel } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { Channel, ChannelKind, Id, ImageRef, Message, User, WsServerMsg } from './types'
+import type { CallSecurity, Channel, ChannelKind, Id, PersonCode, ImageRef, Message, User, WsServerMsg } from './types'
 import type { MyVoice, Prefs, VoiceEvent } from './voice'
 import type { SelfCheck, Source, StreamEvent } from './stream'
 import type { Lyrics, MusicCmd, MusicStatus, SongResult, Annotation } from './music'
@@ -57,6 +57,9 @@ export const api = {
   voiceSetDevices: (input: string | null, output: string | null) => invoke<void>('voice_set_devices', { input, output }),
   voiceSetThreshold: (threshold: number) => invoke<void>('voice_set_threshold', { threshold }),
   voiceMicTest: (on: boolean) => invoke<void>('voice_mic_test', { on }),
+  e2eeCall: () => invoke<CallSecurity | null>('e2ee_call'),
+  e2eePersonCode: (userId: Id) => invoke<PersonCode | null>('e2ee_person_code', { userId }),
+  e2eeVerify: (userId: Id, pubkey: string) => invoke<void>('e2ee_verify', { userId, pubkey }),
   voiceKick: (userId: Id) => invoke<void>('voice_kick', { userId }),
   streamSources: () => invoke<Source[]>('stream_sources'),
   streamEncoders: () => invoke<string[]>('stream_encoders'),
@@ -90,6 +93,10 @@ export const api = {
 
 export function onVoiceEvent(cb: (e: VoiceEvent) => void): Promise<UnlistenFn> {
   return listen<VoiceEvent>('rynuvo://voice', (e) => cb(e.payload))
+}
+
+export function onE2eeChanged(cb: () => void): Promise<UnlistenFn> {
+  return listen<null>('e2ee-changed', () => cb())
 }
 
 export function onMusicEvent(cb: (e: MusicStatus) => void): Promise<UnlistenFn> {

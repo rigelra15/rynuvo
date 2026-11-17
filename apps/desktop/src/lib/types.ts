@@ -3,6 +3,11 @@ import type { VoiceMember } from './voice'
 import type { StreamInfo } from './stream'
 import type { MusicState } from './music'
 export type Id = number
+export type KeyStatus = 'verified' | 'known' | 'newDevice' | 'changed'
+export interface MemberSecurity { userId: Id; status: KeyStatus; pubkey: string }
+/** End-to-end encryption state of the call I am in. */
+export interface CallSecurity { code: string; members: MemberSecurity[] }
+export interface PersonCode { code: string; pubkey: string }
 export type ChannelKind = 'text' | 'voice'
 export interface User { id: Id; nickname: string; isAdmin: boolean; avatarIcon?: string | null; avatarColor?: string | null }
 export interface Channel { id: Id; kind: ChannelKind; name: string; topic: string | null; ownerId: Id; position: number }

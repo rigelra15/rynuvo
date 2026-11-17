@@ -1,7 +1,7 @@
 <script lang="ts" module>
   export type IconName =
     | 'mic' | 'micOff' | 'headphones' | 'headphonesOff' | 'screen' | 'leave'
-    | 'hash' | 'volume' | 'plus' | 'settings' | 'edit' | 'trash' | 'close' | 'check' | 'logo' | 'users' | 'home'
+    | 'hash' | 'volume' | 'plus' | 'settings' | 'edit' | 'trash' | 'close' | 'check' | 'lock' | 'warn' | 'logo' | 'users' | 'home'
     | 'play' | 'pause' | 'skip' | 'queue' | 'music' | 'repeat' | 'repeatOne' | 'lyrics'
 </script>
 
@@ -61,6 +61,12 @@
     <path d="M18 6 6 18M6 6l12 12" />
   {:else if name === 'check'}
     <path d="M20 6 9 17l-5-5" />
+  {:else if name === 'lock'}
+    <rect x="5" y="11" width="14" height="10" rx="2" />
+    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+  {:else if name === 'warn'}
+    <path d="M12 3.5 22 20H2z" />
+    <path d="M12 10v4M12 17.2v.1" />
   {:else if name === 'logo'}
     <path d="M12 2.5 21.5 12 12 21.5 2.5 12z" fill="currentColor" stroke="none" />
   {/if}

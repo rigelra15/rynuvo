@@ -18,6 +18,12 @@
     store.setVolume(userId, pct / 100)
   }
 
+  function verify() {
+    const who = userId
+    onClose()
+    store.verifying = who
+  }
+
   async function kick() {
     // Read who before closing: closing the menu drops its props, `userId` included.
     const who = userId
@@ -40,6 +46,7 @@
       <Slider bind:value={pct} max={200} step={1} label="User volume" oninput={change} />
     </label>
   {/if}
+  {#if !isMe && store.inVoice(member?.channelId ?? -1)}<button onclick={verify}>Verify…</button>{/if}
   {#if canKick}<button class="danger" onclick={kick}>Disconnect</button>{/if}
   {#if isMe}<p class="muted">That's you.</p>{/if}
 </div>
