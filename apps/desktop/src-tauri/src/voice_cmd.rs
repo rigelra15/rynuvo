@@ -1,10 +1,13 @@
 //! Tauri commands for voice: thin wrappers over `voice::ctl::VoiceCtl`.
 use rynuvo_proto::Id;
-use tauri::{AppHandle, State};
+use std::sync::Mutex;
+
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_autostart::ManagerExt;
 
 use crate::{
     commands::Core,
+    e2ee::trust::{KeyStatus, Trust},
     prefs::{Prefs, PrefsStore},
     voice::{
         ctl::MyVoice,
@@ -101,4 +104,51 @@ pub async fn voice_mic_test(core: State<'_, Core>, on: bool) -> Result<(), Strin
 #[tauri::command]
 pub fn voice_kick(core: State<'_, Core>, user_id: Id) {
     core.voice.kick(user_id);
+}
+
+/// Tauri event the UI listens to for "re-read the call's verification data".
+pub const E2EE_EVENT: &str = "e2ee-changed";
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberSecurity {
+    pub user_id: Id,
+    pub status: KeyStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallSecurity {
+    /// The 30-digit code over everyone in the call, me included.
+    pub code: String,
+    /// Everyone else in the call. Reading this records their keys as seen.
+    pub members: Vec<MemberSecurity>,
+}
+
+/// The call's verification code and each other member's key status; None when not in voice.
+#[tauri::command]
+pub fn e2ee_call(core: State<'_, Core>, trust: State<'_, Mutex<Trust>>) -> Option<CallSecurity> {
+    let keys = core.voice.call_keys()?;
+    let mut all = vec![keys.me.clone()];
+    all.extend(keys.others.iter().cloned());
+    let mut t = trust.lock().unwrap();
+    let members = keys.others.iter().map(|(u, pk)| MemberSecurity { user_id: *u, status: t.status(*u, pk) }).collect();
+    Some(CallSecurity { code: rynuvo_proto::e2ee::call_code(&all), members })
+}
+
+/// The 30-digit code for me and `user_id`, to compare in person; None if they are not in my call.
+#[tauri::command]
+pub fn e2ee_person_code(core: State<'_, Core>, user_id: Id) -> Option<String> {
+    let keys = core.voice.call_keys()?;
+    let (_, pk) = keys.others.iter().find(|(u, _)| *u == user_id)?;
+    Some(rynuvo_proto::e2ee::person_code((keys.me.0, &keys.me.1), (user_id, pk)))
+}
+
+/// Mark `user_id`'s current device key as verified.
+#[tauri::command]
+pub fn e2ee_verify(app: AppHandle, core: State<'_, Core>, trust: State<'_, Mutex<Trust>>, user_id: Id) {
+    let Some(keys) = core.voice.call_keys() else { return };
+    let Some((_, pk)) = keys.others.iter().find(|(u, _)| *u == user_id) else { return };
+    trust.lock().unwrap().verify(user_id, pk);
+    let _ = app.emit(E2EE_EVENT, ());
 }

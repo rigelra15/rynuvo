@@ -58,6 +58,8 @@ pub enum VoiceEvent {
     DeviceError { message: String },
     /// My own voice state changed (from the UI, a shortcut, the tray or the server).
     State { channel_id: Option<Id>, muted: bool, deafened: bool },
+    /// Who is in my call, or someone's device key in it, changed: the UI re-reads `e2ee_call`.
+    E2eeChanged,
 }
 
 pub type EventSink = Arc<dyn Fn(VoiceEvent) + Send + Sync>;

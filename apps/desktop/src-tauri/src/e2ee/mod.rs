@@ -2,5 +2,6 @@
 
 pub mod device;
 pub mod state;
+pub mod trust;
 
 pub use state::{KeyState, Outgoing, SharedKeys};

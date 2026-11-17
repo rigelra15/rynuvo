@@ -54,6 +54,13 @@ pub struct MyVoice {
     pub deafened: bool,
 }
 
+/// Device public keys in my current call, for verification codes. Public keys only.
+#[derive(Debug, Clone)]
+pub struct CallKeys {
+    pub me: (Id, PublicKey),
+    pub others: Vec<(Id, PublicKey)>,
+}
+
 #[derive(Default)]
 struct State {
     session: Option<SessionHandle>,
@@ -91,6 +98,21 @@ impl State {
             self.keys = Some((me, Arc::new(Mutex::new(KeyState::new(me, dev)))));
         }
         self.keys.as_ref().map(|(_, k)| k.clone())
+    }
+
+    /// Public keys of everyone in my current voice channel, me included (members without a valid key
+    /// are left out). None when not in voice.
+    fn call_keys(&mut self) -> Option<CallKeys> {
+        let ch = self.want?;
+        let me = self.me?;
+        let mine = self.device().public();
+        let others = self
+            .members
+            .iter()
+            .filter(|m| m.channel_id == ch && m.user_id != me)
+            .filter_map(|m| Some((m.user_id, PublicKey::from_b64(&m.pubkey)?)))
+            .collect();
+        Some(CallKeys { me: (me, mine), others })
     }
 
     /// Everyone else in voice channel `ch`, with their device keys.
@@ -160,6 +182,16 @@ impl VoiceCtl {
             self.set_volume(u, v);
         }
         self.set_music_volume(p.music_volume);
+    }
+
+    /// Tell the UI the call's membership or someone's device key changed.
+    fn e2ee_changed(&self) {
+        (self.events)(VoiceEvent::E2eeChanged);
+    }
+
+    /// Everyone's public device keys in my current call, or None when not in voice.
+    pub fn call_keys(&self) -> Option<CallKeys> {
+        self.st.lock().unwrap().call_keys()
     }
 
     pub fn channel(&self) -> Option<Id> {
@@ -264,6 +296,7 @@ impl VoiceCtl {
         self.st.lock().unwrap().want = Some(channel_id);
         self.voice_join(channel_id);
         self.notify();
+        self.e2ee_changed();
     }
 
     pub fn leave(&self) {
@@ -274,6 +307,7 @@ impl VoiceCtl {
         }
         self.stop_engine_after(Some(Tone::Leave));
         self.notify();
+        self.e2ee_changed();
     }
 
     /// Send my mute/deafen state on, with the sound for what changed (`before`: as it was).
@@ -608,6 +642,7 @@ impl VoiceCtl {
                 if let Some(channel_id) = want {
                     self.voice_join(channel_id);
                 }
+                self.e2ee_changed();
             }
             WsServerMsg::VoiceJoined { channel_id, session, key, udp_port } => {
                 let (want, muted, deafened) = {
@@ -632,6 +667,7 @@ impl VoiceCtl {
                 self.st.lock().unwrap().want = None;
                 self.stop_engine();
                 self.notify();
+                self.e2ee_changed();
             }
             WsServerMsg::VoiceMemberLeft { user_id, channel_id } => {
                 let (me, want, engine, engine_ch) = {
@@ -646,6 +682,7 @@ impl VoiceCtl {
                         self.st.lock().unwrap().want = None;
                         self.stop_engine();
                         self.notify();
+                        self.e2ee_changed();
                     }
                 } else if engine_ch == Some(*channel_id) {
                     if let Some(e) = engine {
@@ -653,6 +690,9 @@ impl VoiceCtl {
                         e.play_tone(Tone::Leave);
                     }
                     self.e2ee_left(*channel_id, *user_id);
+                }
+                if Some(*user_id) != me && want == Some(*channel_id) {
+                    self.e2ee_changed();
                 }
             }
             WsServerMsg::StreamStarted(info) => {
@@ -665,13 +705,22 @@ impl VoiceCtl {
                 }
             }
             WsServerMsg::VoiceMemberUpdated(m) => {
-                let (fresh, me, engine, engine_ch) = {
+                let (fresh, e2ee_changed, me, engine, engine_ch) = {
                     let mut s = self.st.lock().unwrap();
-                    let fresh = !s.members.iter().any(|x| x.user_id == m.user_id && x.channel_id == m.channel_id);
+                    let old = s.members.iter().find(|x| x.user_id == m.user_id && x.channel_id == m.channel_id);
+                    let fresh = old.is_none();
+                    let key_changed = old.is_some_and(|x| x.pubkey != m.pubkey);
+                    // They were in my call and moved to another channel.
+                    let moved_out = s.want.is_some_and(|w| w != m.channel_id && s.members.iter().any(|x| x.user_id == m.user_id && x.channel_id == w));
+                    let in_mine = s.want == Some(m.channel_id);
+                    let e2ee_changed = (in_mine && (fresh || key_changed)) || moved_out;
                     s.members.retain(|x| x.user_id != m.user_id);
                     s.members.push(m.clone());
-                    (fresh, s.me, s.engine.clone(), s.engine_channel)
+                    (fresh, e2ee_changed, s.me, s.engine.clone(), s.engine_channel)
                 };
+                if e2ee_changed {
+                    self.e2ee_changed();
+                }
                 if fresh && Some(m.user_id) != me && engine_ch == Some(m.channel_id) {
                     if let Some(e) = engine {
                         e.play_tone(Tone::Join);

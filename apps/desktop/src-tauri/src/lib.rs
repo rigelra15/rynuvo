@@ -63,6 +63,10 @@ pub fn run() {
                     if let voice::engine::VoiceEvent::State { muted, deafened, .. } = &e {
                         tray::update(&handle, *muted, *deafened);
                     }
+                    if matches!(e, voice::engine::VoiceEvent::E2eeChanged) {
+                        let _ = handle.emit(voice_cmd::E2EE_EVENT, ());
+                        return;
+                    }
                     let _ = handle.emit(commands::VOICE_EVENT, e);
                 }),
             );
@@ -74,6 +78,11 @@ pub fn run() {
             let p = prefs.get();
             voice.set_prefs(p.audio());
             app.manage(prefs);
+            let trust_file = match &profile {
+                Some(p) => format!("trust-{p}.json"),
+                None => "trust.json".into(),
+            };
+            app.manage(std::sync::Mutex::new(e2ee::trust::Trust::open(dir.join(trust_file))));
             let h2 = app.handle().clone();
             let stream = stream::ctl::StreamCtl::new(
                 voice.clone(),
@@ -165,6 +174,9 @@ pub fn run() {
             voice_cmd::voice_set_threshold,
             voice_cmd::voice_mic_test,
             voice_cmd::voice_kick,
+            voice_cmd::e2ee_call,
+            voice_cmd::e2ee_person_code,
+            voice_cmd::e2ee_verify,
             voice_cmd::prefs_get,
             voice_cmd::prefs_set,
         ])
