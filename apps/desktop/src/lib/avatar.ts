@@ -26,9 +26,13 @@ export function isAvatarIcon(s: string | null | undefined): s is AvatarIcon {
   return !!s && (AVATAR_ICONS as readonly string[]).includes(s)
 }
 
-/** The user's colour: their pick, else one derived from their id (same on every client). */
+/** A custom colour (from their photo or the picker), stored as `#rrggbb`. */
+export const isHex = (s: string | null | undefined): s is string => !!s && /^#[0-9a-f]{6}$/i.test(s)
+
+/** The user's colour: their pick (a palette key or a custom #rrggbb), else one derived from their id (same on every client). */
 export function avatarColor(u: { id: number; avatarColor?: string | null }): string {
   const k = u.avatarColor
+  if (isHex(k)) return k.toLowerCase()
   if (k && k in PALETTE) return PALETTE[k as ColorKey]
   return PALETTE[KEYS[((u.id % KEYS.length) + KEYS.length) % KEYS.length]]
 }

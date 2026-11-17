@@ -19,11 +19,13 @@ fn e2ee_entry(server: &str) -> String {
     format!("{server}#e2ee")
 }
 
+#[cfg(not(target_os = "android"))]
 /// OS keychain (macOS Keychain / Windows Credential Manager).
 pub struct KeyringStore {
     service: String,
 }
 
+#[cfg(not(target_os = "android"))]
 impl KeyringStore {
     /// `profile` lets two local instances keep separate identities (env `RYNUVO_PROFILE`).
     pub fn new(profile: Option<&str>) -> Self {
@@ -39,6 +41,7 @@ impl KeyringStore {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 impl SecretStore for KeyringStore {
     fn get(&self, server: &str) -> Option<String> {
         self.entry(server)?.get_password().ok()
@@ -63,6 +66,48 @@ impl SecretStore for KeyringStore {
     fn clear(&self, server: &str) {
         if let Some(e) = self.entry(server) {
             let _ = e.delete_credential();
+        }
+    }
+}
+
+/// Android has no keychain the `keyring` crate can reach: secrets live in a JSON file in the
+/// app's private data directory, which only this app can read.
+pub struct FileStore {
+    path: std::path::PathBuf,
+    map: Mutex<HashMap<String, String>>,
+}
+
+impl FileStore {
+    pub fn open(path: std::path::PathBuf) -> Self {
+        let map = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        Self { path, map: Mutex::new(map) }
+    }
+
+    fn save(&self, map: &HashMap<String, String>) {
+        let tmp = self.path.with_extension("tmp");
+        let r = serde_json::to_vec(map)
+            .map_err(std::io::Error::other)
+            .and_then(|b| std::fs::write(&tmp, b))
+            .and_then(|_| std::fs::rename(&tmp, &self.path));
+        if let Err(e) = r {
+            tracing::error!("secret store write failed: {e}");
+        }
+    }
+}
+
+impl SecretStore for FileStore {
+    fn get(&self, server: &str) -> Option<String> {
+        self.map.lock().unwrap().get(server).cloned()
+    }
+    fn set(&self, server: &str, token: &str) {
+        let mut m = self.map.lock().unwrap();
+        m.insert(server.into(), token.into());
+        self.save(&m);
+    }
+    fn clear(&self, server: &str) {
+        let mut m = self.map.lock().unwrap();
+        if m.remove(server).is_some() {
+            self.save(&m);
         }
     }
 }

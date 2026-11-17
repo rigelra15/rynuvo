@@ -12,7 +12,7 @@ DIR=$(mktemp -d)
 trap 'rm -rf "$DIR"' EXIT
 gh release download "v$V" -D "$DIR" -p "Rynuvo-$V-*"
 ls -lh "$DIR"
-for f in mac.dmg mac.app.tar.gz mac.app.tar.gz.sig windows-setup.exe windows-setup.exe.sig; do
+for f in mac.dmg mac.app.tar.gz mac.app.tar.gz.sig windows-setup.exe windows-setup.exe.sig android.apk android.apk.sig; do
   [ -f "$DIR/Rynuvo-$V-$f" ] || { echo "missing Rynuvo-$V-$f in the release" >&2; exit 1; }
 done
 
@@ -27,12 +27,15 @@ doc = {
     "platforms": {
         "darwin-aarch64": {"url": f"{base}/Rynuvo-{v}-mac.app.tar.gz", "signature": sig(f"Rynuvo-{v}-mac.app.tar.gz.sig")},
         "windows-x86_64": {"url": f"{base}/Rynuvo-{v}-windows-setup.exe", "signature": sig(f"Rynuvo-{v}-windows-setup.exe.sig")},
+        # Not a Tauri updater target: the Android app reads this entry itself (apk_update.rs).
+        "android-aarch64": {"url": f"{base}/Rynuvo-{v}-android.apk", "signature": sig(f"Rynuvo-{v}-android.apk.sig")},
     },
 }
 json.dump(doc, open(os.path.join(d, "latest.json"), "w"), indent=2)
 PY
 cp "$DIR/Rynuvo-$V-mac.dmg" "$DIR/Rynuvo-latest-mac.dmg"
 cp "$DIR/Rynuvo-$V-windows-setup.exe" "$DIR/Rynuvo-latest-windows-setup.exe"
+cp "$DIR/Rynuvo-$V-android.apk" "$DIR/Rynuvo-latest-android.apk"
 
 # latest.json goes last so no app sees it before the files it points to exist.
 STAGE=$(ssh "$HOST" 'mktemp -d')

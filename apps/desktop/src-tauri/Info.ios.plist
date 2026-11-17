@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- iPhone: upright only. iPad keeps every orientation (the ~ipad list). -->
+  <key>UISupportedInterfaceOrientations</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+  </array>
+  <!-- A call keeps going with the app in the background (the audio session stays active). -->
+  <key>UIBackgroundModes</key>
+  <array>
+    <string>audio</string>
+  </array>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Rynuvo uses your microphone for voice channels.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Rynuvo uses the camera to scan a sign-in QR code from your other device.</string>
+</dict>
+</plist>

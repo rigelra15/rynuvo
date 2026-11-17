@@ -29,6 +29,8 @@
 * { box-sizing: border-box; }
 
 html, body, #app { height: 100%; margin: 0; }
+/* Phones and tablets: keep the UI clear of the status bar, notch and home indicator. */
+#app { box-sizing: border-box; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 
 body {
   background: var(--desk);
@@ -49,6 +51,15 @@ button {
 }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Touch screens: no system tap flash (the blue box); a press dims the control instead. Focus
+   rings stay for keyboards only, and hover looks don't stick after a tap. */
+* { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+@media (hover: none) {
+  :focus-visible { outline: none; }
+  button, [role='button'], a { transition: opacity 120ms, transform 120ms; }
+  button:active:not(:disabled), [role='button']:active, a:active { opacity: 0.6; }
+}
 
 input, textarea {
   font: inherit;

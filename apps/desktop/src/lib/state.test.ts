@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import type { Message } from './types'
 
 const messages = vi.fn()
+const markRead = vi.fn((..._a: unknown[]) => Promise.resolve())
 vi.mock('./api', () => ({
-  api: { messages: (...a: unknown[]) => messages(...a) },
+  api: { messages: (...a: unknown[]) => messages(...a), markRead: (...a: unknown[]) => markRead(...a) },
   errText: (e: unknown) => String(e),
 }))
 
@@ -101,10 +102,95 @@ describe('voice ownership', () => {
     expect(store.ready).toBe(true)
   })
 
-  test('ready after the boot timeout even with no connection', () => {
+  test('with no connection the splash stays up, however long it takes', () => {
     store.phase = 'app'
     expect(store.ready).toBe(false)
-    store.bootTimedOut = true
-    expect(store.ready).toBe(true)
+    store.bootSlow = true
+    expect(store.ready).toBe(false)
+  })
+
+  test('a call I am in from another device counts as elsewhere, not joined', () => {
+    store.me = { id: 1, nickname: 'me', isAdmin: false }
+    store.voice = [{ userId: 1, channelId: 3, muted: false, deafened: false }]
+    store.myVoice = { channelId: null, muted: false, deafened: false }
+    expect(store.inVoiceElsewhere(3)).toBe(true)
+    expect(store.inVoiceElsewhere(4)).toBe(false)
+    store.myVoice = { channelId: 3, muted: false, deafened: false }
+    expect(store.inVoiceElsewhere(3)).toBe(false)
+  })})
+
+describe('unread', () => {
+  const two = (reads: { channelId: number; lastMessage: number | null; lastRead: number }[]) => ({
+    kind: 'server' as const,
+    data: {
+      t: 'ready' as const,
+      d: {
+        ...ready.data.d,
+        users: [{ id: 1, nickname: 'me', isAdmin: false }, { id: 2, nickname: 'budi', isAdmin: false }],
+        channels: [ready.data.d.channels[0], { id: 5, kind: 'text' as const, name: 'b', topic: null, ownerId: 1, position: 2 }],
+        reads,
+      },
+    },
+  })
+  const created = (m: Message) => store.apply({ kind: 'server', data: { t: 'messageCreated', d: m } })
+
+  beforeEach(() => {
+    store.reset(null)
+    store.phase = 'app'
+    store.looking = true
+    messages.mockReset()
+    messages.mockResolvedValue([])
+    markRead.mockClear()
+  })
+
+  test('a channel with messages past my read mark is unread; the open one gets read', async () => {
+    store.apply(two([{ channelId: 1, lastMessage: 4, lastRead: 4 }, { channelId: 5, lastMessage: 9, lastRead: 7 }]))
+    await flush()
+    store.seeSelected() // channel 1 is open and loaded
+    expect(store.isUnread(1)).toBe(false)
+    expect(store.isUnread(5)).toBe(true)
+    store.select(5)
+    await flush()
+    store.seeSelected()
+    expect(store.isUnread(5)).toBe(false)
+    expect(markRead).toHaveBeenCalledWith(5, 9)
+  })
+
+  test('nothing is read while I am not looking', async () => {
+    store.apply(two([{ channelId: 1, lastMessage: 4, lastRead: 4 }, { channelId: 5, lastMessage: null, lastRead: 0 }]))
+    await flush()
+    store.looking = false
+    created(msg(10, 1))
+    store.seeSelected()
+    expect(store.isUnread(1)).toBe(true)
+    expect(markRead).not.toHaveBeenCalled()
+  })
+
+  test('my own message never makes a channel unread', async () => {
+    store.apply(two([{ channelId: 1, lastMessage: 4, lastRead: 4 }, { channelId: 5, lastMessage: 3, lastRead: 3 }]))
+    await flush()
+    created({ ...msg(11, 5), authorId: 1 })
+    expect(store.isUnread(5)).toBe(false)
+  })
+
+  test('a mention of me or @everyone marks the channel, until it is read anywhere', async () => {
+    store.apply(two([{ channelId: 1, lastMessage: 4, lastRead: 4 }, { channelId: 5, lastMessage: 3, lastRead: 3 }]))
+    await flush()
+    created({ ...msg(12, 5), content: 'yo @budi' })
+    expect(store.isMentioned(5)).toBe(false)
+    created({ ...msg(13, 5), content: 'hey @me' })
+    expect(store.isMentioned(5)).toBe(true)
+    store.apply({ kind: 'server', data: { t: 'readUpdated', d: { channelId: 5, lastRead: 13 } } })
+    expect(store.isUnread(5)).toBe(false)
+    expect(store.isMentioned(5)).toBe(false)
+    created({ ...msg(14, 5), content: '@everyone rapat' })
+    expect(store.isMentioned(5)).toBe(true)
+  })
+
+  test('at connect, mentions among the unread are found', async () => {
+    messages.mockImplementation(async (ch: number) => (ch === 5 ? [{ ...msg(6, 5), content: '@me cek' }, msg(8, 5)] : []))
+    store.apply(two([{ channelId: 1, lastMessage: 4, lastRead: 4 }, { channelId: 5, lastMessage: 8, lastRead: 5 }]))
+    await flush()
+    expect(store.isMentioned(5)).toBe(true)
   })
 })

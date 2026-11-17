@@ -172,7 +172,7 @@ pub fn parse_visitor(body: &str) -> Option<String> {
 }
 
 pub fn client() -> reqwest::Client {
-    reqwest::Client::builder()
+    crate::core::http::tls_roots(reqwest::Client::builder())
         .connect_timeout(std::time::Duration::from_secs(8))
         .timeout(std::time::Duration::from_secs(30))
         .build()

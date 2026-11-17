@@ -39,7 +39,7 @@
     --on: var(--accent);
     --off: var(--elev);
     --knob: #fff;
-    width: 100%; height: 16px; margin: 0; background: transparent; cursor: pointer;
+    width: 100%; height: 16px; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer;
     -webkit-appearance: none; appearance: none;
   }
   .slider.light { --on: #fff; --off: rgba(255, 255, 255, 0.22); }

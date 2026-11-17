@@ -45,6 +45,12 @@
     "createUpdaterArtifacts": true,
     "macOS": {
       "hardenedRuntime": false
+    },
+    "iOS": {
+      "developmentTeam": "CM8AZJ6265"
+    },
+    "android": {
+      "minSdkVersion": 26
     }
   },
   "plugins": {

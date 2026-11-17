@@ -56,6 +56,8 @@ pub fn device_name() -> String {
     match std::env::consts::OS {
         "macos" => "Mac".into(),
         "windows" => "PC Windows".into(),
+        "android" => "Android".into(),
+        "ios" => "iPhone/iPad".into(),
         o => o.into(),
     }
 }
@@ -229,6 +231,14 @@ pub async fn edit_message(core: State<'_, Core>, id: Id, content: String) -> Cmd
 #[tauri::command]
 pub async fn delete_message(core: State<'_, Core>, id: Id) -> CmdResult<()> {
     core.api()?.delete_message(id).await.map_err(err)
+}
+
+/// I've seen `channel` up to `message` (clears its unread dot on my other devices too).
+#[tauri::command]
+pub fn mark_read(core: State<'_, Core>, channel: Id, message: Id) {
+    if let Some(s) = core.session() {
+        s.send_read(channel, message);
+    }
 }
 
 #[tauri::command]

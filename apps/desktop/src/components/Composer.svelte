@@ -60,6 +60,8 @@
     area.setSelectionRange(caret, caret)
   }
 
+  let picker: HTMLInputElement | undefined = $state()
+
   function attach(f: File | null | undefined) {
     if (!f || !f.type.startsWith('image/')) return
     if (preview) URL.revokeObjectURL(preview)
@@ -196,6 +198,9 @@
       rows="1"
       placeholder="Message #{channel.name}"
     ></textarea>
+    <!-- A phone or tablet can't paste or drop a photo: pick one instead. -->
+    <input bind:this={picker} class="pick" type="file" accept="image/*" onchange={(e) => { attach(e.currentTarget.files?.[0]); e.currentTarget.value = '' }} />
+    <button class="photo" title="Attach a photo" aria-label="Attach a photo" onclick={() => picker?.click()}><Icon name="image" size={18} /></button>
     <button class="song" class:on={songs} title="Play a song" aria-label="Play a song" onclick={() => (songs = !songs)}><Icon name="music" size={18} /></button>
     {#if left < 200}<span class="count" class:over={left < 0}>{left}</span>{/if}
     {#if playing}
@@ -213,7 +218,7 @@
   .box:focus-within { border-color: rgba(244, 184, 96, 0.55); box-shadow: 0 0 0 4px var(--accent-soft); }
   /* Block, not inline: an inline textarea sits on the text baseline and leaves a gap under it,
      which pushed the box taller than the text and the music button out of line with it. */
-  textarea { display: block; width: 100%; resize: none; background: transparent; border: 0; border-radius: 18px; padding: 13px 52px 13px 16px; max-height: 200px; field-sizing: content; }
+  textarea { display: block; width: 100%; resize: none; background: transparent; border: 0; border-radius: 18px; padding: 13px 92px 13px 16px; max-height: 200px; field-sizing: content; }
   .box.drag { outline: 2px dashed var(--accent); }
   .att { position: relative; display: inline-block; margin: 10px 12px 0; }
   .att img { max-height: 120px; max-width: 240px; border-radius: 6px; display: block; }
@@ -222,6 +227,9 @@
   /* Centred on the last line: 13px padding + half a 21px line − half the 34px button. */
   .song { position: absolute; right: 8px; bottom: 6.5px; width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; color: var(--muted); transition: color 120ms, background 120ms; }
   .song:hover, .song.on { color: var(--text); background: var(--elev); }
+  .photo { position: absolute; right: 46px; bottom: 6.5px; width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; color: var(--muted); transition: color 120ms, background 120ms; }
+  .photo:hover { color: var(--text); background: var(--elev); }
+  .pick { display: none; }
   .song.on { color: var(--accent); }
   .count { position: absolute; right: 48px; bottom: 8px; font-size: 11px; color: var(--muted); }
   .count.over { color: var(--danger); }

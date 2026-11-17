@@ -76,6 +76,8 @@ pub fn protocol<R: Runtime>(
             Ok((b, mime)) => tauri::http::Response::builder()
                 .header("content-type", mime)
                 .header("cache-control", "max-age=31536000, immutable")
+                // The app page (another origin) reads pictures too, e.g. for a photo's colour.
+                .header("access-control-allow-origin", "*")
                 .body(b),
             Err(_) => tauri::http::Response::builder().status(404).body(Vec::new()),
         };

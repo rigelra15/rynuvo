@@ -1,18 +1,22 @@
 <script lang="ts">
-  import { backdrop, pop } from '../lib/motion'
+  import { renderSVG } from 'uqr'
+  import { toQr } from '../lib/code'
+  import { backdrop, sheet } from '../lib/motion'
   import Icon from './Icon.svelte'
   import { PRESETS, selfCheckLines } from '../lib/stream'
-  import { AVATAR_ICONS, PALETTE, avatarColor } from '../lib/avatar'
+  import { AVATAR_ICONS, PALETTE, avatarColor, isHex } from '../lib/avatar'
+  import { imageColor } from '../lib/imageColor'
   import { AVATAR_SHAPES } from '../lib/avatarIcons'
   import Avatar from './Avatar.svelte'
   import { onMount } from 'svelte'
-  import { api, describeNet, errText, type TransferCode } from '../lib/api'
+  import { api, describeNet, errText, mediaUrl, type TransferCode } from '../lib/api'
   import type { ProfilePatch } from '../lib/types'
   import { store } from '../lib/state.svelte'
   import AdminPanel from './AdminPanel.svelte'
   import Countdown from './Countdown.svelte'
   import VoiceSettings from './VoiceSettings.svelte'
   import { updater } from '../lib/updater.svelte'
+  import { isAndroid, isMobile } from '../lib/platform'
   import { updateStatus, type CheckResult } from '../lib/update'
 
   let { onClose }: { onClose: () => void } = $props()
@@ -81,12 +85,37 @@
     uploading = true
     try {
       const ref = await api.uploadImage(new Uint8Array(await file.arrayBuffer()))
-      await pick({ avatarImage: ref.id })
+      // A new photo brings its own colour (the first swatch); any colour can still be picked after.
+      const color = await imageColor(file).catch(() => null)
+      if (color) photoColor = { id: ref.id, hex: color }
+      await pick(color ? { avatarImage: ref.id, avatarColor: color } : { avatarImage: ref.id })
     } catch (err) {
       avatarErr = errText(err)
     } finally {
       uploading = false
     }
+  }
+
+  // The colour of my current photo, shown as the first swatch.
+  let photoColor = $state<{ id: string; hex: string } | null>(null)
+  $effect(() => {
+    const id = store.me?.avatarImage
+    if (!id || photoColor?.id === id) return
+    imageColor(mediaUrl(id)).then((hex) => {
+      photoColor = { id, hex }
+      // A photo set before colours followed photos, and no colour ever picked: follow it now.
+      if (store.me && !store.me.avatarColor && store.me.avatarImage === id) void pick({ avatarColor: hex })
+    }, () => {})
+  })
+  const myColor = $derived(store.me ? avatarColor(store.me) : '')
+  // A custom colour that's neither a palette shade nor the photo's: the picker swatch shows it.
+  const customColor = $derived(isHex(store.me?.avatarColor) && store.me.avatarColor !== photoColor?.hex ? store.me.avatarColor : null)
+  let colorTimer: ReturnType<typeof setTimeout> | undefined
+  function pickCustom(e: Event) {
+    const hex = (e.currentTarget as HTMLInputElement).value.toLowerCase()
+    // Dragging around the picker fires many inputs: save once it settles.
+    clearTimeout(colorTimer)
+    colorTimer = setTimeout(() => pick({ avatarColor: hex }), 250)
   }
 
   let autostart = $state(false)
@@ -169,7 +198,7 @@
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="overlay" transition:backdrop|global onclick={onClose}>
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="panel" transition:pop|global onclick={(e) => e.stopPropagation()}>
+  <div class="panel" transition:sheet|global onclick={(e) => e.stopPropagation()}>
     <header>
       <nav>
         <button class:on={tab === 'general'} onclick={() => (tab = 'general')}>Settings</button>
@@ -210,16 +239,26 @@
                 {/each}
               </div>
               <div class="swatches">
+                {#if store.me?.avatarImage && photoColor?.id === store.me.avatarImage}
+                  {@const hex = photoColor.hex}
+                  <button class="sw photo" class:sel={myColor === hex} style="--c:{hex}" title="From your photo" aria-label="Colour from your photo" onclick={() => pick({ avatarColor: hex })}>
+                    <Icon name="image" size={12} />
+                  </button>
+                {/if}
                 {#each Object.entries(PALETTE) as [key, hex] (key)}
                   <button
                     class="sw"
-                    class:sel={store.me && avatarColor(store.me) === hex}
+                    class:sel={myColor === hex && !isHex(store.me?.avatarColor)}
                     style="background:{hex}"
                     title={key}
                     aria-label="{key} colour"
                     onclick={() => pick({ avatarColor: key })}
                   ></button>
                 {/each}
+                <label class="sw custom" class:sel={!!customColor} style={customColor ? `background:${customColor}` : ''} title="Pick any colour">
+                  <input type="color" value={myColor} oninput={pickCustom} aria-label="Pick any colour" />
+                  {#if !customColor}<Icon name="plus" size={12} />{/if}
+                </label>
               </div>
             </div>
           </div>
@@ -237,10 +276,16 @@
 
         <section>
           <h3>Use Rynuvo on another device</h3>
-          <p class="muted">Create a transfer code, then choose "Have a transfer code" on the other device.</p>
+          <p class="muted">Create a transfer code, then scan it or type it in on the other device.</p>
           {#if transfer}
-            <div class="code selectable">{transfer.code}</div>
-            <p class="note"><Countdown until={transfer.expiresAt} /></p>
+            <div class="transfer">
+              <div class="qr" aria-label="QR code for this transfer code">{@html renderSVG(toQr(transfer.code), { border: 2, whiteColor: '#fff', blackColor: '#000' })}</div>
+              <div>
+                <div class="code selectable">{transfer.code}</div>
+                <p class="note"><Countdown until={transfer.expiresAt} /></p>
+                <p class="muted">On a phone or tablet, tap "Scan QR" on the sign-in screen.</p>
+              </div>
+            </div>
           {/if}
           <button class="btn" onclick={makeTransfer}>{transfer ? 'Create a new code' : 'Create transfer code'}</button>
         </section>
@@ -252,6 +297,8 @@
           <button class="btn" disabled={netBusy} onclick={testNet}>{netBusy ? 'Testing…' : 'Test connection'}</button>
         </section>
 
+        <!-- Phones and tablets can't share their screen, start with the computer, or take hotkeys. -->
+        {#if !isMobile}
         <section>
           <h3>Screen share</h3>
           <label class="chk">
@@ -272,25 +319,35 @@
             {/if}
           {/if}
         </section>
+        {/if}
 
+        {#if !isMobile || isAndroid}
         <section>
           <h3>Updates</h3>
-          <p class="muted">You're on Rynuvo {version}. New versions download in the background on their own.</p>
+          <p class="muted">
+            You're on Rynuvo {version}.
+            {isAndroid ? 'New versions download when Rynuvo opens; Android asks you to confirm the install.' : 'New versions download in the background on their own.'}
+          </p>
           <div class="row">
             <button class="btn" onclick={checkUpdates} disabled={checkingUpdate || updater.state.phase !== 'idle'}>Check for updates</button>
           </div>
           {#if upd.text}<p class="note" aria-live="polite">{upd.text}</p>{/if}
         </section>
+        {/if}
 
+        {#if !isMobile}
         <section>
           <h3>Startup</h3>
           <label class="chk"><input type="checkbox" bind:checked={autostart} onchange={setAutostart} /> Open Rynuvo when I sign in to this computer</label>
         </section>
+        {/if}
 
         <section>
           <h3>Having problems?</h3>
-          <button class="btn" onclick={exportDiagnostics}>Export screen share diagnostics</button>
-          {#if diagnosticMsg}<p class="note">{diagnosticMsg}</p>{/if}
+          {#if !isMobile}
+            <button class="btn" onclick={exportDiagnostics}>Export screen share diagnostics</button>
+            {#if diagnosticMsg}<p class="note">{diagnosticMsg}</p>{/if}
+          {/if}
           <button class="btn" onclick={sendLog}>Send log to admin</button>
           {#if logMsg}<p class="note">{logMsg}</p>{/if}
         </section>
@@ -321,6 +378,9 @@
   p { margin: 0; font-size: 13px; }
   .row { display: flex; gap: 8px; width: 100%; }
   .row input { flex: 1; }
+  .transfer { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .qr { width: 132px; height: 132px; flex: none; border-radius: 10px; overflow: hidden; background: #fff; }
+  .qr :global(svg) { display: block; width: 100%; height: 100%; }
   .code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.08em; color: var(--accent); }
   .note { color: var(--muted); }
   ul { margin: 0; padding-left: 18px; font-size: 13px; }
@@ -339,6 +399,19 @@
   .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
   .sw { width: 24px; height: 24px; border-radius: 50%; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.12); }
   .sw.sel { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px #fff; }
+  /* My photo's colour: first, marked with a little picture. */
+  .sw.photo { display: grid; place-items: center; background: var(--c); color: rgba(255, 255, 255, 0.92); }
+  /* Any colour: a colour wheel until one is picked, then that colour. */
+  .sw.custom { position: relative; display: grid; place-items: center; cursor: pointer; color: #fff; background: conic-gradient(#ef4444, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ef4444); }
+  .sw.custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }
+  .sw.custom :global(svg) { filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.6)); pointer-events: none; }
   .chk { display: flex; gap: 8px; align-items: center; font-size: 13px; }
   footer { display: flex; justify-content: space-between; align-items: center; padding-top: 14px; }
+  /* Phones: a full screen page instead of a floating panel. */
+  @media (max-width: 760px) {
+    .overlay { padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+    .panel { width: 100%; height: 100%; max-height: none; border-radius: 0; border: 0; }
+    .profile { flex-wrap: wrap; }
+    .icons { grid-template-columns: repeat(auto-fill, 32px); }
+  }
 </style>

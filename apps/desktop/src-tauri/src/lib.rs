@@ -1,3 +1,4 @@
+mod apk_update;
 pub mod commands;
 pub mod core;
 mod diag;
@@ -9,6 +10,7 @@ pub mod music;
 mod notify;
 pub mod prefs;
 pub mod stream;
+#[cfg(desktop)]
 mod tray;
 pub mod voice;
 mod voice_cmd;
@@ -19,16 +21,19 @@ use std::sync::Arc;
 
 use tauri::{Emitter, Manager};
 
-use crate::core::identity::KeyringStore;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let profile = std::env::var("RYNUVO_PROFILE").ok().filter(|p| !p.is_empty());
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init());
+    #[cfg(mobile)]
+    let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
+    #[cfg(desktop)]
+    let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         .plugin(autostart_plugin())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -42,7 +47,8 @@ pub fn run() {
                 api.prevent_close();
                 let _ = w.hide();
             }
-        })
+        });
+    builder
         .register_asynchronous_uri_scheme_protocol("rynuvo-media", media::protocol)
         .register_asynchronous_uri_scheme_protocol("rynuvo-video", music::vproxy::protocol)
         .setup(move |app| {
@@ -56,11 +62,15 @@ pub fn run() {
                 Some(p) => format!("state-{p}.json"),
                 None => "state.json".into(),
             };
-            let store = Arc::new(KeyringStore::new(profile.as_deref()));
+            #[cfg(not(target_os = "android"))]
+            let store = Arc::new(core::identity::KeyringStore::new(profile.as_deref()));
+            #[cfg(target_os = "android")]
+            let store = Arc::new(core::identity::FileStore::open(dir.join("secrets.json")));
             let handle = app.handle().clone();
             let voice = voice::ctl::VoiceCtl::new(
                 Arc::new(|| Box::new(voice::devices::CpalBackend::default()) as Box<dyn voice::backend::AudioBackend>),
                 Arc::new(move |e| {
+                    #[cfg(desktop)]
                     if let voice::engine::VoiceEvent::State { muted, deafened, .. } = &e {
                         tray::update(&handle, *muted, *deafened);
                     }
@@ -117,14 +127,19 @@ pub fn run() {
             });
             app.manage(music_cmd::MusicHttp(http));
             app.manage(commands::Core::new(store, dir.join(file), voice, stream, music));
-            tray::build(app.handle())?;
-            if let Err(e) = tray::register_shortcuts(app.handle(), &p) {
-                tracing::warn!("shortcuts: {e}");
+            #[cfg(desktop)]
+            {
+                tray::build(app.handle())?;
+                if let Err(e) = tray::register_shortcuts(app.handle(), &p) {
+                    tracing::warn!("shortcuts: {e}");
+                }
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,
+            apk_update::apk_update_check,
+            apk_update::apk_update_download,
             commands::join,
             commands::claim_transfer,
             commands::logout,
@@ -138,6 +153,7 @@ pub fn run() {
             commands::edit_message,
             commands::delete_message,
             commands::send_typing,
+            commands::mark_read,
             commands::transfer_code,
             commands::admin_rotate_invite,
             commands::admin_kick,
@@ -200,6 +216,7 @@ pub fn run() {
         });
 }
 
+#[cfg(desktop)]
 fn autostart_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let b = tauri_plugin_autostart::Builder::new();
     #[cfg(target_os = "macos")]

@@ -159,6 +159,10 @@ impl SessionHandle {
         self.shared.lock().unwrap().binary_sink = sink;
     }
 
+    pub fn send_read(&self, channel_id: Id, message_id: Id) {
+        let _ = self.out.send(WsClientMsg::Read { channel_id, message_id });
+    }
+
     pub fn send_typing(&self, channel_id: Id) {
         let _ = self.out.send(WsClientMsg::Typing { channel_id });
     }
@@ -274,7 +278,7 @@ async fn connect_once(
         .await
         .map_err(|_| "connect timeout")?
         .map_err(|e| e.to_string())?;
-    let hello = serde_json::to_string(&WsClientMsg::Hello { token, protocol: PROTOCOL_VERSION }).unwrap();
+    let hello = serde_json::to_string(&WsClientMsg::Hello { token, protocol: PROTOCOL_VERSION, mobile: cfg!(mobile) }).unwrap();
     ws.send(WsMsg::text(hello)).await.map_err(|e| e.to_string())?;
 
     let mut ready_seen = false;

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Rynuvo: a solid lamp-yellow diamond on the app's night-violet desk, lit warm from the
+       top-left and lilac from the bottom-right (the palette inside the app). -->
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#241b30" />
+      <stop offset="1" stop-color="#140f1a" />
+    </linearGradient>
+    <radialGradient id="warm" cx="0.18" cy="0.12" r="0.75">
+      <stop offset="0" stop-color="#f4b860" stop-opacity="0.42" />
+      <stop offset="0.55" stop-color="#f4b860" stop-opacity="0.08" />
+      <stop offset="1" stop-color="#f4b860" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="lilac" cx="0.88" cy="0.92" r="0.8">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.75" />
+      <stop offset="0.5" stop-color="#6d45c9" stop-opacity="0.28" />
+      <stop offset="1" stop-color="#6d45c9" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="gem" x1="0.2" y1="0.1" x2="0.8" y2="0.95">
+      <stop offset="0" stop-color="#ffd690" />
+      <stop offset="0.55" stop-color="#f4b860" />
+      <stop offset="1" stop-color="#e59a3c" />
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f4b860" stop-opacity="0.35" />
+      <stop offset="1" stop-color="#f4b860" stop-opacity="0" />
+    </radialGradient>
+    <clipPath id="tile"><rect width="1024" height="1024" rx="228" /></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="1024" height="1024" fill="url(#base)" />
+    <rect width="1024" height="1024" fill="url(#warm)" />
+    <rect width="1024" height="1024" fill="url(#lilac)" />
+    <circle cx="512" cy="512" r="380" fill="url(#halo)" />
+    <path d="M512 228 Q524 228 533 237 L787 491 Q808 512 787 533 L533 787 Q512 808 491 787 L237 533 Q216 512 237 491 L491 237 Q500 228 512 228 Z" fill="url(#gem)" />
+  </g>
+</svg>

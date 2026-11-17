@@ -71,13 +71,16 @@ async fn presence_online_offline() {
     let mut wa = app.ws(&a.token).await;
     wa.next().await;
     let wb = app.ws(&b.token).await;
-    assert_eq!(wa.next().await, WsServerMsg::Presence { user_id: b.user.id, online: true });
+    assert_eq!(wa.next().await, WsServerMsg::Presence { user_id: b.user.id, online: true, mobile: false, last_seen: None });
     // second connection of same user: no extra presence
     let mut wb2 = app.ws(&b.token).await;
     wb2.next().await;
     drop(wb);
     wb2.close().await;
-    assert_eq!(wa.next().await, WsServerMsg::Presence { user_id: b.user.id, online: false });
+    match wa.next().await {
+        WsServerMsg::Presence { user_id, online: false, last_seen: Some(at), .. } => assert!(user_id == b.user.id && at > 0),
+        m => panic!("expected offline presence, got {m:?}"),
+    }
 }
 
 #[tokio::test]

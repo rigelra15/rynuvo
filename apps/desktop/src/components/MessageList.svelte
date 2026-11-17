@@ -33,7 +33,26 @@
     tick().then(() => el && (el.scrollTop = el.scrollHeight))
   })
 
+  // Stay at the bottom while the list grows or appears: pictures finishing loading push messages
+  // down, and on a phone the chat is laid out while hidden behind the list of chats (zero height),
+  // so the first scroll to the bottom happens when it is shown.
+  $effect(() => {
+    const box = el
+    if (!box) return
+    const keep = () => {
+      if (stick) box.scrollTop = box.scrollHeight
+    }
+    const ro = new ResizeObserver(keep)
+    ro.observe(box)
+    box.addEventListener('load', keep, true)
+    return () => {
+      ro.disconnect()
+      box.removeEventListener('load', keep, true)
+    }
+  })
+
   async function onScroll() {
+    if (el && el.clientHeight > 0) stick = el.scrollHeight - el.scrollTop - el.clientHeight < 80
     if (!el || loadingOlder || el.scrollTop > 60) return
     loadingOlder = true
     const prevHeight = el.scrollHeight

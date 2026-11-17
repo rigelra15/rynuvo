@@ -22,7 +22,7 @@ pub struct User {
     /// One of [`AVATAR_ICONS`]; `None` shows the nickname's first letter.
     #[serde(default)]
     pub avatar_icon: Option<String>,
-    /// One of [`AVATAR_COLORS`]; `None` picks a colour from the user id.
+    /// One of [`AVATAR_COLORS`] or a custom `#rrggbb` (see [`is_avatar_color`]); `None` picks a colour from the user id.
     #[serde(default)]
     pub avatar_color: Option<String>,
     /// An uploaded picture (media id) shown instead of the icon; `None` uses the icon or letter.
@@ -39,6 +39,11 @@ pub const AVATAR_ICONS: [&str; 24] = [
 /// Avatar colours a user can pick (the desktop app maps each key to a shade).
 pub const AVATAR_COLORS: [&str; 12] =
     ["violet", "blue", "sky", "teal", "green", "lime", "amber", "orange", "red", "pink", "fuchsia", "slate"];
+
+/// A colour a user may pick: a palette key, or any `#rrggbb` (lowercase), like one taken from their photo.
+pub fn is_avatar_color(s: &str) -> bool {
+    AVATAR_COLORS.contains(&s) || (s.len() == 7 && s.starts_with('#') && s[1..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+}
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -72,6 +77,17 @@ pub struct Channel {
     pub topic: Option<String>,
     pub owner_id: Id,
     pub position: i64,
+}
+
+/// How far I've read a text channel: unread while `last_message` is past `last_read`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadMark {
+    pub channel_id: Id,
+    /// The newest message in the channel (None: it has none).
+    pub last_message: Option<Id>,
+    /// The newest message I've seen there (0: none yet).
+    pub last_read: Id,
 }
 
 /// Someone connected to a voice channel.
@@ -324,9 +340,18 @@ pub enum MusicCmd {
 #[serde(tag = "t", content = "d", rename_all = "camelCase")]
 pub enum WsClientMsg {
     #[serde(rename_all = "camelCase")]
-    Hello { token: String, protocol: u32 },
+    Hello {
+        token: String,
+        protocol: u32,
+        /// This connection is a phone or tablet app. Older clients leave it out.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        mobile: bool,
+    },
     #[serde(rename_all = "camelCase")]
     Typing { channel_id: Id },
+    /// I've seen `channel_id` up to `message_id` (only ever moves forward).
+    #[serde(rename_all = "camelCase")]
+    Read { channel_id: Id, message_id: Id },
     Ping,
     #[serde(rename_all = "camelCase")]
     VoiceJoin { channel_id: Id, pubkey: String },
@@ -366,6 +391,13 @@ pub struct StreamInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LastSeen {
+    pub user_id: Id,
+    pub at: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "t", content = "d", rename_all = "camelCase")]
 pub enum WsServerMsg {
     #[serde(rename_all = "camelCase")]
@@ -374,6 +406,12 @@ pub enum WsServerMsg {
         users: Vec<User>,
         channels: Vec<Channel>,
         online: Vec<Id>,
+        /// Of `online`: those connected only from phones or tablets.
+        #[serde(default)]
+        mobile: Vec<Id>,
+        /// When each user was last connected (ms), for those who ever were.
+        #[serde(default)]
+        last_seen: Vec<LastSeen>,
         alerts: Vec<String>,
         #[serde(default)]
         voice: Vec<VoiceMember>,
@@ -384,7 +422,13 @@ pub enum WsServerMsg {
         /// The "Rynuvo Music" user: shown as the author of its replies, never as a member.
         #[serde(default)]
         music_bot: Option<Id>,
+        /// Where I am in each text channel, for its unread dot.
+        #[serde(default)]
+        reads: Vec<ReadMark>,
     },
+    /// I read further on another of my devices.
+    #[serde(rename_all = "camelCase")]
+    ReadUpdated { channel_id: Id, last_read: Id },
     MessageCreated(Message),
     MessageUpdated(Message),
     #[serde(rename_all = "camelCase")]
@@ -397,7 +441,16 @@ pub enum WsServerMsg {
     #[serde(rename_all = "camelCase")]
     UserRemoved { id: Id },
     #[serde(rename_all = "camelCase")]
-    Presence { user_id: Id, online: bool },
+    Presence {
+        user_id: Id,
+        online: bool,
+        /// Online only from phones or tablets (no computer connected).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        mobile: bool,
+        /// When going offline: the moment they were last connected (ms).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_seen: Option<i64>,
+    },
     #[serde(rename_all = "camelCase")]
     Typing { channel_id: Id, user_id: Id },
     #[serde(rename_all = "camelCase")]
@@ -505,13 +558,13 @@ mod tests {
 
     #[test]
     fn ws_server_msg_shape() {
-        let v = serde_json::to_value(WsServerMsg::Presence { user_id: 7, online: true }).unwrap();
+        let v = serde_json::to_value(WsServerMsg::Presence { user_id: 7, online: true, mobile: false, last_seen: None }).unwrap();
         assert_eq!(v, json!({"t":"presence","d":{"userId":7,"online":true}}));
     }
 
     #[test]
     fn ws_client_hello_roundtrip() {
-        let m = WsClientMsg::Hello { token: "abc".into(), protocol: PROTOCOL_VERSION };
+        let m = WsClientMsg::Hello { token: "abc".into(), protocol: PROTOCOL_VERSION, mobile: false };
         let s = serde_json::to_string(&m).unwrap();
         assert_eq!(s, r#"{"t":"hello","d":{"token":"abc","protocol":4}}"#);
         assert_eq!(serde_json::from_str::<WsClientMsg>(&s).unwrap(), m);

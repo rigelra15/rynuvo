@@ -108,6 +108,8 @@ async fn create(State(st): State<AppState>, au: AuthUser, Path(ch): Path<i64>, J
         .fetch_one(&st.db)
         .await?;
     let m = load_message(&st.db, id).await?.ok_or(AppError::NotFound)?;
+    // What I write I've read: my own message never leaves a channel unread for me.
+    crate::ws::mark_read(&st, au.user.id, ch, id).await;
     st.hub.broadcast(WsServerMsg::MessageCreated(m.clone()));
     Ok(Json(m))
 }

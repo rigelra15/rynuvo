@@ -25,16 +25,34 @@ struct Conn {
     id: u64,
     user_id: i64,
     is_admin: bool,
+    mobile: bool,
     tx: mpsc::Sender<Outgoing>,
     kill: watch::Sender<bool>,
 }
 
-/// A registered connection: its queue, a flag raised when it must close, and whether it is the user's first.
+/// How a user shows to others: offline, or online and whether that is only from phones/tablets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    Offline,
+    Online { mobile: bool },
+}
+
+/// A registered connection: its queue, a flag raised when it must close, and the user's status
+/// before and after it joined.
 pub struct Registered {
     pub id: u64,
     pub rx: mpsc::Receiver<Outgoing>,
     pub kill: watch::Receiver<bool>,
-    pub first: bool,
+    pub before: Status,
+    pub after: Status,
+}
+
+fn status_of(conns: &[Conn], user_id: i64) -> Status {
+    let mut it = conns.iter().filter(|c| c.user_id == user_id).peekable();
+    if it.peek().is_none() {
+        return Status::Offline;
+    }
+    Status::Online { mobile: it.all(|c| c.mobile) }
 }
 
 #[derive(Default)]
@@ -54,23 +72,34 @@ pub const TYPING_INTERVAL: Duration = Duration::from_secs(3);
 
 impl Hub {
     /// Register a connection.
-    pub fn register(&self, user_id: i64, is_admin: bool) -> Registered {
+    pub fn register(&self, user_id: i64, is_admin: bool, mobile: bool) -> Registered {
         let (tx, rx) = mpsc::channel(QUEUE_DEPTH);
         let (kill_tx, kill) = watch::channel(false);
         let mut g = self.inner.lock().unwrap();
-        let first = !g.conns.iter().any(|c| c.user_id == user_id);
+        let before = status_of(&g.conns, user_id);
         g.next_id += 1;
         let id = g.next_id;
-        g.conns.push(Conn { id, user_id, is_admin, tx, kill: kill_tx });
-        Registered { id, rx, kill, first }
+        g.conns.push(Conn { id, user_id, is_admin, mobile, tx, kill: kill_tx });
+        let after = status_of(&g.conns, user_id);
+        Registered { id, rx, kill, before, after }
     }
 
-    /// Remove a connection. Returns the user id if that was the user's last connection.
-    pub fn unregister(&self, conn_id: u64) -> Option<i64> {
+    /// Remove a connection. Returns its user and that user's status before and after.
+    pub fn unregister(&self, conn_id: u64) -> Option<(i64, Status, Status)> {
         let mut g = self.inner.lock().unwrap();
         let pos = g.conns.iter().position(|c| c.id == conn_id)?;
+        let before = status_of(&g.conns, g.conns[pos].user_id);
         let c = g.conns.remove(pos);
-        (!g.conns.iter().any(|o| o.user_id == c.user_id)).then_some(c.user_id)
+        Some((c.user_id, before, status_of(&g.conns, c.user_id)))
+    }
+
+    /// Users online only from phones or tablets.
+    pub fn mobile_ids(&self) -> Vec<i64> {
+        let g = self.inner.lock().unwrap();
+        let mut ids: Vec<i64> = g.conns.iter().map(|c| c.user_id).filter(|&u| status_of(&g.conns, u) == Status::Online { mobile: true }).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
     }
 
     fn send_where(&self, out: Outgoing, pred: impl Fn(&Conn) -> bool) {
@@ -98,6 +127,11 @@ impl Hub {
 
     pub fn broadcast_except(&self, user_id: i64, msg: WsServerMsg) {
         self.send_where(Outgoing::Msg(msg), |c| c.user_id != user_id);
+    }
+
+    /// To my other connections (another device of mine), not the one that caused it.
+    pub fn send_to_user_except(&self, user_id: i64, conn_id: u64, msg: WsServerMsg) {
+        self.send_where(Outgoing::Msg(msg), |c| c.user_id == user_id && c.id != conn_id);
     }
 
     pub fn send_to_admins(&self, msg: WsServerMsg) {
@@ -144,7 +178,7 @@ mod tests {
     #[test]
     fn media_backlog_drops_packets_but_keeps_connection() {
         let hub = Hub::default();
-        let mut r = hub.register(1, false);
+        let mut r = hub.register(1, false, false);
         for _ in 0..QUEUE_DEPTH * 2 {
             hub.send_to_conn(r.id, Outgoing::Bin(vec![0; 10]));
         }
@@ -159,9 +193,22 @@ mod tests {
     }
 
     #[test]
+    fn mobile_only_while_no_computer_is_connected() {
+        let hub = Hub::default();
+        let phone = hub.register(1, false, true);
+        assert_eq!((phone.before, phone.after), (Status::Offline, Status::Online { mobile: true }));
+        assert_eq!(hub.mobile_ids(), vec![1]);
+        let mac = hub.register(1, false, false);
+        assert_eq!(mac.after, Status::Online { mobile: false });
+        assert!(hub.mobile_ids().is_empty());
+        assert_eq!(hub.unregister(mac.id), Some((1, Status::Online { mobile: false }, Status::Online { mobile: true })));
+        assert_eq!(hub.unregister(phone.id), Some((1, Status::Online { mobile: true }, Status::Offline)));
+    }
+
+    #[test]
     fn slow_consumer_is_cut_off() {
         let hub = Hub::default();
-        let mut r = hub.register(1, false);
+        let mut r = hub.register(1, false, false);
         for _ in 0..(QUEUE_DEPTH + 50) {
             hub.broadcast(WsServerMsg::Pong);
         }

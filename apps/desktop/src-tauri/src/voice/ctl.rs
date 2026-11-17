@@ -189,8 +189,12 @@ impl VoiceCtl {
     pub fn attach(&self, session: SessionHandle, host: String) {
         let old = {
             let mut s = self.st.lock().unwrap();
+            // The same server again (the page reloaded): stay in the call; Ready rejoins it.
+            // Signing out already cleared `want`, so a different account never inherits it.
+            if s.host != host {
+                s.want = None;
+            }
             s.host = host;
-            s.want = None;
             s.members.clear();
             s.session.replace(session)
         };
@@ -760,6 +764,8 @@ impl VoiceCtl {
                 if let Some(channel_id) = want {
                     self.voice_join(channel_id);
                 }
+                // The page may have reloaded since it last heard: tell it where it is.
+                self.notify();
                 self.e2ee_changed();
             }
             WsServerMsg::VoiceJoined { channel_id, session, key, udp_port } => {
@@ -777,9 +783,9 @@ impl VoiceCtl {
                 self.start_engine(*channel_id, *session, key, *udp_port);
                 self.e2ee_start(*channel_id);
                 self.check_e2ee_support();
-                if muted || deafened {
-                    self.send(WsClientMsg::VoiceState { muted, deafened });
-                }
+                // Always: a join that moved the call from another device carries that device's
+                // mute/deafen on the server, which this device's own state must replace.
+                self.send(WsClientMsg::VoiceState { muted, deafened });
             }
             WsServerMsg::VoiceEnded { reason } => {
                 tracing::info!("voice ended: {reason}");

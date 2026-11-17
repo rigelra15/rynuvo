@@ -3,7 +3,6 @@ use rynuvo_proto::Id;
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter, State};
-use tauri_plugin_autostart::ManagerExt;
 
 use crate::{
     commands::Core,
@@ -80,9 +79,21 @@ pub fn prefs_get(prefs: State<'_, PrefsStore>) -> Prefs {
 #[tauri::command]
 pub fn prefs_set(app: AppHandle, core: State<'_, Core>, prefs: State<'_, PrefsStore>, next: Prefs) -> Result<Prefs, String> {
     let prev = prefs.get();
+    #[cfg(desktop)]
+    apply_desktop(&app, &prev, &next)?;
+    #[cfg(mobile)]
+    let _ = (&app, &prev);
+    core.voice.set_prefs(next.audio());
+    Ok(prefs.update(|p| *p = next))
+}
+
+/// Global shortcuts and start-at-login (desktop only).
+#[cfg(desktop)]
+fn apply_desktop(app: &AppHandle, prev: &Prefs, next: &Prefs) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
     if next.shortcut_mute != prev.shortcut_mute || next.shortcut_deafen != prev.shortcut_deafen {
-        if let Err(e) = crate::tray::register_shortcuts(&app, &next) {
-            let _ = crate::tray::register_shortcuts(&app, &prev);
+        if let Err(e) = crate::tray::register_shortcuts(app, next) {
+            let _ = crate::tray::register_shortcuts(app, prev);
             return Err(e);
         }
     }
@@ -91,8 +102,7 @@ pub fn prefs_set(app: AppHandle, core: State<'_, Core>, prefs: State<'_, PrefsSt
         let r = if next.autostart { al.enable() } else { al.disable() };
         r.map_err(|e| format!("Couldn't change start-at-login: {e}"))?;
     }
-    core.voice.set_prefs(next.audio());
-    Ok(prefs.update(|p| *p = next))
+    Ok(())
 }
 
 #[tauri::command]

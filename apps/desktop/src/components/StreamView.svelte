@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isMobile } from '../lib/platform'
   import Slider from './Slider.svelte'
   import { onMount } from 'svelte'
   import { api, errText } from '../lib/api'
@@ -98,13 +99,31 @@
     void api.streamSetVolume(userId, volume)
   }
 
+  // Phones and tablets: the WebView has no real fullscreen, so the stream covers the app instead,
+  // and the phone may turn sideways while it does. Back (button or gesture) leaves it.
+  let covering = $state(false)
+  const rotate = (free: boolean) => (window as { RynuvoAndroid?: { setFreeRotation(f: boolean): void } }).RynuvoAndroid?.setFreeRotation(free)
+  $effect(() => {
+    if (!covering) return
+    rotate(true)
+    history.pushState({ ...history.state, fullStream: true }, '')
+    const pop = () => { if (!history.state?.fullStream) covering = false }
+    window.addEventListener('popstate', pop)
+    return () => {
+      window.removeEventListener('popstate', pop)
+      rotate(false)
+      if (history.state?.fullStream) history.back()
+    }
+  })
+
   function toggleFullscreen() {
-    if (document.fullscreenElement) void document.exitFullscreen()
+    if (isMobile) covering = !covering
+    else if (document.fullscreenElement) void document.exitFullscreen()
     else void wrap.requestFullscreen()
   }
 </script>
 
-<div class="view" bind:this={wrap}>
+<div class="view" class:covering bind:this={wrap}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="screen" ondblclick={toggleFullscreen}>
     <canvas bind:this={canvas}></canvas>
@@ -117,7 +136,7 @@
       <span class="muted">Volume</span>
       <Slider bind:value={volume} max={2} step={0.01} tone="light" label="Stream volume" oninput={setVolume} />
     </label>
-    <button class="btn" onclick={toggleFullscreen}>Fullscreen</button>
+    <button class="btn" onclick={toggleFullscreen}>{covering ? 'Exit fullscreen' : 'Fullscreen'}</button>
     <button class="btn" onclick={() => store.closeStream()}>Stop watching</button>
   </div>
 </div>
@@ -125,6 +144,10 @@
 <style>
   .view { flex: 1; display: flex; flex-direction: column; min-height: 0; background: #000; border-radius: 12px; overflow: hidden; }
   .view:fullscreen { border-radius: 0; }
+  .view.covering {
+    position: fixed; inset: 0; z-index: 200; border-radius: 0;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
   .screen { flex: 1; min-height: 0; display: grid; place-items: center; position: relative; }
   /* Fills the area and letterboxes: the whole frame always shows, whatever its shape (a grid row
      sized by its content let tall frames spill out and get clipped). */

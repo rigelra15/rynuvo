@@ -1,5 +1,5 @@
 use axum::{Json, Router, extract::State, routing::{get, post}};
-use rynuvo_proto::{AVATAR_COLORS, AVATAR_ICONS, ClaimTransferReq, JoinReq, JoinResp, ProfileReq, User, WsServerMsg};
+use rynuvo_proto::{AVATAR_ICONS, is_avatar_color, ClaimTransferReq, JoinReq, JoinResp, ProfileReq, User, WsServerMsg};
 use sqlx::SqlitePool;
 
 use crate::{
@@ -135,7 +135,10 @@ async fn update_me(State(st): State<AppState>, au: AuthUser, Json(req): Json<Pro
         v => Ok(v),
     };
     let icon = pick(req.avatar_icon, &AVATAR_ICONS, "icon")?;
-    let color = pick(req.avatar_color, &AVATAR_COLORS, "colour")?;
+    let color = match req.avatar_color {
+        Some(Some(c)) if !is_avatar_color(&c.to_ascii_lowercase()) => return Err(AppError::BadRequest("Unknown avatar colour".into())),
+        v => v.map(|c| c.map(|c| c.to_ascii_lowercase())),
+    };
     // A picture must be one already uploaded here.
     if let Some(Some(img)) = &req.avatar_image {
         let found: Option<String> = sqlx::query_scalar("SELECT id FROM images WHERE id = ?").bind(img).fetch_optional(&st.db).await?;

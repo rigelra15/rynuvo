@@ -1,7 +1,7 @@
 <script lang="ts" module>
   export type IconName =
     | 'mic' | 'micOff' | 'headphones' | 'headphonesOff' | 'screen' | 'leave'
-    | 'hash' | 'volume' | 'plus' | 'settings' | 'edit' | 'trash' | 'close' | 'check' | 'lock' | 'eye' | 'warn' | 'logo' | 'users' | 'home'
+    | 'hash' | 'volume' | 'plus' | 'settings' | 'edit' | 'trash' | 'close' | 'check' | 'lock' | 'eye' | 'warn' | 'logo' | 'users' | 'home' | 'back' | 'down' | 'image' | 'sidebar'
     | 'play' | 'pause' | 'skip' | 'queue' | 'music' | 'repeat' | 'repeatOne' | 'lyrics'
 </script>
 
@@ -57,6 +57,14 @@
     <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
   {:else if name === 'trash'}
     <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
+  {:else if name === 'image'}
+    <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
+  {:else if name === 'sidebar'}
+    <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" />
+  {:else if name === 'back'}
+    <path d="m15 18-6-6 6-6" />
+  {:else if name === 'down'}
+    <path d="m6 9 6 6 6-6" />
   {:else if name === 'close'}
     <path d="M18 6 6 18M6 6l12 12" />
   {:else if name === 'check'}

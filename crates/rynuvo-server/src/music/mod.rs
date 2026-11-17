@@ -31,7 +31,8 @@ pub struct Session {
     pub queue: VecDeque<MusicEntry>,
     /// Text channel the bot answers in when a control comes from a button.
     pub reply_to: Option<Id>,
-    /// The channel's lyrics source (an id from `LYRICS_SOURCES`), "auto" until someone picks.
+    /// The lyrics source picked for the playing song (an id from `LYRICS_SOURCES`). A pick lasts one
+    /// song: the next one starts on "auto" again, which finds the best lyrics for each song.
     pub lyrics: Option<String>,
     pub repeat: Repeat,
     /// Votes to skip the playing song (cleared when it changes), and the votes it took last time.
@@ -158,6 +159,7 @@ impl Session {
     /// (a looped song plays again); false for a skip. Returns the song now playing.
     pub fn advance(&mut self, now: i64, ended: bool) -> Option<&MusicEntry> {
         self.clear_votes();
+        let was = self.playing.as_ref().map(|p| p.entry.id);
         if let Some(p) = self.playing.take() {
             match self.repeat {
                 Repeat::Song if ended => self.queue.push_front(p.entry),
@@ -166,6 +168,10 @@ impl Session {
             }
         }
         self.playing = self.queue.pop_front().map(|entry| Playing { entry, started_at: now, paused_at: None });
+        // Another song (not the same one looping): back to "auto" lyrics.
+        if self.playing.as_ref().map(|p| p.entry.id) != was {
+            self.lyrics = None;
+        }
         self.playing.as_ref().map(|p| &p.entry)
     }
 
@@ -280,6 +286,7 @@ impl Session {
                 if self.playing.is_none() {
                     let text = format!("▶ Now playing: {} · requested by {}", line(&e), nick(a.id));
                     self.playing = Some(Playing { entry: e, started_at: now + START_LEAD_MS, paused_at: None });
+                    self.lyrics = None;
                     did(text)
                 } else {
                     let text = format!("+ Added to queue (#{}): {}", self.queue.len() + 1, line(&e));
@@ -425,6 +432,20 @@ mod tests {
         let o = run(&mut s, Cmd::Lyrics("nope".into()), ADMIN, &[ADMIN], 0);
         assert!(!o.changed, "unknown sources are ignored");
         assert_eq!(s.state(5, 0).lyrics, "betterlyrics");
+    }
+
+    #[test]
+    fn a_lyrics_pick_lasts_one_song() {
+        let mut s = Session::default();
+        run(&mut s, Cmd::Add(req("Stuck")), ADMIN, &[ADMIN], 0);
+        run(&mut s, Cmd::Add(req("ILYSB")), ADMIN, &[ADMIN], 0);
+        run(&mut s, Cmd::Lyrics("simpmusic".into()), ADMIN, &[ADMIN], 0);
+        s.repeat = Repeat::Song;
+        s.advance(10, true);
+        assert_eq!(s.state(5, 10).lyrics, "simpmusic", "the same song looping keeps it");
+        s.advance(20, false);
+        assert_eq!(s.playing.as_ref().unwrap().entry.title, "ILYSB");
+        assert_eq!(s.state(5, 20).lyrics, "auto", "the next song starts on auto");
     }
 
     #[test]

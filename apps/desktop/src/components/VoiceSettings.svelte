@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isMobile } from '../lib/platform'
   import Slider from './Slider.svelte'
   import { onDestroy, onMount } from 'svelte'
   import { api, errText } from '../lib/api'
@@ -84,7 +85,7 @@
   {#if testing}<p class="muted">You should hear yourself. Use headphones to avoid echo.</p>{/if}
 </section>
 
-{#if prefs}
+{#if prefs && !isMobile}
   <section>
     <h3>Shortcuts</h3>
     <p class="muted">Work even when Rynuvo is in the background.</p>

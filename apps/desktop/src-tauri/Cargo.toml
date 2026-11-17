@@ -16,7 +16,7 @@ tauri-build = { version = "2.7.4", features = [] }
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-tauri = { version = "2.12.5", features = ["tray-icon"] }
+tauri = { version = "2.12.5", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 rynuvo-proto = { path = "../../../crates/rynuvo-proto" }
@@ -24,7 +24,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
-keyring = { version = "3", features = ["apple-native", "windows-native"] }
 url = "2"
 getrandom = "0.3"
 base64 = "0.22"
@@ -39,11 +38,29 @@ cpal = "0.18"
 sonora = "0.3"
 nnnoiseless = "0.5"
 ringbuf = "0.6.0"
+openh264 = "0.9"
+tauri-plugin-process = "2"
+
+# Desktop only: tray, global shortcuts, start at login and self-update don't exist on Android/iOS.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri = { version = "2.12.5", features = ["tray-icon"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
-openh264 = "0.9"
 tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
+
+# The OS keychain (Keychain on macOS/iOS, Credential Manager on Windows); Android has no backend.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+
+# iOS: the call's audio session (play and record), so the mic has input channels.
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "AVAudioSession", "AVAudioSessionTypes"] }
+
+# Android: reqwest's platform verifier needs JNI setup; check against Mozilla's roots instead.
+# minisign-verify checks a downloaded update APK against the same key the desktop updater uses.
+[target.'cfg(target_os = "android")'.dependencies]
+webpki-root-certs = "1"
+minisign-verify = "0.2"
 
 [dev-dependencies]
 rynuvo-server = { path = "../../../crates/rynuvo-server", features = ["test-util"] }
@@ -64,3 +81,6 @@ apple-cf = "0.11"
 wasapi = "0.27"
 windows-capture = "2"
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Media_MediaFoundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Ole", "Win32_System_Variant"] }
+
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-barcode-scanner = "2"

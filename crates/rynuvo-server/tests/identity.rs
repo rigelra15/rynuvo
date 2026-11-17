@@ -106,7 +106,11 @@ async fn avatar_is_set_cleared_and_validated() {
     let u: User = patch(json!({"avatarIcon":null})).await.unwrap().json().await.unwrap();
     assert_eq!((u.avatar_icon, u.avatar_color.as_deref()), (None, Some("teal")), "null clears only that field");
 
-    for bad in [json!({"avatarIcon":"dragon"}), json!({"avatarColor":"#ff0000"})] {
+    // A custom colour (from a photo, or the picker) is any #rrggbb, stored lowercase.
+    let u: User = patch(json!({"avatarColor":"#A1B2C3"})).await.unwrap().json().await.unwrap();
+    assert_eq!(u.avatar_color.as_deref(), Some("#a1b2c3"));
+
+    for bad in [json!({"avatarIcon":"dragon"}), json!({"avatarColor":"#ff00"}), json!({"avatarColor":"#gg0000"}), json!({"avatarColor":"crimson"})] {
         assert_eq!(patch(bad.clone()).await.unwrap().status(), 400, "{bad}");
     }
 }

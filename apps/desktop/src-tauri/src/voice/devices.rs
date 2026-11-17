@@ -177,8 +177,26 @@ fn output_stream<T: ToF32>(dev: &Device, cfg: StreamConfig, mut cons: ringbuf::H
     .map_err(|e| format!("Can't open the speaker: {e}"))
 }
 
+/// iOS starts an app in a playback-only audio session, where the microphone has no channels. A call
+/// needs play-and-record, in the voice-chat mode (the system's echo cancelling), out of the speaker.
+#[cfg(target_os = "ios")]
+fn call_session() -> Result<(), String> {
+    use objc2_avf_audio::{AVAudioSession, AVAudioSessionCategoryOptions as O, AVAudioSessionCategoryPlayAndRecord, AVAudioSessionModeVoiceChat};
+    unsafe {
+        let s = AVAudioSession::sharedInstance();
+        let (Some(cat), Some(mode)) = (AVAudioSessionCategoryPlayAndRecord, AVAudioSessionModeVoiceChat) else {
+            return Err("Can't set up call audio".into());
+        };
+        s.setCategory_mode_options_error(cat, mode, O::DefaultToSpeaker | O::AllowBluetoothHFP)
+            .map_err(|e| format!("Can't set up call audio: {e:?}"))?;
+        s.setActive_error(true).map_err(|e| format!("Can't start call audio: {e:?}"))
+    }
+}
+
 fn open(input: Option<&str>, output: Option<&str>, io: AudioIo) -> Result<(cpal::Stream, cpal::Stream), String> {
     let AudioIo { capture, playback, errors } = io;
+    #[cfg(target_os = "ios")]
+    call_session()?;
     let idev = find(true, input)?;
     let odev = find(false, output)?;
     let (icfg, ifmt) = pick_config(&idev, true)?;

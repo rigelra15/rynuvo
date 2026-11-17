@@ -7,6 +7,7 @@ import { applyVoice, type MyVoice, type VoiceEvent, type VoiceMember } from './v
 import { applyStreams, type StreamEvent, type StreamInfo } from './stream'
 import type { MusicCmd, MusicState, MusicStatus } from './music'
 import { videos } from './videos'
+import { mentionsMe } from './mention'
 
 export const TYPING_TTL_MS = 6000
 
@@ -17,11 +18,15 @@ class Store {
   me = $state<User | null>(null)
   users = new SvelteMap<Id, User>()
   online = new SvelteSet<Id>()
+  /** Of `online`: those on only a phone or tablet. */
+  mobile = new SvelteSet<Id>()
+  /** When each user was last connected (server ms). */
+  lastSeen = new SvelteMap<Id, number>()
   channels = $state<Channel[]>([])
   /** The first `ready` of this sign-in has arrived (the channel list is real). */
   gotReady = $state(false)
-  /** Boot took too long (server down): stop waiting and show the app with its reconnect bar. */
-  bootTimedOut = $state(false)
+  /** Boot is taking a while (no internet, or the server is down): the splash says so and keeps waiting. */
+  bootSlow = $state(false)
   selectedId = $state<Id | null>(null)
   /** Which page the rail shows: the circle's channels, or Home (friends and activity). */
   view = $state<'circle' | 'home'>('circle')
@@ -33,6 +38,12 @@ class Store {
   private pending = new Map<Id, Message[]>()
   typing = new SvelteMap<Id, SvelteMap<Id, number>>()
   conn = $state<ConnState>({ state: 'connecting' })
+  /** Text channel -> how far I've read it (from the server, so the same on all my devices). */
+  reads = new SvelteMap<Id, { last: Id | null; read: Id }>()
+  /** Text channels whose unread messages mention me or @everyone. */
+  mentioned = new SvelteSet<Id>()
+  /** The open channel is really on screen (App: window shown, and on a phone the chat pane is open). */
+  looking = $state(true)
   alerts = $state<string[]>([])
   updateRequired = $state(false)
   voice = $state<VoiceMember[]>([])
@@ -66,10 +77,44 @@ class Store {
   get ready(): boolean {
     if (this.phase === 'onboarding') return true
     if (this.phase !== 'app') return false
-    if (this.bootTimedOut) return true
     if (!this.gotReady) return false
     const c = this.selected
     return !c || c.kind !== 'text' || this.messages.has(c.id) || this.loadError.has(c.id)
+  }
+
+  /** A text channel has messages I haven't seen. */
+  isUnread(channel: Id): boolean {
+    const r = this.reads.get(channel)
+    return !!r && r.last !== null && r.last > r.read
+  }
+
+  /** …and one of them mentions me. */
+  isMentioned(channel: Id): boolean {
+    return this.mentioned.has(channel) && this.isUnread(channel)
+  }
+
+  /** I'm looking at the open text channel: it's read up to its newest message. */
+  seeSelected() {
+    const c = this.selected
+    if (!c || c.kind !== 'text' || this.view !== 'circle' || !this.looking || !this.messages.has(c.id)) return
+    const r = this.reads.get(c.id)
+    this.mentioned.delete(c.id)
+    if (!r || r.last === null || r.last <= r.read) return
+    this.reads.set(c.id, { ...r, read: r.last })
+    void api.markRead(c.id, r.last).catch(() => {})
+  }
+
+  /** At connect: which unread channels mention me (the newest page is enough to tell). */
+  private async findMentions(channel: Id, after: Id) {
+    const me = this.me?.id
+    if (me === undefined) return
+    try {
+      const list = await api.messages(channel)
+      const people = this.people()
+      if (list.some((m) => m.id > after && m.authorId !== me && mentionsMe(m.content, people, me))) this.mentioned.add(channel)
+    } catch {
+      /* no dot is better than a wrong one */
+    }
   }
 
   get selected(): Channel | null {
@@ -135,7 +180,9 @@ class Store {
 
   async boot() {
     void this.loadPrefs()
-    setTimeout(() => (this.bootTimedOut = true), 8000)
+    // After the page reloads the call carries on underneath: pick up where it is.
+    void api.voiceState?.().then((v) => (this.myVoice = v)).catch(() => {})
+    setTimeout(() => (this.bootSlow = true), 4000)
     try {
       const info = await api.bootstrap()
       if (!info) {
@@ -161,11 +208,15 @@ class Store {
     this.me = null
     this.users.clear()
     this.online.clear()
+    this.mobile.clear()
+    this.lastSeen.clear()
     this.channels = []
     this.gotReady = false
     this.selectedId = null
     this.view = 'circle'
     this.messages.clear()
+    this.reads.clear()
+    this.mentioned.clear()
     this.hasMore.clear()
     this.loadError.clear()
     this.pending.clear()
@@ -245,6 +296,8 @@ class Store {
     this.channels = this.channels.filter((c) => c.id !== id)
     this.messages.delete(id)
     this.typing.delete(id)
+    this.reads.delete(id)
+    this.mentioned.delete(id)
     if (this.selectedId === id || this.selectedId === null) this.select(newSel)
   }
 
@@ -258,6 +311,12 @@ class Store {
     } catch (e) {
       void dialog.notice(errText(e))
     }
+  }
+
+  /** I'm in `channel`'s call, but from another device (this one isn't connected to it). */
+  inVoiceElsewhere(channel: Id): boolean {
+    const me = this.me?.id
+    return !this.inVoice(channel) && this.voice.some((m) => m.userId === me && m.channelId === channel)
   }
 
   joinVoice(channel: Id) {
@@ -425,7 +484,17 @@ class Store {
         for (const u of m.d.users) this.users.set(u.id, u)
         this.online.clear()
         for (const id of m.d.online) this.online.add(id)
+        this.mobile.clear()
+        for (const id of m.d.mobile ?? []) this.mobile.add(id)
+        this.lastSeen.clear()
+        for (const l of m.d.lastSeen ?? []) this.lastSeen.set(l.userId, l.at)
         this.channels = m.d.channels
+        this.reads.clear()
+        this.mentioned.clear()
+        for (const r of m.d.reads ?? []) {
+          this.reads.set(r.channelId, { last: r.lastMessage ?? null, read: r.lastRead })
+          if (r.lastMessage != null && r.lastMessage > r.lastRead) void this.findMentions(r.channelId, r.lastRead)
+        }
         this.gotReady = true
         this.alerts = m.d.alerts
         this.musicBot = m.d.musicBot ?? null
@@ -441,7 +510,21 @@ class Store {
         for (const id of new Set([...this.messages.keys(), ...this.loadError.keys()])) void this.loadLatest(id)
         return
       }
-      case 'messageCreated':
+      case 'messageCreated': {
+        const r = this.reads.get(m.d.channelId) ?? { last: null, read: 0 }
+        const mine = m.d.authorId === this.me?.id
+        this.reads.set(m.d.channelId, { last: Math.max(r.last ?? 0, m.d.id), read: mine ? Math.max(r.read, m.d.id) : r.read })
+        if (!mine && this.me && mentionsMe(m.d.content, this.people(), this.me.id)) this.mentioned.add(m.d.channelId)
+        this.upsertMessage(m.d)
+        this.typing.get(m.d.channelId)?.delete(m.d.authorId)
+        return
+      }
+      case 'readUpdated': {
+        const r = this.reads.get(m.d.channelId)
+        if (r) this.reads.set(m.d.channelId, { ...r, read: Math.max(r.read, m.d.lastRead) })
+        if (!this.isUnread(m.d.channelId)) this.mentioned.delete(m.d.channelId)
+        return
+      }
       case 'messageUpdated':
         this.upsertMessage(m.d)
         this.typing.get(m.d.channelId)?.delete(m.d.authorId)
@@ -449,10 +532,17 @@ class Store {
       case 'messageDeleted': {
         const list = this.messages.get(m.d.channelId)
         if (list) this.messages.set(m.d.channelId, list.filter((x) => x.id !== m.d.id))
+        // The newest message went: the one before it is the newest now (as far as is known here).
+        const r = this.reads.get(m.d.channelId)
+        if (r && r.last === m.d.id) {
+          const rest = this.messages.get(m.d.channelId)
+          this.reads.set(m.d.channelId, { ...r, last: rest?.length ? rest[rest.length - 1].id : r.read })
+        }
         return
       }
       case 'channelCreated':
         if (!this.channels.some((c) => c.id === m.d.id)) this.channels = [...this.channels, m.d]
+        if (m.d.kind === 'text' && !this.reads.has(m.d.id)) this.reads.set(m.d.id, { last: null, read: 0 })
         return
       case 'channelUpdated':
         this.channels = this.channels.map((c) => (c.id === m.d.id ? m.d : c))
@@ -467,10 +557,14 @@ class Store {
       case 'userRemoved':
         this.users.delete(m.d.id)
         this.online.delete(m.d.id)
+        this.mobile.delete(m.d.id)
         return
       case 'presence':
         if (m.d.online) this.online.add(m.d.userId)
         else this.online.delete(m.d.userId)
+        if (m.d.online && m.d.mobile) this.mobile.add(m.d.userId)
+        else this.mobile.delete(m.d.userId)
+        if (m.d.lastSeen) this.lastSeen.set(m.d.userId, m.d.lastSeen)
         return
       case 'typing': {
         let t = this.typing.get(m.d.channelId)

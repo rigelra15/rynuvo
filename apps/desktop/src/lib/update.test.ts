@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { CHECK_EVERY_MS, checkDue, NUDGE_GAP_MS, topBar, updateStatus } from './update'
+import { CHECK_EVERY_MS, checkDue, NUDGE_GAP_MS, progressOf, topBar, updateStatus } from './update'
 
 describe('update schedule', () => {
   test('notices a new version within minutes while the app stays open', () => {
@@ -53,5 +53,23 @@ describe('updateStatus (Settings)', () => {
     const ready = { phase: 'ready', version: '0.9.0', seconds: 3 } as const
     expect(updateStatus({ update: ready, checking: false, result: null, busy: false })).toEqual({ text: '0.9.0 is ready. Restarting in 3s…', restart: false })
     expect(updateStatus({ update: ready, checking: false, result: null, busy: true })).toEqual({ text: '0.9.0 is ready. Restarting in 3s…', restart: false })
+  })
+})
+
+describe('update progress', () => {
+  test('fraction of the download, clamped', () => {
+    expect(progressOf(0, 100)).toBe(0)
+    expect(progressOf(42, 100)).toBe(0.42)
+    expect(progressOf(150, 100)).toBe(1)
+  })
+  test('unknown size means no fraction', () => {
+    expect(progressOf(42, null)).toBeNull()
+    expect(progressOf(42, 0)).toBeNull()
+  })
+  test('Settings shows the percentage and the Android install step', () => {
+    const at = (progress: number | null) => updateStatus({ update: { phase: 'downloading', version: '0.10.0', progress }, checking: false, result: 'found', busy: false }).text
+    expect(at(0.42)).toBe('Downloading 0.10.0 in the background… 42%')
+    expect(at(null)).toBe('Downloading 0.10.0 in the background…')
+    expect(updateStatus({ update: { phase: 'install', version: '0.10.0' }, checking: false, result: null, busy: false }).text).toBe('0.10.0 is downloaded and ready to install.')
   })
 })

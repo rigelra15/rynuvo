@@ -42,6 +42,7 @@
   function startEdit() {
     draft = m.content
     editing = true
+    picked = false
   }
 
   async function saveEdit() {
@@ -69,9 +70,21 @@
       void saveEdit()
     } else if (e.key === 'Escape') editing = false
   }
+  // Touch screens have no hover: a long press (or right click) shows the message's actions until a
+  // tap lands elsewhere.
+  let picked = $state(false)
+  let rowEl: HTMLDivElement | undefined = $state()
+  $effect(() => {
+    if (!picked) return
+    const away = (e: PointerEvent) => { if (!rowEl?.contains(e.target as Node)) picked = false }
+    window.addEventListener('pointerdown', away, true)
+    return () => window.removeEventListener('pointerdown', away, true)
+  })
 </script>
 
-<div class="row" class:mine class:head class:fresh>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="row" class:mine class:head class:fresh class:picked bind:this={rowEl}
+  oncontextmenu={(e) => { if (editing || !(mine || canDelete)) return; e.preventDefault(); picked = !picked }}>
   {#if !mine}
     <div class="side">{#if head}<Avatar user={author} id={m.authorId} size={32} />{/if}</div>
   {/if}
@@ -153,7 +166,7 @@
   .mine .err { color: #6b1010; font-weight: 600; }
 
   .actions { display: flex; align-self: center; visibility: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .row:hover .actions { visibility: visible; }
+  .row:hover .actions, .row.picked .actions { visibility: visible; }
   .actions button { padding: 4px 6px; color: var(--muted); display: grid; place-items: center; }
   .actions button:hover { color: var(--text); background: var(--elev); }
 </style>

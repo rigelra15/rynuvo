@@ -33,6 +33,7 @@ export const api = {
   editMessage: (id: Id, content: string) => invoke<Message>('edit_message', { id, content }),
   deleteMessage: (id: Id) => invoke<void>('delete_message', { id }),
   sendTyping: (channel: Id) => invoke<void>('send_typing', { channel }),
+  markRead: (channel: Id, message: Id) => invoke<void>('mark_read', { channel, message }),
   transferCode: () => invoke<TransferCode>('transfer_code'),
   adminRotateInvite: () => invoke<{ code: string }>('admin_rotate_invite'),
   adminKick: (user: Id) => invoke<void>('admin_kick', { user }),

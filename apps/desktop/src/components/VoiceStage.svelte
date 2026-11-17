@@ -3,9 +3,12 @@
   import Avatar from './Avatar.svelte'
   import { store } from '../lib/state.svelte'
   import { membersOf } from '../lib/voice'
-  import { dockIn, pop, sidePanel } from '../lib/motion'
+  import { isMobile } from '../lib/platform'
+  import { dockIn, panelShown, pop, sidePanel } from '../lib/motion'
   import { musicPanel } from '../lib/panel.svelte'
   import { seats } from '../lib/bento'
+  import { Tween } from 'svelte/motion'
+  import { cubicOut } from 'svelte/easing'
   import { groupTitle } from '../lib/home'
   import type { Channel, Id } from '../lib/types'
   import Icon from './Icon.svelte'
@@ -36,8 +39,27 @@
   // A shared screen is about two seats wide, so it counts as two when sizing the room.
   const screens = $derived(list.filter((m) => store.isLive(m.userId)).length)
   const seat = $derived(strip ? { cols: list.length, size: 44 } : seats(list.length + screens, gw - 24, gh - 24, GAP, playerUp ? 132 : 168))
+  // Faces grow and shrink smoothly when the room does (the music panel opening or closing), instead
+  // of stepping with every pixel and jumping when the seating changes.
+  const face = new Tween(0, { duration: 260, easing: cubicOut })
+  $effect(() => {
+    const target = seat.size
+    face.set(target, { duration: face.current === 0 ? 0 : 260 })
+  })
+  const sz = $derived(Math.round(face.current || seat.size))
 
   const who = $derived(groupTitle(list.map((m) => store.nick(m.userId))))
+  const elsewhere = $derived(store.inVoiceElsewhere(channel.id))
+  const others = $derived(list.filter((m) => m.userId !== meId))
+  const doorText = $derived(
+    elsewhere
+      ? others.length
+        ? `You're in here on another device, with ${groupTitle(others.map((m) => store.nick(m.userId)))}`
+        : "You're in this room on another device"
+      : list.length
+        ? `${who} ${list.length === 1 ? 'is' : 'are'} in here`
+        : 'Nobody is in here yet',
+  )
 
   function share() {
     if (store.live) store.stopLive()
@@ -62,14 +84,14 @@
         {#if list.length > 5}<span class="pk more">+{list.length - 5}</span>{/if}
         {#if !list.length}<span class="chair"><Icon name="volume" size={26} /></span>{/if}
       </div>
-      <p class="who">{list.length ? `${who} ${list.length === 1 ? 'is' : 'are'} in here` : 'Nobody is in here yet'}</p>
+      <p class="who">{doorText}</p>
       {#if music}<p class="np"><Icon name="music" size={14} /> {music.state.now!.title} by {music.state.now!.artist}</p>{/if}
-      <button class="enter" onclick={() => store.joinVoice(channel.id)}>{list.length ? 'Join them' : 'Go in'}</button>
+      <button class="enter" onclick={() => store.joinVoice(channel.id)}>{elsewhere ? 'Move here' : list.length ? 'Join them' : 'Go in'}</button>
     </div>
   {:else}
     {#snippet people()}
       <div class="room" class:strip bind:clientWidth={gw} bind:clientHeight={gh}>
-        <div class="seats" style="--sz:{seat.size}px;--gap:{strip ? 14 : GAP}px;{strip ? '' : `max-width:${seat.cols * (seat.size + GAP)}px`}">
+        <div class="seats" style="--sz:{sz}px;--gap:{strip ? 14 : GAP}px;{strip ? '' : `max-width:${seat.cols * (sz + GAP)}px`}">
           {#each list as m (m.userId)}
             {@const streaming = store.isLive(m.userId)}
             {@const talking = store.speaking.has(m.userId)}
@@ -104,7 +126,7 @@
                 </div>
               {:else}
                 <span class="face">
-                  <Avatar user={store.user(m.userId)} id={m.userId} size={seat.size} speaking={talking} />
+                  <Avatar user={store.user(m.userId)} id={m.userId} size={sz} speaking={talking} />
                   {#if m.deafened}<span class="state" title="Can't hear"><Icon name="headphonesOff" size={13} /></span>
                   {:else if m.muted}<span class="state" title="Muted"><Icon name="micOff" size={13} /></span>{/if}
                   {#if streaming}<span class="state live-dot" title="Sharing their screen"></span>{/if}
@@ -124,7 +146,7 @@
       <div class="split">
         {@render people()}
         {#if musicPanel.open}
-          <div class="side" transition:sidePanel>
+          <div class="side" transition:sidePanel use:panelShown>
             {#if music}<MusicPlayer {music} />{:else}<MusicIdle channelName={channel.name} />{/if}
           </div>
         {/if}
@@ -147,9 +169,9 @@
         <button class="ctl" style="--i:1" class:off={store.myVoice.deafened} aria-pressed={store.myVoice.deafened} aria-label={store.myVoice.deafened ? 'Undeafen' : 'Deafen'} onclick={() => store.toggleDeafen()}>
           <SwapLabel icons={['headphones', 'headphonesOff']} labels={['Sound', 'Deafened']} flipped={store.myVoice.deafened} />
         </button>
-        <button class="ctl" style="--i:2" class:on={!!store.live} aria-pressed={!!store.live} aria-label={store.live ? 'Stop sharing' : 'Share screen'} onclick={share}>
+        {#if !isMobile}<button class="ctl" style="--i:2" class:on={!!store.live} aria-pressed={!!store.live} aria-label={store.live ? 'Stop sharing' : 'Share screen'} onclick={share}>
           <SwapLabel icons={['screen', 'screen']} labels={['Share screen', 'Stop sharing']} flipped={!!store.live} />
-        </button>
+        </button>{/if}
         <span class="sep" style="--i:3" aria-hidden="true"></span>
         <button class="ctl leave" style="--i:4" onclick={() => store.leaveVoice()}><Icon name="leave" size={18} /><span class="lbl">Leave</span></button>
       </div>
@@ -249,5 +271,16 @@
   @media (prefers-reduced-motion: reduce) {
     .lamp, .face, .tv, .ctl { transition: none; }
     .ctl, .sep { animation: none; }
+  }
+  /* Phones and upright tablets: the music panel sits under the people instead of beside them. */
+  @media (max-width: 760px) {
+    .stage { padding: 4px 12px 12px; }
+  }
+  @media (max-width: 900px) {
+    /* One scroller only: the panel's own list (search results, queue, lyrics) scrolls inside it.
+       The people take what the panel leaves, down to a band; the panel is as tall as its content. */
+    .split { flex-direction: column; gap: 12px; overflow: hidden; }
+    .split > .room { flex: 1 1 150px; min-height: 110px; }
+    .side { width: 100%; flex: 0 1 auto; min-height: 0; position: relative; z-index: 3; }
   }
 </style>

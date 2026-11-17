@@ -55,10 +55,20 @@ pub fn normalize_server(s: &str) -> Result<Url, String> {
     Ok(u)
 }
 
+/// TLS roots for every HTTP client. On Android the OS verifier `reqwest` uses needs to be wired up
+/// through JNI first (unset, it panics on the first request), so check against Mozilla's roots.
+pub fn tls_roots(b: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    #[cfg(target_os = "android")]
+    let b = b.tls_certs_only(
+        webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().filter_map(|c| reqwest::Certificate::from_der(c).ok()),
+    );
+    b
+}
+
 impl Api {
     pub fn new(base: &str, token: Option<String>) -> Result<Api, String> {
         let base = normalize_server(base)?;
-        let http = reqwest::Client::builder()
+        let http = tls_roots(reqwest::Client::builder())
             .connect_timeout(std::time::Duration::from_secs(8))
             .timeout(std::time::Duration::from_secs(60))
             .build()

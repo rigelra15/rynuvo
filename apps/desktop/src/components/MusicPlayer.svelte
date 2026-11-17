@@ -10,6 +10,9 @@
   import { annotationsOf, frameClock, lyricExtras, lyricsOf } from '../lib/lyrics.svelte'
   import { beforeStart, clock, LYRICS_SOURCES, lyricsStatus, mayControl, positionMs, type MusicState } from '../lib/music'
   import { membersOf } from '../lib/voice'
+  import { phonePortal } from '../lib/portal'
+  import { sheet } from '../lib/motion'
+  import { fade } from 'svelte/transition'
 
   let { music }: { music: { state: MusicState; receivedAt: number } } = $props()
   const s = $derived(music.state)
@@ -173,8 +176,8 @@
       ><Icon name="lyrics" /></button>
       {#if picking}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="scrim" onmousedown={() => (picking = false)}></div>
-        <div class="menu" role="menu" aria-label="Lyrics source">
+        <div class="scrim" use:phonePortal onpointerdown={() => (picking = false)} transition:fade={{ duration: 220 }}></div>
+        <div class="menu" role="menu" aria-label="Lyrics source" use:phonePortal transition:sheet>
           <div class="mhead">Lyrics from{source === 'auto' && lyrics?.source ? ` · now ${lyrics.source}` : ''}</div>
           {#each LYRICS_SOURCES as o (o.id)}
             <!-- Asking every source while the menu is open shows which ones know this song. -->
@@ -217,7 +220,7 @@
             <li>
               <span class="qart" style="background-image:url('{e.artUrl}')"></span>
               <span class="qtxt"><b>{e.title}</b><small>{e.artist} · {clock(e.durationMs)}</small></span>
-              <span class="who" title="Requested by {store.nick(e.requestedBy)}"><Avatar user={store.user(e.requestedBy)} id={e.requestedBy} size={16} />{store.nick(e.requestedBy)}</span>
+              <span class="who" title="Requested by {store.nick(e.requestedBy)}"><Avatar user={store.user(e.requestedBy)} id={e.requestedBy} size={16} /><span class="wn">{store.nick(e.requestedBy)}</span></span>
               {#if mayControl(e.requestedBy, me, inVoice)}
                 <button title="Remove from the queue" onclick={() => store.musicCmd({ op: 'remove', index: i + 1 })}><Icon name="close" size={14} /></button>
               {/if}
@@ -281,7 +284,7 @@
   .times { display: flex; justify-content: space-between; font-size: 11px; color: rgba(255, 255, 255, 0.7); font-variant-numeric: tabular-nums; }
   .bar { position: relative; height: 4px; margin: 6px 0 4px; border-radius: 2px; overflow: hidden; background: rgba(255, 255, 255, 0.2); }
   .fill { position: absolute; inset: 0; background: #fff; transform-origin: left; }
-  .ctl { display: flex; gap: 10px; align-items: center; }
+  .ctl { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   .ctl button { width: 38px; height: 38px; border-radius: 50%; background: rgba(255, 255, 255, 0.14); display: grid; place-items: center; color: #fff; transition: background 120ms, transform 120ms; }
   .ctl button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.24); }
   .ctl button:active:not(:disabled) { transform: scale(0.94); }
@@ -293,7 +296,8 @@
     position: absolute; right: -6px; top: -6px; min-width: 22px; padding: 1px 5px; border-radius: 999px; font-size: 10px; font-weight: 800;
     color: #16171c; background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4); font-variant-numeric: tabular-nums;
   }
-  .vol { flex: 1; display: flex; align-items: center; gap: 6px; margin-left: 4px; color: rgba(255, 255, 255, 0.8); min-width: 0; }
+  /* Takes the row's leftover space; on a narrow panel it drops to a line of its own instead of being crushed. */
+  .vol { flex: 1 0 110px; display: flex; align-items: center; gap: 6px; margin-left: 4px; color: rgba(255, 255, 255, 0.8); min-width: 0; }
   .vol :global(.slider) { flex: 1; min-width: 40px; max-width: 120px; }
   .next { font-size: 12px; color: rgba(255, 255, 255, 0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .src { position: relative; }
@@ -302,7 +306,7 @@
     position: absolute; top: calc(100% + 6px); right: -60px; z-index: 5; min-width: 240px; padding: 4px; border-radius: 10px;
     background: rgba(20, 20, 28, 0.92); backdrop-filter: blur(18px); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   }
-  .src .menu button { width: 100%; height: auto; background: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 7px; font-size: 13px; color: #fff; text-align: left; }
+  .menu button { width: 100%; height: auto; background: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 7px; font-size: 13px; color: #fff; text-align: left; }
   .menu button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
   .menu button:disabled { opacity: 0.45; cursor: default; }
   .mhead { padding: 6px 10px 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255, 255, 255, 0.6); }
@@ -317,7 +321,7 @@
   .add { margin-bottom: 10px; }
   .add :global(.lists) { max-height: 260px; flex: none; }
   .menu button.on { background: rgba(255, 255, 255, 0.06); }
-  .src .menu button { justify-content: flex-start; gap: 10px; }
+  .menu button { justify-content: flex-start; gap: 10px; }
   .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: rgba(255, 255, 255, 0.35); }
   .dot.good { background: #3ba55d; box-shadow: 0 0 0 3px rgba(59, 165, 93, 0.25); }
   .dot.meh { background: #e3a53b; box-shadow: 0 0 0 3px rgba(227, 165, 59, 0.22); }
@@ -351,6 +355,28 @@
   .queue button { color: rgba(255, 255, 255, 0.7); display: grid; padding: 4px; border-radius: 6px; }
   .queue button:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
   .empty { color: rgba(255, 255, 255, 0.6); font-size: 13px; }
+  /* Phones: a smaller record and sleeve, so the queue and lyrics get the room below. */
+  @media (max-width: 760px) {
+    .player { padding: 14px; gap: 10px; }
+    .sleeve { width: 72px; height: 72px; margin-right: 34px; }
+    .disc { width: 68px; height: 68px; left: 40px; }
+    .label { width: 30px; height: 30px; }
+    .title { font-size: 18px; -webkit-line-clamp: 1; line-clamp: 1; }
+    /* The song's name matters more than who asked: just their face. */
+    .queue .wn { display: none; }
+    /* Search results scroll with the queue, not in a box of their own. */
+    .add :global(.lists) { max-height: none; }
+    /* The lyrics menu opens upward over the player (below it the room ends), scrolling if long. */
+    /* The lyrics menu is a sheet from the bottom of the screen (moved to <body>, over everything). */
+    .scrim { z-index: 300; background: rgba(0, 0, 0, 0.45); }
+    .menu {
+      position: fixed; top: auto; left: 0; right: 0; bottom: 0; z-index: 301; min-width: 0; max-height: 70vh; overflow-y: auto; color: #fff;
+      padding: 10px 10px calc(14px + env(safe-area-inset-bottom)); border-radius: 18px 18px 0 0; background: rgba(20, 20, 28, 0.98);
+    }
+    .menu .mhead { padding: 8px 10px; }
+    .menu button { padding: 10px; }
+
+  }
   @media (prefers-reduced-motion: reduce) {
     .vid, .sleeve { transition: none; }
     .disc, .plain pre, .dot.wait { animation: none; }

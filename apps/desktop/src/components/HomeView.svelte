@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { pane } from '../lib/pane.svelte'
+  import { ago } from '../lib/ago'
+  import { clock } from '../lib/clock.svelte'
   import Avatar from './Avatar.svelte'
   import Icon from './Icon.svelte'
   import { store } from '../lib/state.svelte'
@@ -24,6 +27,7 @@
 </script>
 
 <header class="top">
+  {#if pane.narrow}<button class="away" title="Back to chats & rooms" aria-label="Back to chats & rooms" onclick={pane.close}><Icon name="back" size={22} /></button>{/if}
   <h1 class="title-xl">Friends</h1>
   <div class="tabs" role="tablist" aria-label="Which friends">
     <button role="tab" aria-selected={tab === 'online'} class="tab" class:on={tab === 'online'} onclick={() => (tab = 'online')}>Online</button>
@@ -68,7 +72,7 @@
   {@const vc = voiceOf(u.id)}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="row" class:off={!on} oncontextmenu={(e) => { e.preventDefault(); onMemberMenu(u.id, e) }}>
-    <span class="av"><Avatar user={u} id={u.id} size={36} speaking={store.speaking.has(u.id)} /><span class="dot" class:on></span></span>
+    <span class="av"><Avatar user={u} id={u.id} size={36} speaking={store.speaking.has(u.id)} />{#if !on && store.lastSeen.has(u.id)}<span class="seen">{ago(store.lastSeen.get(u.id)!, clock.now)}</span>{:else}<span class="dot" class:on class:mobile={on && store.mobile.has(u.id)}></span>{/if}</span>
     <span class="txt">
       <span class="nick">{u.nickname}</span>
       <span class="status">{presence(u.id, store.online, store.voice, store.channels, live)}</span>
@@ -80,6 +84,7 @@
 {/snippet}
 
 <style>
+  .away { flex: none; width: 36px; height: 36px; margin: 0 -4px 0 -10px; border-radius: 10px; display: grid; place-items: center; color: var(--text); }
   .top { display: flex; align-items: center; gap: 16px; padding: 18px 22px 12px; min-height: 64px; }
   h1 { margin: 0; }
   .tabs { display: flex; padding: 3px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
@@ -97,6 +102,14 @@
   .dot { position: absolute; right: -2px; bottom: -2px; z-index: 2; width: 13px; height: 13px; border-radius: 50%; background: var(--faint); border: 3px solid var(--bg); box-sizing: border-box; }
   .row:hover .dot { border-color: var(--elev-2); }
   .dot.on { background: var(--speaking); }
+  /* On a phone only: the dot becomes a little phone (a screen over a lit chin). */
+  .dot.mobile { width: 12px; height: 17px; border-radius: 4px; }
+  .dot.mobile::after { content: ''; position: absolute; left: 1px; right: 1px; top: 1px; bottom: 3px; border-radius: 1px; background: var(--bg); }
+  /* Offline friends: how long since they were last here. */
+  .seen {
+    position: absolute; right: -6px; bottom: -4px; z-index: 2; height: 15px; padding: 0 4px; border-radius: 999px; display: grid; place-items: center;
+    font-size: 9.5px; font-weight: 750; line-height: 1; color: var(--muted); background: var(--elev); box-shadow: 0 0 0 2px var(--bg); font-variant-numeric: tabular-nums;
+  }
   .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .nick { font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .status { font-size: 12.5px; color: var(--muted); }
@@ -119,5 +132,12 @@
   .here { font-size: 12px; color: var(--accent); white-space: nowrap; font-weight: 600; }
   .quiet { padding: 18px 16px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; border: 1px dashed var(--line); border-radius: 16px; }
   .quiet strong { color: var(--text); font-size: 15px; }
+  /* Phones: what's happening now on top, then everyone, in one scroll. */
+  @media (max-width: 760px) {
+    .top { padding: 12px 16px 8px; min-height: 0; }
+    .body { flex-direction: column-reverse; justify-content: flex-end; overflow-y: auto; }
+    .friends { flex: none; overflow: visible; padding: 4px 16px 16px; }
+    .active { width: auto; overflow: visible; padding: 8px 16px 0; }
+  }
   @media (prefers-reduced-motion: reduce) { .card { animation: none; } .row { transition: none; } }
 </style>
