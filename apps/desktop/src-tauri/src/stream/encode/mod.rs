@@ -3,6 +3,9 @@
 #[cfg(target_os = "macos")]
 mod vt;
 mod soft;
+#[cfg(windows)]
+pub mod mf;
+pub mod nv12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Codec {
@@ -83,10 +86,32 @@ pub fn available() -> Vec<Codec> {
     {
         vec![Codec::Hevc, Codec::H264]
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        // HEVC only from a GPU encoder that works; H.264 always (software when there is no GPU one).
+        let mut v = Vec::new();
+        if !mf::is_broken(Codec::Hevc) && mf_has(Codec::Hevc) {
+            v.push(Codec::Hevc);
+        }
+        v.push(Codec::H264);
+        v
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         vec![Codec::H264]
     }
+}
+
+/// Whether a hardware encoder for `codec` came up once (checked a single time per run).
+#[cfg(windows)]
+fn mf_has(codec: Codec) -> bool {
+    use std::sync::OnceLock;
+    static HEVC: OnceLock<bool> = OnceLock::new();
+    let cell = match codec {
+        Codec::Hevc => &HEVC,
+        _ => return true,
+    };
+    *cell.get_or_init(|| mf::MfEncoder::new(codec, 320, 240, 30, 1000).is_ok())
 }
 
 /// One encoder as found on this machine (Settings self-check).
@@ -112,6 +137,11 @@ pub fn probe() -> Vec<EncoderInfo> {
 pub fn open(codec: Codec, width: u32, height: u32, fps: u32, kbps: u32) -> Result<Box<dyn VideoEncoder>, String> {
     #[cfg(target_os = "macos")]
     match vt::VtEncoder::new(codec, width, height, fps, kbps) {
+        Ok(e) => return Ok(Box::new(e)),
+        Err(e) => tracing::warn!("hardware {} encoder unavailable: {e}", codec.name()),
+    }
+    #[cfg(windows)]
+    match mf::MfEncoder::new(codec, width, height, fps, kbps) {
         Ok(e) => return Ok(Box::new(e)),
         Err(e) => tracing::warn!("hardware {} encoder unavailable: {e}", codec.name()),
     }

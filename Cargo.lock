@@ -4745,6 +4745,7 @@ dependencies = [
  "videotoolbox",
  "wasapi",
  "webp",
+ "windows",
  "windows-capture",
 ]
 
