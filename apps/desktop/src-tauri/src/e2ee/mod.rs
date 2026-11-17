@@ -4,4 +4,4 @@ pub mod device;
 pub mod state;
 pub mod trust;
 
-pub use state::{KeyState, Outgoing, SharedKeys};
+pub use state::{KeyState, Outgoing, SealParts, SharedKeys, open_shared, seal_shared};

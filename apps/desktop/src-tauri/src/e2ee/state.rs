@@ -86,6 +86,39 @@ fn random_generation() -> u32 {
     u32::from_be_bytes([k.0[0], k.0[1], k.0[2], k.0[3]])
 }
 
+/// A reserved frame counter of one of my keys: everything `seal_frame` needs. No `Debug` (holds a key).
+pub struct SealParts {
+    key: MediaKey,
+    pub generation: u32,
+    pub counter: u32,
+    pub sender: Id,
+}
+
+impl SealParts {
+    pub fn seal(&self, kind: u8, plain: &[u8]) -> Vec<u8> {
+        seal_frame(&self.key, self.generation, self.counter, kind, self.sender, plain)
+    }
+}
+
+/// Seal one frame with my active key for `scope`. The lock is held only to reserve the counter;
+/// the encryption runs after it is released (the realtime voice thread shares this lock).
+pub fn seal_shared(keys: &Mutex<KeyState>, scope: &Scope, kind: u8, plain: &[u8], now: Instant) -> Option<Vec<u8>> {
+    let parts = keys.lock().unwrap().seal_parts(scope, now)?;
+    Some(parts.seal(kind, plain))
+}
+
+/// Open one frame from `from`. The lock is held for the key lookup (and, after a missing key,
+/// to record success); the decryption runs without it.
+pub fn open_shared(keys: &Mutex<KeyState>, scope: &Scope, from: Id, kind: u8, ct: &[u8], now: Instant) -> Option<Vec<u8>> {
+    let generation = frame_generation(ct)?;
+    let (key, was_missing) = keys.lock().unwrap().open_key(scope, from, generation, now)?;
+    let plain = open_frame(&key, kind, from, ct)?;
+    if was_missing {
+        keys.lock().unwrap().opened(scope, from);
+    }
+    Some(plain)
+}
+
 /// Media-key bookkeeping for one engine run. A new `KeyState` always starts with fresh keys.
 /// Deliberately no `Debug`: it holds the device private key and media keys.
 pub struct KeyState {
@@ -109,6 +142,23 @@ impl KeyState {
             self.peers.retain(|(_, u), _| *u != user);
         }
         self.pubkeys.insert(user, pk);
+    }
+
+    /// Forget `user`'s device key (they announced none, or an unusable one) and every key from them:
+    /// nothing is sealed to, or opened from, a key that is no longer theirs.
+    pub fn remove_peer_pubkey(&mut self, user: Id) {
+        self.pubkeys.remove(&user);
+        self.peers.retain(|(_, u), _| *u != user);
+    }
+
+    /// The device public key I seal envelopes to and open them from for `user`. Public keys only.
+    pub fn peer_pubkey(&self, user: Id) -> Option<PublicKey> {
+        self.pubkeys.get(&user).cloned()
+    }
+
+    /// This device's public key.
+    pub fn my_public(&self) -> PublicKey {
+        self.device.public()
     }
 
     fn envelopes(&self, scope: &Scope, key: &MyKey, to: &[Id]) -> Vec<Outgoing> {
@@ -170,24 +220,29 @@ impl KeyState {
         true
     }
 
-    /// Encrypt one frame with my active key. None if I have no key or its counter is used up.
-    pub fn seal(&mut self, scope: &Scope, kind: u8, plain: &[u8], now: Instant) -> Option<Vec<u8>> {
+    /// Reserve the next frame counter of my active key for `scope`. None if I have no key or its
+    /// counter is used up. The caller seals with `seal_frame` (see `seal_shared`), outside any lock.
+    pub fn seal_parts(&mut self, scope: &Scope, now: Instant) -> Option<SealParts> {
         let mine = self.mine.get_mut(scope)?;
         mine.promote(now);
         let k = &mut mine.current;
         if k.next == u32::MAX {
             return None;
         }
-        let ct = seal_frame(&k.key, k.generation, k.next, kind, self.me, plain);
+        let counter = k.next;
         k.next += 1;
-        Some(ct)
+        Some(SealParts { key: k.key.clone(), generation: k.generation, counter, sender: self.me })
     }
 
-    /// Decrypt a frame from `from`. None means drop it (lost frame). Only pass members of the scope:
-    /// a frame newer than any key held marks the sender as missing a key, so a request becomes due;
-    /// a stale frame (older than the held key) is just loss.
-    pub fn open(&mut self, scope: &Scope, from: Id, kind: u8, ct: &[u8], now: Instant) -> Option<Vec<u8>> {
-        let generation = frame_generation(ct)?;
+    /// Encrypt one frame with my active key. None if I have no key or its counter is used up.
+    pub fn seal(&mut self, scope: &Scope, kind: u8, plain: &[u8], now: Instant) -> Option<Vec<u8>> {
+        Some(self.seal_parts(scope, now)?.seal(kind, plain))
+    }
+
+    /// The key from `from` for a frame of `generation`, if I hold it (current or a not yet expired
+    /// previous one). Without one, a frame newer than any key held marks the sender as missing a key;
+    /// a stale one is just loss. The bool says a successful open must call `opened`.
+    pub fn open_key(&mut self, scope: &Scope, from: Id, generation: u32, now: Instant) -> Option<(MediaKey, bool)> {
         let peer = self.peers.entry((scope.clone(), from)).or_default();
         peer.previous.retain(|(_, _, until)| now < *until);
         let key = peer
@@ -196,17 +251,34 @@ impl KeyState {
             .map(|(g, k)| (*g, k))
             .chain(peer.previous.iter().map(|(g, k, _)| (*g, k)))
             .find(|(g, _)| *g == generation)
-            .map(|(_, k)| k);
-        let Some(key) = key else {
-            let stale = peer.current.as_ref().is_some_and(|(cur, _)| not_newer(generation, *cur));
-            if !stale {
-                peer.missing_since.get_or_insert(now);
+            .map(|(_, k)| k.clone());
+        match key {
+            Some(k) => Some((k, peer.missing_since.is_some() || peer.last_request.is_some())),
+            None => {
+                let stale = peer.current.as_ref().is_some_and(|(cur, _)| not_newer(generation, *cur));
+                if !stale {
+                    peer.missing_since.get_or_insert(now);
+                }
+                None
             }
-            return None;
-        };
-        let plain = open_frame(key, kind, from, ct)?;
-        peer.missing_since = None;
-        peer.last_request = None;
+        }
+    }
+
+    /// A frame from `from` opened: they are no longer missing a key.
+    pub fn opened(&mut self, scope: &Scope, from: Id) {
+        if let Some(peer) = self.peers.get_mut(&(scope.clone(), from)) {
+            peer.missing_since = None;
+            peer.last_request = None;
+        }
+    }
+
+    /// Decrypt a frame from `from`. None means drop it (lost frame). Only pass members of the scope:
+    /// a frame newer than any key held marks the sender as missing a key, so a request becomes due;
+    /// a stale frame (older than the held key) is just loss.
+    pub fn open(&mut self, scope: &Scope, from: Id, kind: u8, ct: &[u8], now: Instant) -> Option<Vec<u8>> {
+        let (key, _) = self.open_key(scope, from, frame_generation(ct)?, now)?;
+        let plain = open_frame(&key, kind, from, ct)?;
+        self.opened(scope, from);
         Some(plain)
     }
 
@@ -483,6 +555,63 @@ mod tests {
         let o = a.share_current(&SCOPE, &[B], t0).remove(0);
         assert!(b.on_envelope(A, &o.scope, o.generation, &o.envelope, t0));
         assert!(!b.on_envelope(A, &o.scope, o.generation, &o.envelope, t0));
+    }
+
+    /// The shared-state helpers: the lock covers key lookup and counter reservation only.
+    #[test]
+    fn shared_seal_and_open_round_trip() {
+        let (mut a, mut b, _) = trio();
+        let t0 = Instant::now();
+        deliver(a.share_current(&SCOPE, &[B], t0), A, B, &mut b, t0);
+        let (a, b) = (Mutex::new(a), Mutex::new(b));
+        let ct = seal_shared(&a, &SCOPE, KIND_VOICE, b"hi", t0).unwrap();
+        assert_eq!(open_shared(&b, &SCOPE, A, KIND_VOICE, &ct, t0).as_deref(), Some(&b"hi"[..]));
+        let mut tampered = ct.clone();
+        *tampered.last_mut().unwrap() ^= 1;
+        assert!(open_shared(&b, &SCOPE, A, KIND_VOICE, &tampered, t0).is_none());
+    }
+
+    #[test]
+    fn seal_parts_reserves_each_counter_once() {
+        let (_, mut a, _) = pair();
+        let t0 = Instant::now();
+        assert!(a.seal_parts(&SCOPE, t0).is_none(), "no key yet");
+        a.share_current(&SCOPE, &[B], t0);
+        let p1 = a.seal_parts(&SCOPE, t0).unwrap();
+        let p2 = a.seal_parts(&SCOPE, t0).unwrap();
+        assert_eq!((p1.generation, p1.counter, p1.sender), (p2.generation, 0, A));
+        assert_eq!(p2.counter, 1);
+        a.set_next_counter(&SCOPE, u32::MAX - 1);
+        assert!(a.seal_parts(&SCOPE, t0).is_some());
+        assert!(a.seal_parts(&SCOPE, t0).is_none());
+    }
+
+    #[test]
+    fn shared_open_tracks_missing_keys() {
+        let (mut a, b, _) = trio();
+        let t0 = Instant::now();
+        let out = a.share_current(&SCOPE, &[B], t0);
+        let ct = a.seal(&SCOPE, KIND_VOICE, b"x", t0).unwrap();
+        let b = Mutex::new(b);
+        assert!(open_shared(&b, &SCOPE, A, KIND_VOICE, &ct, t0).is_none());
+        assert_eq!(b.lock().unwrap().due_requests(t0 + ms(1100)), vec![(SCOPE, A)]);
+        deliver(out, A, B, &mut b.lock().unwrap(), t0 + ms(1200));
+        assert!(open_shared(&b, &SCOPE, A, KIND_VOICE, &ct, t0 + ms(1200)).is_some());
+        assert!(b.lock().unwrap().due_requests(t0 + Duration::from_secs(10)).is_empty());
+    }
+
+    #[test]
+    fn peer_pubkey_reads_the_key_in_use() {
+        let (_, mut a, b) = pair();
+        let bp = b.device.public();
+        assert_eq!(a.peer_pubkey(B), Some(bp.clone()));
+        assert_eq!(a.my_public(), a.device.public());
+        assert_eq!(a.peer_pubkey(C), None);
+        let t0 = Instant::now();
+        a.share_current(&SCOPE, &[B], t0);
+        a.remove_peer_pubkey(B);
+        assert_eq!(a.peer_pubkey(B), None);
+        assert!(a.share_current(&SCOPE, &[B], t0).is_empty(), "nothing sealed to a forgotten key");
     }
 
     #[test]

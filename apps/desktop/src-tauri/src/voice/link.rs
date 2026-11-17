@@ -133,7 +133,7 @@ impl VoiceLink {
     /// Without e2ee keys nothing is sent (tests may opt into plaintext).
     pub fn seal_audio(&self, opus: &[u8]) -> Option<Vec<u8>> {
         match &self.inner.keys {
-            Some(k) => k.lock().unwrap().seal(&self.inner.scope, KIND_VOICE, opus, Instant::now()),
+            Some(k) => crate::e2ee::seal_shared(k, &self.inner.scope, KIND_VOICE, opus, Instant::now()),
             None if self.inner.unencrypted => Some(opus.to_vec()),
             None => None,
         }
@@ -212,7 +212,7 @@ impl Inner {
                 let body = &d.payload[4..];
                 let payload = match &self.keys {
                     // A frame that does not open is dropped: the jitter buffer conceals it as lost.
-                    Some(k) => match k.lock().unwrap().open(&self.scope, d.from_user, KIND_VOICE, body, Instant::now()) {
+                    Some(k) => match crate::e2ee::open_shared(k, &self.scope, d.from_user, KIND_VOICE, body, Instant::now()) {
                         Some(p) => p,
                         None => return,
                     },

@@ -225,7 +225,7 @@ impl BInner {
         match &self.net.keys {
             None if self.net.unencrypted_for_tests => Some(plain),
             None => None,
-            Some(k) => k.lock().unwrap().seal(&self.scope(), kind, &plain, Instant::now()),
+            Some(k) => crate::e2ee::seal_shared(k, &self.scope(), kind, &plain, Instant::now()),
         }
     }
 
@@ -712,7 +712,7 @@ fn open<'a>(keys: &Option<SharedKeys>, plain: bool, streamer: Id, kind: u8, ct: 
     match keys {
         None if plain => Some(Cow::Borrowed(ct)),
         None => None,
-        Some(k) => k.lock().unwrap().open(&Scope::Stream(streamer), streamer, kind, ct, Instant::now()).map(Cow::Owned),
+        Some(k) => crate::e2ee::open_shared(k, &Scope::Stream(streamer), streamer, kind, ct, Instant::now()).map(Cow::Owned),
     }
 }
 
