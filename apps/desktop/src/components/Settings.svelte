@@ -20,6 +20,7 @@
   import { isAndroid, isMobile } from '../lib/platform'
   import { bubble } from '../lib/bubble.svelte'
   import { overlayEnabled, setOverlayEnabled } from '../lib/overlay'
+  import { setShareGame, shareGame } from '../lib/activity'
   import { updateStatus, type CheckResult } from '../lib/update'
 
   let { onClose }: { onClose: () => void } = $props()
@@ -347,6 +348,7 @@
         <section>
           <h3>Call overlay</h3>
           <label class="chk"><input type="checkbox" checked={overlayEnabled()} onchange={(e) => setOverlayEnabled(e.currentTarget.checked)} /> Show who's talking over games</label>
+          <label class="chk"><input type="checkbox" checked={shareGame()} onchange={(e) => setShareGame(e.currentTarget.checked)} /> Let friends see what I'm playing</label>
           <p class="note">While you're in a room and playing, a small panel shows on top of the game (windowed or borderless; not exclusive full screen). Clicks pass through it; press {navigator.userAgent.includes('Mac') ? '⌘⇧O' : 'Ctrl+Shift+O'} to use its buttons or move it.</p>
         </section>
         {/if}

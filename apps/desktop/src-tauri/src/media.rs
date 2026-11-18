@@ -17,12 +17,24 @@ fn cache_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 /// Raw body = image bytes. Compresses, uploads, returns the server ImageRef.
 #[tauri::command]
 pub async fn upload_image(core: State<'_, Core>, request: Request<'_>) -> Result<ImageRef, String> {
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("Invalid image data".into());
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(b) => b.clone(),
+        // Android's IPC can't carry raw bytes: they come as JSON instead.
+        tauri::ipc::InvokeBody::Json(v) => bytes_of_json(v).ok_or("Invalid image data")?,
     };
-    let bytes = bytes.clone();
     let prepared = tokio::task::spawn_blocking(move || prepare(&bytes)).await.map_err(|e| e.to_string())??;
     core.api()?.upload_media(prepared.bytes, prepared.mime).await.map_err(|e| e.user_message())
+}
+
+/// Bytes sent as JSON: an array of numbers, or a typed array's `{"0": …, "1": …}`.
+fn bytes_of_json(v: &serde_json::Value) -> Option<Vec<u8>> {
+    let byte = |x: &serde_json::Value| x.as_u64().filter(|&n| n <= 255).map(|n| n as u8);
+    match v {
+        serde_json::Value::Array(a) => a.iter().map(byte).collect(),
+        serde_json::Value::Object(o) => (0..o.len()).map(|i| o.get(&i.to_string()).and_then(byte)).collect(),
+        _ => None,
+    }
+    .filter(|b: &Vec<u8>| !b.is_empty())
 }
 
 #[tauri::command]
@@ -83,4 +95,19 @@ pub fn protocol<R: Runtime>(
         };
         responder.respond(resp.unwrap());
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bytes_of_json;
+    use serde_json::json;
+
+    #[test]
+    fn image_bytes_from_json() {
+        assert_eq!(bytes_of_json(&json!([255, 216, 0])), Some(vec![255, 216, 0]));
+        assert_eq!(bytes_of_json(&json!({"0": 1, "1": 2})), Some(vec![1, 2]));
+        assert_eq!(bytes_of_json(&json!([256])), None);
+        assert_eq!(bytes_of_json(&json!({})), None);
+        assert_eq!(bytes_of_json(&json!("x")), None);
+    }
 }

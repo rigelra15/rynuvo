@@ -197,6 +197,7 @@ pub fn run() {
             commands::push_register,
             commands::push_unregister,
             commands::set_away,
+            commands::set_activity,
             commands::admin_rotate_invite,
             commands::admin_kick,
             commands::admin_transfer_code,

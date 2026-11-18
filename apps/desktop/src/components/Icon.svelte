@@ -2,7 +2,7 @@
   export type IconName =
     | 'mic' | 'micOff' | 'headphones' | 'headphonesOff' | 'screen' | 'leave'
     | 'hash' | 'volume' | 'plus' | 'settings' | 'edit' | 'trash' | 'close' | 'check' | 'lock' | 'eye' | 'warn' | 'logo' | 'users' | 'userPlus' | 'expand' | 'shrink' | 'ambient' | 'cc' | 'home' | 'back' | 'down' | 'image' | 'sidebar'
-    | 'play' | 'pause' | 'skip' | 'queue' | 'music' | 'repeat' | 'repeatOne' | 'lyrics'
+    | 'play' | 'pause' | 'skip' | 'queue' | 'music' | 'repeat' | 'repeatOne' | 'lyrics' | 'send' | 'gamepad'
 </script>
 
 <script lang="ts">
@@ -31,6 +31,10 @@
     <path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z" /><path d="M8 8h9M8 12h6" />
   {:else if name === 'queue'}
     <path d="M4 6h16M4 12h10M4 18h10M18 14v6l4-3z" />
+  {:else if name === 'send'}
+    <path d="M4.5 12 3 4l18 8-18 8 1.5-8zm0 0H11" />
+  {:else if name === 'gamepad'}
+    <path d="M7.5 7h9a4.5 4.5 0 0 1 4.4 5.4l-.8 4A2.5 2.5 0 0 1 16 17.6L14.5 16h-5L8 17.6a2.5 2.5 0 0 1-4.1-1.2l-.8-4A4.5 4.5 0 0 1 7.5 7z" /><path d="M8 10.5v3M6.5 12h3" /><path d="M15.5 11h.01M17.5 13h.01" />
   {:else if name === 'music'}
     <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
   {:else if name === 'screen'}

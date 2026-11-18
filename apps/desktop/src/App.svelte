@@ -25,6 +25,7 @@
   import { callNotice } from './lib/callNotice'
   import { bubble } from './lib/bubble.svelte'
   import { overlay } from './lib/overlay'
+  import { watchActivity } from './lib/activity'
   import { startPush } from './lib/push'
   import { tick } from 'svelte'
   import type { Channel, ChannelKind, Id } from './lib/types'
@@ -202,6 +203,8 @@
 
   // Desktop: the call overlay over other apps while Rynuvo is in the background.
   const syncOverlay = isMobile ? null : overlay(store)
+  // Desktop: the game I'm playing, shown to others.
+  if (!isMobile) watchActivity()
   $effect(() => {
     syncOverlay?.()
   })

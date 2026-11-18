@@ -16,10 +16,12 @@ export interface Channel { id: Id; kind: ChannelKind; name: string; topic: strin
 /** How far I've read a text channel (unread while lastMessage is past lastRead). */
 export interface ReadMark { channelId: Id; lastMessage?: Id | null; lastRead: Id }
 export interface ImageRef { id: string; width: number; height: number; mime: string }
+/** What someone is playing now (none: nothing). */
+export interface Activity { userId: Id; game: string | null }
 export interface Message { id: Id; channelId: Id; authorId: Id; content: string; image: ImageRef | null; createdAt: number; editedAt: number | null }
 
 export type WsServerMsg =
-  | { t: 'ready'; d: { me: User; users: User[]; channels: Channel[]; online: Id[]; mobile?: Id[]; lastSeen?: { userId: Id; at: number }[]; alerts: string[]; voice?: VoiceMember[]; streams?: StreamInfo[]; music?: MusicState[]; musicBot?: Id | null; reads?: ReadMark[] } }
+  | { t: 'ready'; d: { me: User; users: User[]; channels: Channel[]; online: Id[]; mobile?: Id[]; lastSeen?: { userId: Id; at: number }[]; alerts: string[]; voice?: VoiceMember[]; streams?: StreamInfo[]; music?: MusicState[]; musicBot?: Id | null; reads?: ReadMark[]; activities?: Activity[] } }
   | { t: 'messageCreated'; d: Message }
   | { t: 'readUpdated'; d: { channelId: Id; lastRead: Id } }
   | { t: 'transferClaimed'; d: { expiresAt: number; device: string } }
@@ -32,6 +34,7 @@ export type WsServerMsg =
   | { t: 'userRemoved'; d: { id: Id } }
   | { t: 'presence'; d: { userId: Id; online: boolean; mobile?: boolean; lastSeen?: number } }
   | { t: 'typing'; d: { channelId: Id; userId: Id } }
+  | { t: 'activity'; d: Activity }
   | { t: 'adminAlert'; d: { message: string } }
   | { t: 'voiceJoined'; d: { channelId: Id; session: number; key: string; udpPort: number } }
   | { t: 'voiceMemberUpdated'; d: VoiceMember }

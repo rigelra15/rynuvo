@@ -23,6 +23,8 @@ class Store {
   mobile = new SvelteSet<Id>()
   /** When each user was last connected (server ms). */
   lastSeen = new SvelteMap<Id, number>()
+  /** The game each user is playing now. */
+  games = new SvelteMap<Id, string>()
   channels = $state<Channel[]>([])
   /** The first `ready` of this sign-in has arrived (the channel list is real). */
   gotReady = $state(false)
@@ -109,6 +111,18 @@ class Store {
   /** …and one of them mentions me. */
   isMentioned(channel: Id): boolean {
     return this.mentioned.has(channel) && this.isUnread(channel)
+  }
+
+  /** Someone else's new message (the desktop call overlay shows it). */
+  onMessage: ((m: Message) => void) | null = null
+
+  /** A message was seen somewhere else than the chat (the call overlay): read up to it. */
+  readUpTo(channel: Id, id: Id) {
+    const r = this.reads.get(channel)
+    if (!r || id <= r.read) return
+    this.reads.set(channel, { ...r, read: id })
+    if (!this.isUnread(channel)) this.mentioned.delete(channel)
+    void api.markRead(channel, id).catch(() => {})
   }
 
   /** I'm looking at the open text channel: it's read up to its newest message. */
@@ -547,6 +561,8 @@ class Store {
         for (const id of m.d.mobile ?? []) this.mobile.add(id)
         this.lastSeen.clear()
         for (const l of m.d.lastSeen ?? []) this.lastSeen.set(l.userId, l.at)
+        this.games.clear()
+        for (const g of m.d.activities ?? []) if (g.game) this.games.set(g.userId, g.game)
         this.channels = m.d.channels
         this.reads.clear()
         this.mentioned.clear()
@@ -576,6 +592,7 @@ class Store {
         if (!mine && this.me && mentionsMe(m.d.content, this.people(), this.me.id)) this.mentioned.add(m.d.channelId)
         this.upsertMessage(m.d)
         this.typing.get(m.d.channelId)?.delete(m.d.authorId)
+        if (!mine) this.onMessage?.(m.d)
         return
       }
       case 'transferClaimed':
@@ -620,6 +637,10 @@ class Store {
         this.users.delete(m.d.id)
         this.online.delete(m.d.id)
         this.mobile.delete(m.d.id)
+        return
+      case 'activity':
+        if (m.d.game) this.games.set(m.d.userId, m.d.game)
+        else this.games.delete(m.d.userId)
         return
       case 'presence':
         if (m.d.online) this.online.add(m.d.userId)

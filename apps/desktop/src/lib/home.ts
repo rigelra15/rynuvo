@@ -25,10 +25,11 @@ export function activeNow(voice: readonly Vm[], channels: readonly Ch[], nick: (
 }
 
 /** The status line under a friend's name. */
-export function presence(id: number, online: ReadonlySet<number>, voice: readonly Vm[], channels: readonly Ch[], live: ReadonlySet<number>): string {
+export function presence(id: number, online: ReadonlySet<number>, voice: readonly Vm[], channels: readonly Ch[], live: ReadonlySet<number>, game?: string): string {
   const v = voice.find((m) => m.userId === id)
   const where = v ? channels.find((c) => c.id === v.channelId)?.name : undefined
   if (where && live.has(id)) return `Streaming in ${where}`
+  if (game) return where ? `Playing ${game} · in ${where}` : `Playing ${game}`
   if (where) return `In voice · ${where}`
   return online.has(id) ? 'Online' : 'Offline'
 }

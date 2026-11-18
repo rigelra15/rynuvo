@@ -4,7 +4,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { emitTo, listen } from '@tauri-apps/api/event'
 import type { store as storeType } from './state.svelte'
-import type { User } from './types'
+import type { ImageRef, User } from './types'
 
 type Store = typeof storeType
 
@@ -12,12 +12,15 @@ export const OVERLAY = 'overlay'
 export const STATE_EVENT = 'rynuvo://overlay-state'
 export const ACTION_EVENT = 'rynuvo://overlay-action'
 export const READY_EVENT = 'rynuvo://overlay-ready'
+export const CHAT_EVENT = 'rynuvo://overlay-chat'
 /** From the app: a game came to the front (true) or went. */
 const GAME_EVENT = 'rynuvo://game'
 const PREF = 'rynuvo.overlay'
 
 export interface OverlayPerson { id: number; name: string; user: User | null; muted: boolean; deafened: boolean; talking: boolean; me: boolean }
-export interface OverlayState { room: string; muted: boolean; deafened: boolean; people: OverlayPerson[] }
+export interface OverlayState { muted: boolean; deafened: boolean; people: OverlayPerson[] }
+/** A chat message that came in while the overlay is up. */
+export interface OverlayChat { id: number; name: string; user: User | null; authorId: number; channel: string; text: string; image: ImageRef | null }
 export type OverlayAction = 'mute' | 'deafen' | 'leave'
 
 /** Whether the overlay is wanted (on unless turned off in Settings). */
@@ -61,15 +64,34 @@ export function overlay(store: Store): () => void {
     void invoke('overlay_show', { show: want }).catch(() => (shown = !want))
   }
 
+  // A game that leaves the front only for a moment (a notification, a quick alt-tab) keeps it.
+  let away: ReturnType<typeof setTimeout> | undefined
   void listen<boolean>(GAME_EVENT, ({ payload }) => {
-    gaming = payload
-    show()
+    clearTimeout(away)
+    if (payload) {
+      gaming = true
+      show()
+    } else {
+      away = setTimeout(() => {
+        gaming = false
+        show()
+      }, 2500)
+    }
   })
   window.addEventListener(PREF, () => {
     enabled = overlayEnabled()
     show()
   })
   void listen(READY_EVENT, () => send(true))
+  // New messages pop up on it, and count as read: they were seen there.
+  store.onMessage = (m) => {
+    if (!shown) return
+    const c = store.channels.find((x) => x.id === m.channelId)
+    if (!c || c.kind !== 'text') return
+    const chat: OverlayChat = { id: m.id, name: store.nick(m.authorId), user: store.user(m.authorId) ?? null, authorId: m.authorId, channel: c.name, text: m.content, image: m.image }
+    void emitTo(OVERLAY, CHAT_EVENT, chat)
+    store.readUpTo(m.channelId, m.id)
+  }
   void listen<OverlayAction>(ACTION_EVENT, ({ payload }) => {
     if (!store.myVoice.channelId) return
     if (payload === 'mute') store.toggleMute()
@@ -97,7 +119,7 @@ export function overlay(store: Store): () => void {
         talking: store.speaking.has(m.userId),
         me: m.userId === me,
       }))
-    last = { room: store.channels.find((c) => c.id === v.channelId)?.name ?? 'Call', muted: v.muted, deafened: v.deafened, people }
+    last = { muted: v.muted, deafened: v.deafened, people }
     send()
     show()
   }

@@ -66,6 +66,7 @@ export const api = {
   pushRegister: (token: string) => invoke<{ server: string; key: string }>('push_register', { token }),
   pushUnregister: () => invoke<void>('push_unregister'),
   setAway: (away: boolean) => invoke<void>('set_away', { away }),
+  setActivity: (game: string | null) => invoke<void>('set_activity', { game }),
   streamSources: () => invoke<Source[]>('stream_sources'),
   streamEncoders: () => invoke<string[]>('stream_encoders'),
   streamSelfCheck: () => invoke<SelfCheck>('stream_self_check'),

@@ -88,6 +88,7 @@ async fn snapshot(st: &AppState, me: User) -> anyhow::Result<WsServerMsg> {
         music: st.music.states(crate::now_ms()),
         music_bot: crate::music::wire::bot_id(st).await,
         reads,
+        activities: st.hub.activities(),
     })
 }
 
@@ -148,7 +149,10 @@ async fn handle(st: AppState, mut socket: WebSocket) {
     // Last seen is when the device let go, not when it connected.
     let now = now_ms();
     let _ = sqlx::query("UPDATE devices SET last_seen = ? WHERE id = ?").bind(now).bind(device_id).execute(&st.db).await;
-    if let Some((uid, before, after)) = st.hub.unregister(conn_id) {
+    if let Some((uid, before, after, game)) = st.hub.unregister(conn_id) {
+        if let Some(game) = game {
+            st.hub.broadcast_except(uid, WsServerMsg::Activity(rynuvo_proto::Activity { user_id: uid, game }));
+        }
         if before != after {
             let msg = match after {
                 Status::Offline => WsServerMsg::Presence { user_id: uid, online: false, mobile: false, last_seen: Some(now) },
@@ -207,6 +211,13 @@ async fn run(
                         Ok(WsClientMsg::VoiceKick { user_id: target }) => crate::voice::kick(st, user_id, is_admin, target).await,
                         Ok(WsClientMsg::VoiceInvite { to }) => crate::voice::invite(st, user_id, to),
                         Ok(WsClientMsg::Away { away }) => st.hub.set_away(conn_id, away),
+                        Ok(WsClientMsg::Activity { game }) => {
+                            // A name, not an essay: trimmed and cut short.
+                            let game = game.map(|g| g.trim().chars().take(64).collect::<String>()).filter(|g| !g.is_empty());
+                            if let Some((uid, game)) = st.hub.set_game(conn_id, game) {
+                                st.hub.broadcast(WsServerMsg::Activity(rynuvo_proto::Activity { user_id: uid, game }));
+                            }
+                        }
                         Ok(WsClientMsg::StreamStart { codecs, preset }) => crate::voice::stream_start(st, user_id, codecs, preset),
                         Ok(WsClientMsg::StreamStop) => crate::voice::stream_stop(st, user_id),
                         Ok(WsClientMsg::StreamWatch { user_id: streamer, codecs }) => crate::voice::stream_watch(st, user_id, streamer, codecs),

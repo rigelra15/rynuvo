@@ -30,6 +30,8 @@ struct Conn {
     device_id: i64,
     /// The app is in the background: it may be frozen soon, so treat it as gone for notifications.
     away: bool,
+    /// The game this device says is being played.
+    game: Option<String>,
     tx: mpsc::Sender<Outgoing>,
     kill: watch::Sender<bool>,
 }
@@ -49,6 +51,11 @@ pub struct Registered {
     pub kill: watch::Receiver<bool>,
     pub before: Status,
     pub after: Status,
+}
+
+/// The game a user is playing: any of their devices' (the newest connection's first).
+fn game_of(conns: &[Conn], user_id: i64) -> Option<String> {
+    conns.iter().rev().filter(|c| c.user_id == user_id).find_map(|c| c.game.clone())
 }
 
 fn status_of(conns: &[Conn], user_id: i64) -> Status {
@@ -83,7 +90,7 @@ impl Hub {
         let before = status_of(&g.conns, user_id);
         g.next_id += 1;
         let id = g.next_id;
-        g.conns.push(Conn { id, user_id, is_admin, mobile, device_id: 0, away: false, tx, kill: kill_tx });
+        g.conns.push(Conn { id, user_id, is_admin, mobile, device_id: 0, away: false, game: None, tx, kill: kill_tx });
         let after = status_of(&g.conns, user_id);
         Registered { id, rx, kill, before, after }
     }
@@ -100,6 +107,25 @@ impl Hub {
         }
     }
 
+    /// A device says what's being played. The user's game, if that changed it.
+    pub fn set_game(&self, conn_id: u64, game: Option<String>) -> Option<(i64, Option<String>)> {
+        let mut g = self.inner.lock().unwrap();
+        let user_id = g.conns.iter().find(|c| c.id == conn_id)?.user_id;
+        let before = game_of(&g.conns, user_id);
+        g.conns.iter_mut().find(|c| c.id == conn_id)?.game = game;
+        let after = game_of(&g.conns, user_id);
+        (after != before).then_some((user_id, after))
+    }
+
+    /// Everyone playing something now.
+    pub fn activities(&self) -> Vec<rynuvo_proto::Activity> {
+        let g = self.inner.lock().unwrap();
+        let mut ids: Vec<i64> = g.conns.iter().filter(|c| c.game.is_some()).map(|c| c.user_id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids.into_iter().map(|user_id| rynuvo_proto::Activity { user_id, game: game_of(&g.conns, user_id) }).collect()
+    }
+
     /// Devices with the app open (connected and not in the background): they see things in the app,
     /// so they don't need a push.
     pub fn active_devices(&self) -> Vec<i64> {
@@ -107,12 +133,15 @@ impl Hub {
     }
 
     /// Remove a connection. Returns its user and that user's status before and after.
-    pub fn unregister(&self, conn_id: u64) -> Option<(i64, Status, Status)> {
+    /// Also their game, if this connection's going changed it.
+    pub fn unregister(&self, conn_id: u64) -> Option<(i64, Status, Status, Option<Option<String>>)> {
         let mut g = self.inner.lock().unwrap();
         let pos = g.conns.iter().position(|c| c.id == conn_id)?;
-        let before = status_of(&g.conns, g.conns[pos].user_id);
-        let c = g.conns.remove(pos);
-        Some((c.user_id, before, status_of(&g.conns, c.user_id)))
+        let user_id = g.conns[pos].user_id;
+        let (before, game_before) = (status_of(&g.conns, user_id), game_of(&g.conns, user_id));
+        g.conns.remove(pos);
+        let game_after = game_of(&g.conns, user_id);
+        Some((user_id, before, status_of(&g.conns, user_id), (game_after != game_before).then_some(game_after)))
     }
 
     /// Users online only from phones or tablets.
@@ -228,8 +257,8 @@ mod tests {
         let mac = hub.register(1, false, false);
         assert_eq!(mac.after, Status::Online { mobile: false });
         assert!(hub.mobile_ids().is_empty());
-        assert_eq!(hub.unregister(mac.id), Some((1, Status::Online { mobile: false }, Status::Online { mobile: true })));
-        assert_eq!(hub.unregister(phone.id), Some((1, Status::Online { mobile: true }, Status::Offline)));
+        assert_eq!(hub.unregister(mac.id), Some((1, Status::Online { mobile: false }, Status::Online { mobile: true }, None)));
+        assert_eq!(hub.unregister(phone.id), Some((1, Status::Online { mobile: true }, Status::Offline, None)));
     }
 
     #[test]
@@ -245,5 +274,19 @@ mod tests {
             n += 1;
         }
         assert!(n <= QUEUE_DEPTH, "queue bounded, got {n}");
+    }
+
+    #[test]
+    fn a_users_game_follows_their_devices() {
+        let hub = Hub::default();
+        let pc = hub.register(1, false, false);
+        let phone = hub.register(1, false, true);
+        assert_eq!(hub.set_game(pc.id, Some("Hades".into())), Some((1, Some("Hades".into()))));
+        assert_eq!(hub.set_game(pc.id, Some("Hades".into())), None);
+        assert_eq!(hub.activities(), vec![rynuvo_proto::Activity { user_id: 1, game: Some("Hades".into()) }]);
+        assert_eq!(hub.unregister(phone.id).unwrap().3, None);
+        // The computer goes: so does the game.
+        assert_eq!(hub.unregister(pc.id).unwrap().3, Some(None));
+        assert!(hub.activities().is_empty());
     }
 }

@@ -15,7 +15,7 @@ pub const LABEL: &str = "overlay";
 /// To the overlay page: `true` when it takes clicks.
 pub const MODE_EVENT: &str = "rynuvo://overlay-mode";
 pub const SHORTCUT: &str = "CmdOrCtrl+Shift+O";
-const WIDTH: f64 = 248.0;
+const WIDTH: f64 = 260.0;
 
 #[derive(Default)]
 pub struct Overlay {
@@ -30,7 +30,7 @@ struct Saved {
 }
 
 fn saved_path<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
-    app.path().app_config_dir().ok().map(|d| d.join("overlay.json"))
+    app.path().app_config_dir().ok().map(|d| d.join("overlay-position.json"))
 }
 
 fn window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::WebviewWindow<R>> {
@@ -65,8 +65,7 @@ fn window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::WebviewWindow<
         }
         None => {
             if let Ok(Some(m)) = w.primary_monitor() {
-                let k = m.scale_factor();
-                let _ = w.set_position(PhysicalPosition::new(m.position().x + (24.0 * k) as i32, m.position().y + (64.0 * k) as i32));
+                                let _ = w.set_position(PhysicalPosition::new(m.position().x, m.position().y));
             }
         }
     }
@@ -75,7 +74,9 @@ fn window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::WebviewWindow<
     above_full_screen(&w);
     let h = app.clone();
     w.on_window_event(move |e| {
+        // Only where it was dragged to (it takes clicks then), not where it was put.
         if let WindowEvent::Moved(p) = e
+            && *h.state::<Overlay>().interactive.lock().unwrap()
             && let Some(path) = saved_path(&h)
         {
             let _ = std::fs::write(path, serde_json::to_vec(&Saved { x: p.x, y: p.y }).unwrap_or_default());
@@ -92,14 +93,18 @@ fn above_full_screen<R: Runtime>(w: &tauri::WebviewWindow<R>) {
     const STATIONARY: usize = 1 << 4;
     const IGNORES_CYCLE: usize = 1 << 6;
     const FULL_SCREEN_AUXILIARY: usize = 1 << 8;
-    // NSStatusWindowLevel: over full-screen apps' windows.
-    const LEVEL: isize = 25;
+    // Above the shield a full-screen game puts over the display (it takes the screen, changing its
+    // resolution); anything lower stays hidden behind it.
+    unsafe extern "C" {
+        fn CGShieldingWindowLevel() -> i32;
+    }
+    let level = unsafe { CGShieldingWindowLevel() } as isize + 1;
     let w2 = w.clone();
     let _ = w.run_on_main_thread(move || unsafe {
         let Ok(ns) = w2.ns_window() else { return };
         let ns = &*(ns as *mut AnyObject);
         let _: () = msg_send![ns, setCollectionBehavior: CAN_JOIN_ALL_SPACES | STATIONARY | IGNORES_CYCLE | FULL_SCREEN_AUXILIARY];
-        let _: () = msg_send![ns, setLevel: LEVEL];
+        let _: () = msg_send![ns, setLevel: level];
         let _: () = msg_send![ns, setHidesOnDeactivate: false];
     });
 }
@@ -123,8 +128,10 @@ pub fn toggle_interactive<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// Show or hide it (from the main window: in a call, with Rynuvo in the background).
+/// Async: a window built from a synchronous command deadlocks on Windows (it runs on the thread the
+/// window needs).
 #[tauri::command]
-pub fn overlay_show(app: AppHandle, show: bool) -> Result<(), String> {
+pub async fn overlay_show(app: AppHandle, show: bool) -> Result<(), String> {
     if show {
         let w = window(&app).map_err(|e| e.to_string())?;
         let _ = w.show();

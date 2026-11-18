@@ -279,6 +279,14 @@ pub fn set_away(core: State<'_, Core>, away: bool) {
     }
 }
 
+/// The game I'm playing (shown to others), or none.
+#[tauri::command]
+pub fn set_activity(core: State<'_, Core>, game: Option<String>) {
+    if let Some(s) = core.inner.lock().unwrap().session.as_ref() {
+        s.set_activity(game);
+    }
+}
+
 #[tauri::command]
 pub async fn transfer_code(core: State<'_, Core>) -> CmdResult<TransferCodeResp> {
     core.api()?.transfer_code().await.map_err(err)

@@ -55,8 +55,8 @@
         {#if statusOf(m.userId) === 'verified'}<span class="bd ok" title={badgeText(m.userId)} aria-label={badgeText(m.userId)}><Icon name="check" size={12} /></span>
         {:else if statusOf(m.userId) === 'changed'}<span class="bd warn" title={badgeText(m.userId)} aria-label={badgeText(m.userId)}><Icon name="warn" size={12} /></span>
         {:else if statusOf(m.userId) === 'newDevice'}<span class="bd new">{badgeText(m.userId)}</span>{/if}
-        {#if m.deafened}<span class="st" title="Deafened"><Icon name="headphonesOff" size={13} /></span>
-        {:else if m.muted}<span class="st" title="Muted"><Icon name="micOff" size={13} /></span>{/if}
+        {#if m.muted || m.deafened}<span class="st" title="Muted"><Icon name="micOff" size={13} /></span>{/if}
+        {#if m.deafened}<span class="st" title="Deafened"><Icon name="headphonesOff" size={13} /></span>{/if}
       </li>
     {/each}
   </ul>

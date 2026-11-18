@@ -71,6 +71,8 @@ struct Shared {
     /// The app is in the background (phones): told again after every reconnect, so the server
     /// keeps sending push notifications to this device meanwhile.
     away: bool,
+    /// The game being played (desktop): told again after every reconnect.
+    game: Option<String>,
 }
 
 impl Shared {
@@ -147,6 +149,12 @@ impl SessionHandle {
     pub fn set_away(&self, away: bool) {
         self.shared.lock().unwrap().away = away;
         let _ = self.out.send(WsClientMsg::Away { away });
+    }
+
+    /// The game being played now, or none.
+    pub fn set_activity(&self, game: Option<String>) {
+        self.shared.lock().unwrap().game = game.clone();
+        let _ = self.out.send(WsClientMsg::Activity { game });
     }
 
     /// Queue any client message (sent once the connection is ready).
@@ -345,6 +353,10 @@ async fn connect_once(
                                 *attempt = 0;
                                 let away = shared.lock().unwrap().away;
                                 if away && !send_in_time(&mut ws, WsMsg::text(serde_json::to_string(&WsClientMsg::Away { away }).unwrap())).await {
+                                    return Ok(End::Retry);
+                                }
+                                let game = shared.lock().unwrap().game.clone();
+                                if game.is_some() && !send_in_time(&mut ws, WsMsg::text(serde_json::to_string(&WsClientMsg::Activity { game }).unwrap())).await {
                                     return Ok(End::Retry);
                                 }
                                 emit(SessionEvent::Server(m));

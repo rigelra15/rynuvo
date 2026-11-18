@@ -11,10 +11,10 @@
 
   let { onMemberMenu }: { onMemberMenu: (userId: Id, e: MouseEvent) => void } = $props()
 
-  let tab = $state<'online' | 'all'>('online')
   const live = $derived(new Set(store.streams.map((s) => s.userId)))
   const groups = $derived(memberGroups(store.people().filter((u) => u.id !== store.me?.id), store.online))
-  const list = $derived(tab === 'online' ? groups.online : [...groups.online, ...groups.offline])
+  // Everyone, the ones around first.
+  const list = $derived([...groups.online, ...groups.offline])
   const cards = $derived(activeNow(store.voice, store.channels, (id) => store.nick(id), live))
 
   /** Jump to a voice channel in the circle and join it. */
@@ -29,19 +29,14 @@
 <header class="top">
   {#if pane.narrow}<button class="away" title="Back to chats & rooms" aria-label="Back to chats & rooms" onclick={pane.close}><Icon name="back" size={22} /></button>{/if}
   <h1 class="title-xl">Friends</h1>
-  <div class="tabs" role="tablist" aria-label="Which friends">
-    <button role="tab" aria-selected={tab === 'online'} class="tab" class:on={tab === 'online'} onclick={() => (tab = 'online')}>Online</button>
-    <button role="tab" aria-selected={tab === 'all'} class="tab" class:on={tab === 'all'} onclick={() => (tab = 'all')}>Everyone</button>
-  </div>
 </header>
 
 <div class="body">
   <section class="friends">
-    <h4>{tab === 'online' ? 'Online now' : 'Everyone'} <b>{list.length}</b></h4>
     {#each list as u (u.id)}
       {@render friend(u)}
     {:else}
-      <p class="empty muted">{tab === 'online' ? 'No friends online right now. Check back later!' : 'Nobody else is here yet. Invite your friends from Settings.'}</p>
+      <p class="empty muted">Nobody else is here yet. Invite your friends from Settings.</p>
     {/each}
   </section>
 
@@ -75,7 +70,7 @@
     <span class="av"><Avatar user={u} id={u.id} size={36} speaking={store.speaking.has(u.id)} />{#if !on && store.lastSeen.has(u.id)}<span class="seen">{ago(store.lastSeen.get(u.id)!, clock.now)}</span>{:else}<span class="dot" class:on class:mobile={on && store.mobile.has(u.id)}></span>{/if}</span>
     <span class="txt">
       <span class="nick">{u.nickname}</span>
-      <span class="status">{presence(u.id, store.online, store.voice, store.channels, live)}</span>
+      <span class="status">{#if store.games.has(u.id)}<Icon name="gamepad" size={13} /> {/if}{presence(u.id, store.online, store.voice, store.channels, live, store.games.get(u.id))}</span>
     </span>
     {#if vc !== null && vc !== store.myVoice.channelId}
       <button class="act" title="Join their voice channel" onclick={() => join(vc)}><Icon name="headphones" size={18} /></button>
@@ -87,14 +82,8 @@
   .away { flex: none; width: 36px; height: 36px; margin: 0 -4px 0 -10px; border-radius: 10px; display: grid; place-items: center; color: var(--text); }
   .top { display: flex; align-items: center; gap: 16px; padding: 18px 22px 12px; min-height: 64px; }
   h1 { margin: 0; }
-  .tabs { display: flex; padding: 3px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
-  .tab { padding: 4px 14px; border-radius: 9px; color: var(--muted); font-weight: 600; font-size: 13.5px; }
-  .tab:hover { color: var(--text); }
-  .tab.on { background: var(--elev); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
   .body { flex: 1; display: flex; min-height: 0; }
   .friends { flex: 1; min-width: 0; overflow-y: auto; padding: 8px 22px 16px; }
-  h4 { display: flex; gap: 8px; align-items: baseline; margin: 4px 0 10px; font-size: 13px; font-weight: 650; color: var(--muted); }
-  h4 b { color: var(--faint); font-weight: 600; font-variant-numeric: tabular-nums; }
   .row { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 14px; transition: background 140ms; }
   .row:hover { background: var(--elev-2); }
   .row.off { opacity: 0.5; }
@@ -112,7 +101,8 @@
   }
   .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .nick { font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .status { font-size: 12.5px; color: var(--muted); }
+  .status { display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status :global(svg) { flex: none; color: var(--speaking); }
   .act { width: 38px; height: 38px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; }
   .act:hover { background: var(--accent); color: var(--on-accent); }
   .empty { text-align: center; margin-top: 18vh; }

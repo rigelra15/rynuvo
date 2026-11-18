@@ -425,6 +425,8 @@ pub enum WsClientMsg {
     /// The app went to the background (true) or came back (false). While away, this device gets
     /// push notifications as if it weren't connected.
     Away { away: bool },
+    /// The game I'm playing now, or none. Shown to others ("Playing …").
+    Activity { game: Option<String> },
     /// Go Live in my current voice channel. `codecs`: what I can encode, best first.
     #[serde(rename_all = "camelCase")]
     StreamStart { codecs: Vec<String>, preset: String },
@@ -449,6 +451,14 @@ pub struct StreamInfo {
     pub channel_id: Id,
     pub codecs: Vec<String>,
     pub preset: String,
+}
+
+/// Someone's game: what they're playing now (none: nothing).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Activity {
+    pub user_id: Id,
+    pub game: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -486,6 +496,9 @@ pub enum WsServerMsg {
         /// Where I am in each text channel, for its unread dot.
         #[serde(default)]
         reads: Vec<ReadMark>,
+        /// Who is playing what right now.
+        #[serde(default)]
+        activities: Vec<Activity>,
     },
     /// I read further on another of my devices.
     #[serde(rename_all = "camelCase")]
@@ -517,6 +530,8 @@ pub enum WsServerMsg {
     },
     #[serde(rename_all = "camelCase")]
     Typing { channel_id: Id, user_id: Id },
+    /// Someone started or stopped playing a game.
+    Activity(Activity),
     #[serde(rename_all = "camelCase")]
     AdminAlert { message: String },
     Pong,
