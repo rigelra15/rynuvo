@@ -50,7 +50,7 @@ jobs:
 
       - name: Tests (desktop crate, Windows parts)
         working-directory: apps/desktop/src-tauri
-        run: cargo test --lib game::
+        run: cargo test --lib "game::"
 
       - name: Build
         working-directory: apps/desktop
