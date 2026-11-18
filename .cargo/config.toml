@@ -1,0 +1,4 @@
+# Windows: the C/C++ runtime goes into the exe (whisper.cpp is C++), so Rynuvo starts on a PC that
+# never installed the Visual C++ Redistributable (otherwise: "MSVCP140.dll was not found").
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

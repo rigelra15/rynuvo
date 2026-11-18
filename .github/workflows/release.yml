@@ -118,6 +118,14 @@ jobs:
           codesign -d -r- "$app" 2>&1 | tee /dev/stderr | grep -q 'certificate root' || {
             echo "::error::$app is not signed with the certificate (permissions would reset on update)"; exit 1; }
 
+      # A fresh Windows has no Visual C++ runtime: the exe must not need one (.cargo/config.toml).
+      - name: No Visual C++ runtime DLLs needed
+        if: matrix.os == 'windows-latest'
+        run: |
+          exe=target/${{ matrix.target }}/release/rynuvo-desktop.exe
+          if grep -aiqE "msvcp140|vcruntime140" "$exe"; then
+            echo "::error::$exe needs the Visual C++ runtime (MSVCP140/VCRUNTIME140)"; exit 1; fi
+
       - name: Collect installer and updater bundle
         run: |
           mkdir -p out
