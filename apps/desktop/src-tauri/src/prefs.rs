@@ -86,7 +86,8 @@ impl Prefs {
             input: self.input_device.clone(),
             output: self.output_device.clone(),
             threshold: self.vad_threshold,
-            volumes: self.volumes.clone(),
+            // Saved before 100% became the most.
+            volumes: self.volumes.iter().map(|(u, v)| (*u, v.min(1.0))).collect(),
             music_volume: self.music_volume,
         }
     }

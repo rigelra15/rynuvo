@@ -111,6 +111,8 @@ impl Mixer {
 
     pub fn mix(&mut self, out: &mut [f32; FRAME]) {
         out.fill(0.0);
+        // Who is loudest this frame, for captions.
+        let mut loudest: Option<(Id, f32)> = None;
         for (id, p) in self.peers.iter_mut() {
             let pcm = match p.jitter.pop() {
                 super::jitter::Pop::Idle => {
@@ -121,11 +123,15 @@ impl Mixer {
             };
             let rms = (pcm.iter().map(|x| x * x).sum::<f32>() / FRAME as f32).sqrt();
             p.quiet = if rms > SPEAKING_RMS { 0 } else { p.quiet.saturating_add(1) };
+            if rms > SPEAKING_RMS && loudest.is_none_or(|(_, r)| rms > r) {
+                loudest = Some((*id, rms));
+            }
             let vol = self.volumes.get(id).copied().unwrap_or(1.0);
             for (o, s) in out.iter_mut().zip(pcm) {
                 *o += s * vol;
             }
         }
+        let stream = self.streams.iter().find(|(_, q)| !q.is_empty()).map(|(id, _)| *id);
         for (id, q) in self.streams.iter_mut() {
             let vol = self.stream_volumes.get(id).copied().unwrap_or(1.0);
             for o in out.iter_mut() {
@@ -134,6 +140,10 @@ impl Mixer {
                     None => break,
                 }
             }
+        }
+        if crate::captions::active() && !self.deaf {
+            // What's heard from people and streams (before the music and the app's own sounds).
+            crate::captions::feed(&out[..], loudest.map(|(id, _)| id).or(stream));
         }
         let talking = self.peers.values().any(|p| p.quiet < SPEAKING_HOLD);
         self.music.mix(out, talking);

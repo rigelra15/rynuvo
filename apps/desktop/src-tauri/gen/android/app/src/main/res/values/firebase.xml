@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Firebase (push notifications), from google-services.json of project rynuvo-p7h0d.
+     Written by hand instead of with the google-services Gradle plugin; Firebase reads these at start. -->
+<resources>
+    <string name="google_app_id" translatable="false">1:1007601954187:android:e37b8abb5cc205c7ba538e</string>
+    <string name="gcm_defaultSenderId" translatable="false">1007601954187</string>
+    <string name="google_api_key" translatable="false">AIzaSyAHQh1vQIxpb1iz2KQYPYRImbs2BIAeYbU</string>
+    <string name="project_id" translatable="false">rynuvo-p7h0d</string>
+    <string name="google_storage_bucket" translatable="false">rynuvo-p7h0d.firebasestorage.app</string>
+</resources>

@@ -85,7 +85,26 @@ impl StreamCtl {
         self.st.lock().unwrap().live.is_some()
     }
 
+    fn capture_fn(&self, source_id: &str, cursor: bool) -> engine::CaptureFn {
+        let source = source_id.to_string();
+        let capture = self.capture.clone();
+        Arc::new(move |opts, video, audio, ended| capture(&source, CaptureOpts { cursor, ..opts }, video, audio, ended))
+    }
+
+    /// While live: share another window or screen, change the quality, or turn the sound on or off,
+    /// without ending the stream (viewers stay on). `None` leaves that part alone.
+    pub fn adjust(&self, source_id: Option<&str>, preset: Option<&str>, audio: Option<bool>, cursor: bool) -> Result<(), String> {
+        let st = self.st.lock().unwrap();
+        let Some(b) = st.live.as_ref() else { return Err("You're not sharing your screen".into()) };
+        b.reconfigure(source_id.map(|s| self.capture_fn(s, cursor)), preset.map(engine::preset), audio);
+        Ok(())
+    }
+
     pub fn go_live(&self, source_id: &str, preset: &str, cursor: bool) -> Result<(), String> {
+        self.go_live_with(source_id, preset, cursor, true)
+    }
+
+    pub fn go_live_with(&self, source_id: &str, preset: &str, cursor: bool, audio: bool) -> Result<(), String> {
         if self.voice.channel().is_none() {
             return Err("Join a voice channel first".into());
         }
@@ -94,9 +113,7 @@ impl StreamCtl {
         }
         self.stop_local();
         let p = engine::preset(preset);
-        let source = source_id.to_string();
-        let capture = self.capture.clone();
-        let start: engine::CaptureFn = Arc::new(move |opts, video, audio, ended| capture(&source, CaptureOpts { cursor, ..opts }, video, audio, ended));
+        let start = self.capture_fn(source_id, cursor);
         let ctl = self.clone();
         let events: EventSink = Arc::new(move |e| {
             if let StreamEvent::Error { .. } = &e {
@@ -107,7 +124,7 @@ impl StreamCtl {
             }
             ctl.emit(e);
         });
-        let b = Broadcast::start(start, p, self.net(), events)?;
+        let b = Broadcast::start_with(start, p, audio, self.net(), events)?;
         self.st.lock().unwrap().live = Some(b);
         let codecs = super::encode::available().iter().map(|c| c.name().to_string()).collect();
         self.voice.send_ws(WsClientMsg::StreamStart { codecs, preset: preset.to_string() });

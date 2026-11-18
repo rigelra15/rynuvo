@@ -4,10 +4,11 @@
   import { markWelcomed, permissions, welcomed } from './lib/permissions.svelte'
   import { isAndroid } from './lib/platform'
   import Splash from './components/Splash.svelte'
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import ChannelMenu from './components/ChannelMenu.svelte'
   import ChannelView from './components/ChannelView.svelte'
   import ConnBanner from './components/ConnBanner.svelte'
+  import InviteToast from './components/InviteToast.svelte'
   import CreateChannelDialog from './components/CreateChannelDialog.svelte'
   import Onboarding from './components/Onboarding.svelte'
   import Settings from './components/Settings.svelte'
@@ -22,6 +23,7 @@
   import { layout } from './lib/layout.svelte'
   import { pane } from './lib/pane.svelte'
   import { callNotice } from './lib/callNotice'
+  import { startPush } from './lib/push'
   import { tick } from 'svelte'
   import type { Channel, ChannelKind, Id } from './lib/types'
 
@@ -119,6 +121,15 @@
   // A room rises from the bottom like a sheet (and is swiped back down); chats slide in from the right.
   let sheet = $state(false)
   let mainEl: HTMLElement | undefined = $state()
+  /** Open a chat or room from the sidebar. */
+  function goTo(c: Channel) {
+    store.view = 'circle'
+    store.select(c.id)
+    // Opening a room I'm already in on another device shows it; moving the call here is a choice.
+    if (c.kind === 'voice' && !store.inVoiceElsewhere(c.id)) store.joinVoice(c.id)
+    void openPane()
+  }
+
   async function openPane() {
     if (!narrow || paneOpen) return
     const next = store.view !== 'home' && store.selected?.kind === 'voice'
@@ -205,6 +216,18 @@
     if (store.phase === 'onboarding') settingsOpen = false
   })
 
+  // Android: notifications while the app is closed, and opening what a tapped one is about.
+  $effect(() => {
+    if (store.phase !== 'app') return
+    // Only the phase decides when this runs, not what opening a chat happens to read.
+    return untrack(() =>
+      startPush((id) => {
+        const c = store.channels.find((c) => c.id === id)
+        if (c) goTo(c)
+      }),
+    )
+  })
+
   // Back online (woke up, network came back): a good moment to look for a new version.
   $effect(() => {
     if (store.conn.state === 'online') updater.nudge()
@@ -263,13 +286,7 @@
         selectedId={narrow && !paneOpen ? null : store.selectedId}
         me={store.me}
         canManage={store.canManage}
-        onSelect={(c) => {
-          store.view = 'circle'
-          store.select(c.id)
-          // Opening a room I'm already in on another device shows it; moving the call here is a choice.
-          if (c.kind === 'voice' && !store.inVoiceElsewhere(c.id)) store.joinVoice(c.id)
-          openPane()
-        }}
+        onSelect={goTo}
         onMemberMenu={(userId, e) => (memberMenu = { userId, x: e.clientX, y: e.clientY })}
         onCreate={(k) => (creating = k)}
         onChannelMenu={(c, e) => (menu = { c, x: e.clientX, y: e.clientY })}
@@ -326,6 +343,7 @@
   <Settings onClose={() => (settingsOpen = false)} />
 {/if}
 
+{#if store.phase === 'app'}<InviteToast onJoin={(c) => { store.view = 'circle'; store.select(c.id); store.joinVoice(c.id); void openPane() }} />{/if}
 <DialogHost />
 
 <style>

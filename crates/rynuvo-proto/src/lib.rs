@@ -155,6 +155,62 @@ pub struct ClaimTransferReq {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct PushRegisterReq {
+    /// The device's Firebase Cloud Messaging token.
+    pub token: String,
+}
+
+/// What a push needs to fetch its notification: a key that can read notifications and nothing else.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PushRegisterResp {
+    pub key: String,
+}
+
+/// A notification as the phone shows it. Pushes carry only its id; the phone fetches this from the
+/// server, so what was said never passes through Google.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PushNote {
+    /// "message", "invite", or "room" (someone is hanging out in a voice room).
+    pub kind: String,
+    pub channel_id: Id,
+    pub channel: String,
+    /// Who: their nickname and id (for their avatar).
+    pub from: String,
+    pub from_id: Id,
+    /// Their profile photo (a media id; fetched with the push key from `/push/avatar/{from_id}`),
+    /// and their avatar colour for when there's none.
+    #[serde(default)]
+    pub avatar: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    /// The text to show: a message's first 200 characters, or "sent an image".
+    pub text: String,
+    pub mention: bool,
+    pub at: i64,
+    /// A message's picture (media id, fetched with the push key from `/push/media/{id}`).
+    #[serde(default)]
+    pub image: Option<String>,
+    /// "room": who is in there now, the one who just came in first.
+    #[serde(default)]
+    pub people: Vec<PushPerson>,
+    /// Update what's showing without a sound (this room already rang this phone).
+    #[serde(default)]
+    pub quiet: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PushPerson {
+    pub id: Id,
+    pub name: String,
+    pub avatar: Option<String>,
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TransferCodeResp {
     pub code: String,
     pub expires_at: i64,
@@ -364,6 +420,11 @@ pub enum WsClientMsg {
     VoiceState { muted: bool, deafened: bool },
     #[serde(rename_all = "camelCase")]
     VoiceKick { user_id: Id },
+    /// Ask these people to come to the voice channel I'm in ("come hang out").
+    VoiceInvite { to: Vec<Id> },
+    /// The app went to the background (true) or came back (false). While away, this device gets
+    /// push notifications as if it weren't connected.
+    Away { away: bool },
     /// Go Live in my current voice channel. `codecs`: what I can encode, best first.
     #[serde(rename_all = "camelCase")]
     StreamStart { codecs: Vec<String>, preset: String },
@@ -429,6 +490,9 @@ pub enum WsServerMsg {
     /// I read further on another of my devices.
     #[serde(rename_all = "camelCase")]
     ReadUpdated { channel_id: Id, last_read: Id },
+    /// A transfer code of mine was just used to sign in a new device (`expires_at` tells which code).
+    #[serde(rename_all = "camelCase")]
+    TransferClaimed { expires_at: i64, device: String },
     MessageCreated(Message),
     MessageUpdated(Message),
     #[serde(rename_all = "camelCase")]
@@ -459,6 +523,9 @@ pub enum WsServerMsg {
     /// Sent only to the connection that joined: credentials for the media relay.
     #[serde(rename_all = "camelCase")]
     VoiceJoined { channel_id: Id, session: u32, key: String, udp_port: u16 },
+    /// `from` asks me to come to voice channel `channel_id`.
+    #[serde(rename_all = "camelCase")]
+    VoiceInvited { channel_id: Id, from: Id },
     VoiceMemberUpdated(VoiceMember),
     #[serde(rename_all = "camelCase")]
     VoiceMemberLeft { user_id: Id, channel_id: Id },
@@ -480,6 +547,34 @@ pub enum WsServerMsg {
     #[serde(rename_all = "camelCase")]
     E2eeKeyRequest { by: Id, scope: e2ee::Scope },
 }
+
+/// Does `content` @mention `me` (or @everyone)? Same rules as the app's `findMentions`: case-insensitive,
+/// word boundaries on both sides, and the longest matching name wins ("@Budi Santoso" is not "@Budi").
+pub fn mentions_me(content: &str, me: &str, names: &[&str]) -> bool {
+    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    let mut names: Vec<String> = names.iter().map(|n| n.to_lowercase()).chain(["everyone".to_string()]).collect();
+    names.sort_by_key(|n| std::cmp::Reverse(n.chars().count()));
+    let me = me.to_lowercase();
+    let chars: Vec<char> = content.chars().collect();
+    let lower: Vec<char> = chars.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect();
+    for i in 0..chars.len() {
+        if chars[i] != '@' || (i > 0 && word(Some(chars[i - 1]))) {
+            continue;
+        }
+        let hit = names.iter().find(|n| {
+            let n: Vec<char> = n.chars().collect();
+            let end = i + 1 + n.len();
+            end <= lower.len() && lower[i + 1..end] == n[..] && !word(chars.get(end).copied())
+        });
+        if let Some(n) = hit {
+            if *n == me || n == "everyone" {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 
 #[cfg(test)]
 mod tests {

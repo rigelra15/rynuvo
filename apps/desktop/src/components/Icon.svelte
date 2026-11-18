@@ -1,7 +1,7 @@
 <script lang="ts" module>
   export type IconName =
     | 'mic' | 'micOff' | 'headphones' | 'headphonesOff' | 'screen' | 'leave'
-    | 'hash' | 'volume' | 'plus' | 'settings' | 'edit' | 'trash' | 'close' | 'check' | 'lock' | 'eye' | 'warn' | 'logo' | 'users' | 'home' | 'back' | 'down' | 'image' | 'sidebar'
+    | 'hash' | 'volume' | 'plus' | 'settings' | 'edit' | 'trash' | 'close' | 'check' | 'lock' | 'eye' | 'warn' | 'logo' | 'users' | 'userPlus' | 'expand' | 'shrink' | 'ambient' | 'cc' | 'home' | 'back' | 'down' | 'image' | 'sidebar'
     | 'play' | 'pause' | 'skip' | 'queue' | 'music' | 'repeat' | 'repeatOne' | 'lyrics'
 </script>
 
@@ -42,6 +42,16 @@
     <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" /><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
   {:else if name === 'users'}
     <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+  {:else if name === 'cc'}
+    <rect x="3" y="5" width="18" height="14" rx="3" /><path d="M10.5 10.2a2.2 2.2 0 1 0 0 3.6M17 10.2a2.2 2.2 0 1 0 0 3.6" />
+  {:else if name === 'ambient'}
+    <circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+  {:else if name === 'expand'}
+    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+  {:else if name === 'shrink'}
+    <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />
+  {:else if name === 'userPlus'}
+    <path d="M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" /><path d="M20 8v6M23 11h-6" />
   {:else if name === 'hash'}
     <path d="M5 9h15M4 15h15M10 3 8 21M16 3l-2 18" />
   {:else if name === 'volume'}

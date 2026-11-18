@@ -6,7 +6,9 @@
   // circling the card. Underneath it is a plain QR turned 45° (scanners read any angle) with error
   // correction at its highest so the lamp can sit in the middle. Modules are softened squares that
   // touch: round dots with gaps read noticeably worse at a distance (checked with ZXing).
-  let { text, label = 'QR code' }: { text: string; label?: string } = $props()
+  // When the code is used (or runs out) it doesn't stay up looking usable: used, the dust blows
+  // away and a green tick takes its place; expired, it greys out.
+  let { text, label = 'QR code', state = 'live' }: { text: string; label?: string; state?: 'live' | 'done' | 'expired'; device?: string } = $props()
 
   const qr = $derived(encode(text, { ecc: 'H', border: 0 }))
   const n = $derived(qr.size)
@@ -80,7 +82,7 @@
 </script>
 
 {#key text}
-  <div class="dqr" role="img" aria-label={label}>
+  <div class="dqr" class:done={state === 'done'} class:expired={state === 'expired'} role="img" aria-label={state === 'done' ? 'Code used' : state === 'expired' ? 'Code expired' : label}>
     <svg class="dust" viewBox="-100 -100 200 200" aria-hidden="true">
       {#each dust as d}
         <g class="orbit" class:reverse={d.reverse} style="--dur:{d.dur}s;--start:{d.start}s">
@@ -125,6 +127,22 @@
       <!-- The lamp, upright in the middle, lit last. -->
       <path class="lamp" d="M0 {-hole * 0.55} L{hole * 0.55} 0 L0 {hole * 0.55} L{-hole * 0.55} 0 Z" fill="url(#dqr-lamp)" />
     </svg>
+
+    {#if state === 'done'}
+      <svg class="badge" viewBox="-64 -64 128 128" aria-hidden="true">
+        <defs>
+          <linearGradient id="dqr-ok" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#bbf7d0" />
+            <stop offset="1" stop-color="#22c55e" />
+          </linearGradient>
+        </defs>
+        <path class="ok-ring" d="M0 -58 L58 0 L0 58 L-58 0 Z" fill="none" stroke="#4ade80" stroke-width="2" />
+        <path d="M0 -40 L40 0 L0 40 L-40 0 Z" fill="url(#dqr-ok)" class="ok-gem" />
+        <path class="ok-tick" d="M-15 1 L-4 12 L17 -10" fill="none" stroke="#052e16" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" pathLength="1" />
+      </svg>
+    {:else if state === 'expired'}
+      <span class="exp">Expired</span>
+    {/if}
   </div>
 {/key}
 
@@ -168,7 +186,41 @@
   @keyframes twinkle { from { opacity: 0.15; } to { opacity: 0.85; } }
   @keyframes dust-in { from { opacity: 0; } }
 
+  /* Used: the code blows apart into dust, the card folds away, a green tick lands. */
+  .done .dot { animation: scatter 900ms calc(var(--d) * 0.35) cubic-bezier(0.5, 0, 0.75, 0) forwards; }
+  @keyframes scatter {
+    from { transform: none; opacity: 1; stroke-width: 0; }
+    30% { stroke-width: 1.4; }
+    to { transform: translate(calc(var(--dx) * 1.3), calc(var(--dy) * 1.3)) scale(0.2); opacity: 0; stroke-width: 2.4; }
+  }
+  .done .eye, .done .lamp { animation: vanish 420ms 240ms ease-in forwards; }
+  @keyframes vanish { to { opacity: 0; transform: scale(0.3); } }
+  .done .card { animation: fold 600ms 650ms cubic-bezier(0.5, 0, 0.75, 0) forwards; }
+  @keyframes fold { to { opacity: 0; transform: scale(0.55); } }
+  .done .code { filter: none; }
+  .done .orbit circle { animation: dust-out 900ms ease-in forwards; }
+  @keyframes dust-out { to { opacity: 0; } }
+  .badge { position: absolute; inset: 14%; width: 72%; height: 72%; overflow: visible; filter: drop-shadow(0 10px 26px rgba(74, 222, 128, 0.45)); }
+  .ok-gem { transform-box: fill-box; transform-origin: center; animation: pop 620ms 1050ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  .ok-ring { transform-box: fill-box; transform-origin: center; opacity: 0; animation: ring 1.1s 1250ms ease-out both; }
+  .ok-tick { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 480ms 1450ms cubic-bezier(0.65, 0, 0.35, 1) forwards; }
+  @keyframes pop { from { opacity: 0; transform: scale(0) rotate(-45deg); } }
+  @keyframes ring { from { opacity: 0.9; transform: scale(0.7); } to { opacity: 0; transform: scale(1.35); } }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+
+  /* Run out: greys over and goes soft, so it plainly can't be scanned any more. */
+  .code, .dust { transition: filter 900ms ease, opacity 900ms ease; }
+  .expired .code { filter: grayscale(1) blur(2px); opacity: 0.32; }
+  .expired .dust { opacity: 0; }
+  .exp {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 6px 14px; border-radius: 999px;
+    font-size: 13px; font-weight: 700; color: var(--text, #f1ebe4); background: rgba(26, 21, 33, 0.85); border: 1px solid rgba(255, 255, 255, 0.12);
+    animation: fade-in 500ms 300ms both;
+  }
+  @keyframes fade-in { from { opacity: 0; } }
+
   @media (prefers-reduced-motion: reduce) {
     .dot, .eye, .lamp, .card, .orbit, .orbit circle { animation: none; }
+    .done .code { opacity: 0; }
   }
 </style>

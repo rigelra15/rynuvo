@@ -569,6 +569,10 @@ impl VoiceCtl {
         self.send(WsClientMsg::VoiceKick { user_id });
     }
 
+    pub fn invite(&self, to: Vec<Id>) {
+        self.send(WsClientMsg::VoiceInvite { to });
+    }
+
     pub fn prefs(&self) -> AudioPrefs {
         self.st.lock().unwrap().prefs.clone()
     }

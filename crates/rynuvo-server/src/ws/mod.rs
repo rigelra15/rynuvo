@@ -129,6 +129,7 @@ async fn handle(st: AppState, mut socket: WebSocket) {
     let device_id = au.device_id;
     let reg = st.hub.register(user_id, au.user.is_admin, mobile);
     let (conn_id, mut rx, mut kill) = (reg.id, reg.rx, reg.kill);
+    st.hub.set_device(conn_id, device_id);
     let ready = match snapshot(&st, au.user).await {
         Ok(r) => r,
         Err(e) => {
@@ -204,6 +205,8 @@ async fn run(
                         Ok(WsClientMsg::VoiceLeave) => crate::voice::leave(st, user_id),
                         Ok(WsClientMsg::VoiceState { muted, deafened }) => crate::voice::set_state(st, user_id, muted, deafened),
                         Ok(WsClientMsg::VoiceKick { user_id: target }) => crate::voice::kick(st, user_id, is_admin, target).await,
+                        Ok(WsClientMsg::VoiceInvite { to }) => crate::voice::invite(st, user_id, to),
+                        Ok(WsClientMsg::Away { away }) => st.hub.set_away(conn_id, away),
                         Ok(WsClientMsg::StreamStart { codecs, preset }) => crate::voice::stream_start(st, user_id, codecs, preset),
                         Ok(WsClientMsg::StreamStop) => crate::voice::stream_stop(st, user_id),
                         Ok(WsClientMsg::StreamWatch { user_id: streamer, codecs }) => crate::voice::stream_watch(st, user_id, streamer, codecs),

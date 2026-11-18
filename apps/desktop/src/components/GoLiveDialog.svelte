@@ -9,8 +9,13 @@
 
   let sources = $state<Source[] | null>(null)
   let error = $state<string | null>(null)
-  let picked = $state<string | null>(null)
-  let preset = $state(store.streamPreset)
+  // Opened while live: the same picker changes the running stream instead (viewers stay on).
+  const live = !!store.live
+  let picked = $state<string | null>(live ? store.liveSource : null)
+  let preset = $state((live && store.livePreset) || store.streamPreset)
+  const cursorAtOpen = store.streamCursor
+  const changed = $derived(live && (picked !== store.liveSource || preset !== store.livePreset || store.streamCursor !== cursorAtOpen))
+  let applying = $state(false)
   const screens = $derived((sources ?? []).filter((s) => s.kind === 'screen'))
   const windows = $derived((sources ?? []).filter((s) => s.kind === 'window'))
 
@@ -74,7 +79,20 @@
 
   async function start() {
     if (!picked) return
-    if (await store.goLive(picked, preset)) onClose()
+    if (!live) {
+      if (await store.goLive(picked, preset)) onClose()
+      return
+    }
+    applying = true
+    const restart = picked !== store.liveSource || store.streamCursor !== cursorAtOpen
+    const ok = await store.adjustLive({ sourceId: restart ? picked : undefined, preset: preset !== store.livePreset ? preset : undefined })
+    applying = false
+    if (ok) onClose()
+  }
+
+  function stop() {
+    store.stopLive()
+    onClose()
   }
 
   function key(e: KeyboardEvent) {
@@ -85,8 +103,9 @@
 <svelte:window onkeydown={key} />
 
 <div class="overlay" transition:backdrop|global>
-  <div class="box" transition:pop|global role="dialog" aria-modal="true" aria-label="Go Live">
-    <h2>Go Live</h2>
+  <div class="box" transition:pop|global role="dialog" aria-modal="true" aria-label={live ? 'Stream settings' : 'Go Live'}>
+    <h2>{live ? "You're live" : 'Go Live'}</h2>
+    {#if live}<p class="muted sub">Pick another screen or window, or change the quality. Viewers stay on while it switches.</p>{/if}
     {#if error}
       <p class="err">{error}</p>
       <button class="btn" onclick={load}>Try again</button>
@@ -123,6 +142,10 @@
       </div>
       <p class="hint muted">A fullscreen game that shows up black as a window? Share its screen instead.</p>
       <label class="row">
+        <span>Share sound <span class="muted small">what you hear on this computer</span></span>
+        <input type="checkbox" checked={store.streamAudio} onchange={(e) => store.setStreamAudio(e.currentTarget.checked)} />
+      </label>
+      <label class="row">
         Show cursor
         <input type="checkbox" checked={store.streamCursor} onchange={(e) => void store.setStreamCursor(e.currentTarget.checked)} />
       </label>
@@ -134,8 +157,13 @@
       </label>
     {/if}
     <div class="actions">
-      <button class="btn" onclick={onClose}>Cancel</button>
-      <button class="btn primary" disabled={!picked || store.goingLive} onclick={start}>{store.goingLive ? 'Starting…' : 'Go Live'}</button>
+      {#if live}<button class="btn danger" onclick={stop}>Stop sharing</button><span class="grow"></span>{/if}
+      <button class="btn" onclick={onClose}>{live ? 'Close' : 'Cancel'}</button>
+      {#if live}
+        <button class="btn primary" disabled={!picked || !changed || applying} onclick={start}>{applying ? 'Switching…' : 'Apply'}</button>
+      {:else}
+        <button class="btn primary" disabled={!picked || store.goingLive} onclick={start}>{store.goingLive ? 'Starting…' : 'Go Live'}</button>
+      {/if}
     </div>
   </div>
 </div>
@@ -162,4 +190,8 @@
   .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .err { color: var(--danger); margin: 0; line-height: 1.45; }
   .actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .grow { flex: 1; }
+  .danger { color: #fff; background: var(--danger); border-color: transparent; }
+  .sub { margin: -6px 0 0; font-size: 13px; }
+  .small { font-size: 12px; margin-left: 6px; }
 </style>

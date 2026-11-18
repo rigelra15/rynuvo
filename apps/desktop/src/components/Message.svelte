@@ -88,7 +88,7 @@
   {#if !mine}
     <div class="side">{#if head}<Avatar user={author} id={m.authorId} size={32} />{/if}</div>
   {/if}
-  <div class="bubble" class:mentioned class:editing class:has-img={!!m.image}>
+  <div class="bubble" class:mentioned class:editing class:has-img={!!m.image && !editing} class:img-only={!!m.image && !m.content && !editing}>
     {#if head && !mine}<div class="who" style="color:{whoColor}">{store.nick(m.authorId)}</div>{/if}
     {#if editing}
       <!-- svelte-ignore a11y_autofocus -->
@@ -134,7 +134,15 @@
   .head:not(.mine) .bubble { border-top-left-radius: 6px; }
   .mine .bubble { background: var(--bubble-mine); color: var(--on-accent); }
   .mine.head .bubble { border-top-right-radius: 6px; }
-  .bubble.has-img { padding-top: 4px; }
+  /* A picture runs to the bubble's edges (the bubble's own corners round it off); its shape is the
+     picture's own, never cropped. */
+  .bubble.has-img { padding-top: 0; overflow: hidden; }
+  .has-img .who { padding-top: 7px; margin-bottom: 5px; }
+  /* Just a picture: it is the bubble, with the time over its corner. */
+  .bubble.img-only { padding: 0; }
+  .img-only .who { padding: 7px 12px 0; }
+  .img-only .content { position: absolute; right: 8px; bottom: 8px; }
+  .bubble.img-only .stamp { padding: 4px 7px; border-radius: 999px; color: #fff; background: rgba(10, 8, 14, 0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
   .bubble.editing { width: min(70%, 420px); max-width: none; }
 
   /* Someone called you: the bubble catches the lamp's light. */
@@ -156,7 +164,8 @@
   .text :global(a) { color: var(--lilac); }
   .mine .text :global(a) { color: var(--on-accent); text-decoration: underline; }
 
-  .img { display: block; max-width: 100%; margin: 0 -6px 4px; padding: 0; border-radius: 10px; overflow: hidden; background: var(--panel-2); cursor: zoom-in; }
+  .img { display: block; max-width: calc(100% + 24px); margin: 0 -12px 6px; padding: 0; border-radius: 0; overflow: hidden; background: var(--panel-2); cursor: zoom-in; }
+  .img-only .img { max-width: 100%; margin: 0; }
   .img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
   textarea { width: 100%; resize: none; }

@@ -14,6 +14,11 @@
   import Icon from './Icon.svelte'
   import SwapLabel from './SwapLabel.svelte'
   import GoLiveDialog from './GoLiveDialog.svelte'
+  import InvitePicker from './InvitePicker.svelte'
+  import AudioPicker from './AudioPicker.svelte'
+  import CaptionsPicker from './CaptionsPicker.svelte'
+  import CaptionsOverlay from './CaptionsOverlay.svelte'
+  import { captions } from '../lib/captions.svelte'
   import StreamView from './StreamView.svelte'
   import MusicPlayer from './MusicPlayer.svelte'
   import MusicBackdrop from './MusicBackdrop.svelte'
@@ -26,6 +31,9 @@
   const joined = $derived(store.inVoice(channel.id))
   const watching = $derived(store.watching !== null && list.some((m) => m.userId === store.watching) ? store.watching : null)
   let picking = $state(false)
+  let inviting = $state(false)
+  let devicesOpen = $state(false)
+  let ccOpen = $state(false)
   const music = $derived(store.musicIn(channel.id))
   /** The music panel sits on the right (empty when nothing plays), unless a stream is open (the stream wins). */
   const playerUp = $derived(joined && watching === null)
@@ -61,9 +69,9 @@
         : 'Nobody is in here yet',
   )
 
+  // Live: the same button opens the stream's settings (switch window, quality, sound, or stop).
   function share() {
-    if (store.live) store.stopLive()
-    else picking = true
+    picking = true
   }
 
   function open(user: Id) {
@@ -156,6 +164,7 @@
     {/if}
 
     <div class="dock-row">
+      <CaptionsOverlay />
       {#if store.voicePath === 'ws' || store.live}
         <p class="path">
           {#if store.live}You're live{#if store.live.viewers.length}<span class="eyes" title="{store.live.viewers.length} watching"><Icon name="eye" size={13} />{store.live.viewers.length}</span>{/if}{store.live.codec ? ` (${store.live.codec.toUpperCase()}${store.live.relay ? ', via server, 1080p30 cap' : ''})` : store.live.relay ? ' (via server, 1080p30 cap)' : ''}{/if}
@@ -169,11 +178,29 @@
         <button class="ctl" style="--i:1" class:off={store.myVoice.deafened} aria-pressed={store.myVoice.deafened} aria-label={store.myVoice.deafened ? 'Undeafen' : 'Deafen'} onclick={() => store.toggleDeafen()}>
           <SwapLabel icons={['headphones', 'headphonesOff']} labels={['Sound', 'Deafened']} flipped={store.myVoice.deafened} />
         </button>
-        {#if !isMobile}<button class="ctl" style="--i:2" class:on={!!store.live} aria-pressed={!!store.live} aria-label={store.live ? 'Stop sharing' : 'Share screen'} onclick={share}>
-          <SwapLabel icons={['screen', 'screen']} labels={['Share screen', 'Stop sharing']} flipped={!!store.live} />
+        <span class="invwrap">
+          <button class="ctl" style="--i:2" data-audio-toggle class:on={devicesOpen} aria-expanded={devicesOpen} aria-label="Microphone and speaker" title="Microphone and speaker" onclick={() => (devicesOpen = !devicesOpen)}>
+            <Icon name="volume" size={18} /><span class="lbl">Devices</span>
+          </button>
+          {#if devicesOpen}<AudioPicker onClose={() => (devicesOpen = false)} />{/if}
+        </span>
+        <span class="invwrap">
+          <button class="ctl" style="--i:2" data-cc-toggle class:on={captions.wanted} aria-expanded={ccOpen} aria-label="Captions" title="Captions" onclick={() => (ccOpen = !ccOpen)}>
+            <Icon name="cc" size={18} /><span class="lbl">Captions</span>
+          </button>
+          {#if ccOpen}<CaptionsPicker onClose={() => (ccOpen = false)} />{/if}
+        </span>
+        <span class="invwrap">
+          <button class="ctl" style="--i:2" data-invite-toggle class:on={inviting} aria-expanded={inviting} aria-label="Invite friends" onclick={() => (inviting = !inviting)}>
+            <Icon name="userPlus" size={18} /><span class="lbl">Invite</span>
+          </button>
+          {#if inviting}<InvitePicker channelId={channel.id} onClose={() => (inviting = false)} />{/if}
+        </span>
+        {#if !isMobile}<button class="ctl" style="--i:3" class:on={!!store.live} aria-pressed={!!store.live} aria-label={store.live ? 'Stream settings' : 'Share screen'} onclick={share}>
+          <SwapLabel icons={['screen', 'screen']} labels={['Share screen', 'Sharing']} flipped={!!store.live} />
         </button>{/if}
-        <span class="sep" style="--i:3" aria-hidden="true"></span>
-        <button class="ctl leave" style="--i:4" onclick={() => store.leaveVoice()}><Icon name="leave" size={18} /><span class="lbl">Leave</span></button>
+        <span class="sep" style="--i:4" aria-hidden="true"></span>
+        <button class="ctl leave" style="--i:5" onclick={() => store.leaveVoice()}><Icon name="leave" size={18} /><span class="lbl">Leave</span></button>
       </div>
     </div>
   {/if}
@@ -283,4 +310,5 @@
     .split > .room { flex: 1 1 150px; min-height: 110px; }
     .side { width: 100%; flex: 0 1 auto; min-height: 0; position: relative; z-index: 3; }
   }
+  .invwrap { position: relative; display: inline-flex; }
 </style>

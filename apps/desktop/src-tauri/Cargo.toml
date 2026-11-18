@@ -22,6 +22,9 @@ tauri-plugin-notification = "2"
 rynuvo-proto = { path = "../../../crates/rynuvo-proto" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "fs"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+# Named directly to pick its crypto: the updater brings ring and reqwest brings aws-lc, and with both
+# rustls won't guess, so the app installs aws-lc at start.
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 url = "2"
@@ -39,6 +42,8 @@ sonora = "0.3"
 nnnoiseless = "0.5"
 ringbuf = "0.6.0"
 openh264 = "0.9"
+# Captions: speech to text on the device itself (whisper.cpp), so call audio never leaves it.
+whisper-rs = "0.16"
 tauri-plugin-process = "2"
 
 # Desktop only: tray, global shortcuts, start at login and self-update don't exist on Android/iOS.
@@ -68,6 +73,7 @@ tempfile = "3"
 tokio = { version = "1", features = ["test-util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = { version = "0.16", features = ["metal"] }
 libc = "0.2"
 objc2 = "0.6"
 block2 = "0.6"

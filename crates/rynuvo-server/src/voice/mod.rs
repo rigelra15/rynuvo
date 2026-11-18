@@ -22,10 +22,12 @@ fn ended(st: &AppState, conn_id: u64, reason: &str) {
 
 /// Announce that `m` left and store its traffic.
 fn left(st: &AppState, m: Member) {
+    let user = m.user_id;
     st.hub.broadcast(WsServerMsg::VoiceMemberLeft { user_id: m.user_id, channel_id: m.channel_id });
     let ch = m.channel_id;
     store_usage(st, m);
     crate::music::wire::voice_left(st, ch);
+    tokio::spawn(crate::push::room_left(st.clone(), ch, user));
 }
 
 /// The member's voice session is over: end their stream and their watching.
@@ -112,6 +114,8 @@ pub async fn join(st: &AppState, user_id: Id, conn_id: u64, channel_id: Id, pubk
         Ok(j) => j,
         Err(rooms::JoinError::Full) => return ended(st, conn_id, FULL),
     };
+    // Came into this room (not a reconnect to the room they were already in).
+    let moved_in = j.previous.as_ref().is_none_or(|p| p.channel_id != channel_id);
     if let Some(prev) = j.previous {
         if prev.conn_id != conn_id {
             ended(st, prev.conn_id, MOVED);
@@ -134,6 +138,9 @@ pub async fn join(st: &AppState, user_id: Id, conn_id: u64, channel_id: Id, pubk
         }),
     );
     st.hub.broadcast(WsServerMsg::VoiceMemberUpdated(m.public()));
+    if moved_in {
+        tokio::spawn(crate::push::room(st.clone(), channel_id, user_id));
+    }
 }
 
 pub fn leave(st: &AppState, user_id: Id) {
@@ -159,6 +166,33 @@ pub async fn kick(st: &AppState, by: Id, by_admin: bool, target: Id) {
         ended(st, m.conn_id, KICKED);
         left(st, m);
     }
+}
+
+/// Between two invites from the same person to the same person.
+pub const INVITE_GAP_MS: i64 = 30_000;
+
+/// Ask people to the voice channel `from` is in. Skips those already there and repeats too soon.
+pub fn invite(st: &AppState, from: Id, to: Vec<Id>) {
+    let Some(me) = st.voice.member(from) else { return };
+    let now = now_ms();
+    let mut seen = Vec::new();
+    let mut asked = Vec::new();
+    for t in to.into_iter().take(64) {
+        if t == from || seen.contains(&t) {
+            continue;
+        }
+        seen.push(t);
+        if st.voice.member(t).is_some_and(|m| m.channel_id == me.channel_id) {
+            continue;
+        }
+        if st.voice.may_invite(from, t, now, INVITE_GAP_MS) {
+            st.hub.send_to_user(t, WsServerMsg::VoiceInvited { channel_id: me.channel_id, from });
+            asked.push(t);
+        }
+    }
+    // Those with the app closed get it on their phone.
+    let (st, channel) = (st.clone(), me.channel_id);
+    tokio::spawn(async move { crate::push::invite(&st, from, &asked, channel).await });
 }
 
 pub fn conn_closed(st: &AppState, conn_id: u64) {

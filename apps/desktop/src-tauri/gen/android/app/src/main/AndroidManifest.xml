@@ -32,6 +32,19 @@
             </intent-filter>
         </activity>
 
+        <!-- Push notifications (Firebase): fetches what each push is about from the Rynuvo server. -->
+        <service
+            android:name=".PushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".ReplyReceiver"
+            android:exported="false" />
+
         <service
             android:name=".CallService"
             android:exported="false"

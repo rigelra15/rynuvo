@@ -195,6 +195,12 @@ impl Api {
         let b = r.bytes().await.map_err(|e| ClientError::Network(e.to_string()))?;
         Ok((b.to_vec(), mime))
     }
+    pub async fn push_register(&self, token: &str) -> ClientResult<rynuvo_proto::PushRegisterResp> {
+        self.json(Method::POST, "/me/push", Some(&rynuvo_proto::PushRegisterReq { token: token.into() })).await
+    }
+    pub async fn push_unregister(&self) -> ClientResult<()> {
+        self.empty(Method::DELETE, "/me/push").await
+    }
     pub async fn transfer_code(&self) -> ClientResult<TransferCodeResp> {
         self.json(Method::POST, "/me/transfer-code", Self::NONE).await
     }

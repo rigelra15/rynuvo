@@ -1,4 +1,6 @@
 mod apk_update;
+pub mod captions;
+mod captions_cmd;
 pub mod commands;
 pub mod core;
 mod diag;
@@ -24,6 +26,8 @@ use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Two crypto backends are linked (see Cargo.toml): say which one TLS uses, before any connection.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let profile = std::env::var("RYNUVO_PROFILE").ok().filter(|p| !p.is_empty());
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -126,6 +130,14 @@ pub fn run() {
                 async move { m.spawn_ticker() }
             });
             app.manage(music_cmd::MusicHttp(http));
+            // Captions: the model is shared by every profile on this device.
+            let h4 = app.handle().clone();
+            app.manage(captions::Captions::new(
+                app.path().app_data_dir()?.join("models"),
+                Arc::new(move |e| {
+                    let _ = h4.emit(captions_cmd::CAPTIONS_EVENT, e);
+                }),
+            ));
             app.manage(commands::Core::new(store, dir.join(file), voice, stream, music));
             #[cfg(desktop)]
             {
@@ -155,6 +167,9 @@ pub fn run() {
             commands::send_typing,
             commands::mark_read,
             commands::transfer_code,
+            commands::push_register,
+            commands::push_unregister,
+            commands::set_away,
             commands::admin_rotate_invite,
             commands::admin_kick,
             commands::admin_transfer_code,
@@ -176,6 +191,11 @@ pub fn run() {
             stream_cmd::stream_watch,
             stream_cmd::stream_unwatch,
             stream_cmd::stream_set_volume,
+            stream_cmd::stream_adjust,
+            captions_cmd::captions_info,
+            captions_cmd::captions_start,
+            captions_cmd::captions_stop,
+            captions_cmd::captions_set_lang,
             stream_cmd::stream_request_key,
             stream_cmd::stream_self_check,
             stream_cmd::open_capture_settings,
@@ -198,6 +218,7 @@ pub fn run() {
             voice_cmd::voice_set_threshold,
             voice_cmd::voice_mic_test,
             voice_cmd::voice_kick,
+            voice_cmd::voice_invite,
             voice_cmd::e2ee_call,
             voice_cmd::e2ee_person_code,
             voice_cmd::e2ee_verify,

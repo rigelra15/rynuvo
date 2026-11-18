@@ -8,6 +8,7 @@ import { applyStreams, type StreamEvent, type StreamInfo } from './stream'
 import type { MusicCmd, MusicState, MusicStatus } from './music'
 import { videos } from './videos'
 import { mentionsMe } from './mention'
+import { stopPush } from './push'
 
 export const TYPING_TTL_MS = 6000
 
@@ -42,6 +43,12 @@ class Store {
   reads = new SvelteMap<Id, { last: Id | null; read: Id }>()
   /** Text channels whose unread messages mention me or @everyone. */
   mentioned = new SvelteSet<Id>()
+  /** "Come hang out" asks waiting for an answer, newest last (one per person). */
+  invites = $state<{ channelId: Id; from: Id; at: number }[]>([])
+  /** Who I asked to my room, and when (the server holds back a repeat for 30 s). */
+  invited = new SvelteMap<Id, number>()
+  /** The last transfer code used to sign in a new device (`expiresAt` says which code it was). */
+  transferClaimed = $state<{ expiresAt: number; device: string } | null>(null)
   /** The open channel is really on screen (App: window shown, and on a phone the chat pane is open). */
   looking = $state(true)
   alerts = $state<string[]>([])
@@ -64,6 +71,17 @@ class Store {
   streamNotice = $state<string | null>(null)
   streamPreset = $state('1080p60')
   streamCursor = $state(true)
+  /** Share the screen's sound too (remembered on this device). */
+  streamAudio = $state((() => {
+    try {
+      return localStorage.getItem('rynuvo.streamAudio') !== '0'
+    } catch {
+      return true
+    }
+  })())
+  /** What I'm sharing right now, and at what quality (to change them while live). */
+  liveSource = $state<string | null>(null)
+  livePreset = $state<string | null>(null)
   /** Listen-together music per voice channel, with the local time each state arrived. */
   music = new SvelteMap<Id, { state: MusicState; receivedAt: number }>()
   /** The "Rynuvo Music" user: authors the bot's replies, never listed as a person. */
@@ -240,6 +258,7 @@ class Store {
   }
 
   async logout() {
+    await stopPush()
     await api.logout()
     this.reset(null)
   }
@@ -319,7 +338,20 @@ class Store {
     return !this.inVoice(channel) && this.voice.some((m) => m.userId === me && m.channelId === channel)
   }
 
+  /** Ask people to the room I'm in. */
+  invite(to: Id[]) {
+    if (!to.length) return
+    const now = Date.now()
+    for (const id of to) this.invited.set(id, now)
+    void api.voiceInvite(to).catch((e) => console.warn('invite failed', e))
+  }
+
+  dismissInvite(from: Id) {
+    this.invites = this.invites.filter((i) => i.from !== from)
+  }
+
   joinVoice(channel: Id) {
+    this.invites = this.invites.filter((i) => i.channelId !== channel)
     if (this.inVoice(channel)) return
     this.voicePath = null
     void this.voiceCall(() => api.voiceJoin(channel)).then(() => this.refreshSecurity())
@@ -359,8 +391,10 @@ class Store {
   async goLive(sourceId: string, preset: string): Promise<boolean> {
     this.goingLive = true
     try {
-      await api.streamGoLive(sourceId, preset, this.streamCursor)
+      await api.streamGoLive(sourceId, preset, this.streamCursor, this.streamAudio)
       this.live = { viewers: [], codec: '', kbps: 0, hardware: false, relay: false }
+      this.liveSource = sourceId
+      this.livePreset = preset
       return true
     } catch (e) {
       void dialog.notice(errText(e))
@@ -368,6 +402,31 @@ class Store {
     } finally {
       this.goingLive = false
     }
+  }
+
+  /** While live: switch source, quality or sound; viewers stay on. Passing the source restarts the
+   *  capture (also how a cursor change takes effect). */
+  async adjustLive(change: { sourceId?: string; preset?: string; audio?: boolean }): Promise<boolean> {
+    if (!this.live) return false
+    try {
+      await api.streamAdjust(change.sourceId ?? null, change.preset ?? null, change.audio ?? null, this.streamCursor)
+      if (change.sourceId) this.liveSource = change.sourceId
+      if (change.preset) this.livePreset = change.preset
+      return true
+    } catch (e) {
+      void dialog.notice(errText(e))
+      return false
+    }
+  }
+
+  setStreamAudio(on: boolean) {
+    this.streamAudio = on
+    try {
+      localStorage.setItem('rynuvo.streamAudio', on ? '1' : '0')
+    } catch {
+      // not remembered, still applies
+    }
+    if (this.live) void this.adjustLive({ audio: on })
   }
 
   stopLive() {
@@ -519,6 +578,9 @@ class Store {
         this.typing.get(m.d.channelId)?.delete(m.d.authorId)
         return
       }
+      case 'transferClaimed':
+        this.transferClaimed = m.d
+        return
       case 'readUpdated': {
         const r = this.reads.get(m.d.channelId)
         if (r) this.reads.set(m.d.channelId, { ...r, read: Math.max(r.read, m.d.lastRead) })
@@ -584,12 +646,31 @@ class Store {
       case 'voiceEnded':
         this.voiceNotice = m.d.reason
         return
+      case 'voiceInvited': {
+        if (this.inVoice(m.d.channelId)) return
+        this.invites = [...this.invites.filter((i) => i.from !== m.d.from), { ...m.d, at: Date.now() }]
+        return
+      }
       case 'voiceMemberLeft':
+        // The sharer left the room: their stream went with them.
+        if (this.watching === m.d.userId) {
+          this.watching = null
+          this.streamStats.delete(m.d.userId)
+          this.streamNotice = `${this.nick(m.d.userId)}'s stream ended`
+        }
         return
       case 'voiceMemberUpdated':
         return
-      case 'streamStarted':
       case 'streamStopped':
+        // The sharer stopped: close it here too, even if the picture just stops coming (no "ended"
+        // from the stream itself), instead of leaving the last frame frozen on screen.
+        if (this.watching === m.d.userId) {
+          this.watching = null
+          this.streamStats.delete(m.d.userId)
+          this.streamNotice = `${this.nick(m.d.userId)}'s stream ended`
+        }
+        return
+      case 'streamStarted':
       case 'streamViewer':
       case 'streamSignal':
         return

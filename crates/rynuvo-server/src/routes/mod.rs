@@ -9,6 +9,7 @@ pub mod diag;
 pub mod identity;
 pub mod media;
 pub mod messages;
+pub mod push;
 
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({"ok": true, "protocol": PROTOCOL_VERSION}))
@@ -21,6 +22,7 @@ pub fn api(cfg: &crate::config::Config) -> Router<AppState> {
         .merge(admin::router())
         .merge(channels::router())
         .merge(messages::router())
+        .merge(push::router())
         .merge(diag::router())
         .merge(media::router(cfg.max_upload_bytes))
 }

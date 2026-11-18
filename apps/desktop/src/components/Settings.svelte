@@ -1,5 +1,6 @@
 <script lang="ts">
   import DiamondQr from './DiamondQr.svelte'
+  import { fly } from 'svelte/transition'
   import { toQr } from '../lib/code'
   import { backdrop, sheet } from '../lib/motion'
   import Icon from './Icon.svelte'
@@ -25,6 +26,17 @@
   let nickname = $state(store.me?.nickname ?? '')
   let nickMsg = $state<string | null>(null)
   let transfer = $state<TransferCode | null>(null)
+  // A code shown here ends one of two ways: used to sign in a device (the server says so), or
+  // run out of time. Either way it closes instead of sitting there looking usable.
+  let expired = $state(false)
+  $effect(() => {
+    if (!transfer) return
+    expired = false
+    const t = setTimeout(() => (expired = true), Math.max(0, transfer.expiresAt - Date.now()))
+    return () => clearTimeout(t)
+  })
+  const claimed = $derived(transfer && store.transferClaimed?.expiresAt === transfer.expiresAt ? store.transferClaimed : null)
+  const transferState = $derived<'live' | 'done' | 'expired'>(claimed ? 'done' : expired ? 'expired' : 'live')
   let net = $state<string[] | null>(null)
   let netBusy = $state(false)
   let logMsg = $state<string | null>(null)
@@ -278,16 +290,24 @@
           <h3>Use Rynuvo on another device</h3>
           <p class="muted">Create a transfer code, then scan it or type it in on the other device.</p>
           {#if transfer}
-            <div class="transfer">
-              <div class="qr"><DiamondQr text={toQr(transfer.code)} label="QR code for this transfer code" /></div>
-              <div>
-                <div class="code selectable">{transfer.code}</div>
-                <p class="note"><Countdown until={transfer.expiresAt} /></p>
-                <p class="muted">On a phone or tablet, tap "Scan QR" on the sign-in screen.</p>
+            <div class="transfer" class:done={transferState === 'done'} class:expired={transferState === 'expired'}>
+              <div class="qr"><DiamondQr text={toQr(transfer.code)} state={transferState} device={claimed?.device} label="QR code for this transfer code" /></div>
+              <div class="tinfo">
+                <div class="code" class:selectable={transferState === 'live'}>{transfer.code}</div>
+                {#if transferState === 'done'}
+                  <p class="claimed" in:fly={{ y: 6, duration: 360, delay: 700 }}>Signed in on {claimed?.device || 'another device'}</p>
+                  <p class="muted">This code is used up. Make a new one for another device.</p>
+                {:else if transferState === 'expired'}
+                  <p class="note">Expired</p>
+                  <p class="muted">Codes last 10 minutes. Make a new one to try again.</p>
+                {:else}
+                  <p class="note"><Countdown until={transfer.expiresAt} /></p>
+                  <p class="muted">On a phone or tablet, tap "Scan QR" on the sign-in screen.</p>
+                {/if}
               </div>
             </div>
           {/if}
-          <button class="btn" onclick={makeTransfer}>{transfer ? 'Create a new code' : 'Create transfer code'}</button>
+          <button class="btn" onclick={makeTransfer}>{transfer && transferState === 'live' ? 'Create a new code' : 'Create transfer code'}</button>
         </section>
 
         <section>
@@ -379,6 +399,10 @@
   .row { display: flex; gap: 8px; width: 100%; }
   .row input { flex: 1; }
   .transfer { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .tinfo .code { transition: opacity 400ms, text-decoration-color 400ms; }
+  .transfer:not(.done):not(.expired) .tinfo .code { text-decoration: line-through transparent; }
+  .transfer.done .tinfo .code, .transfer.expired .tinfo .code { opacity: 0.35; text-decoration: line-through; }
+  .claimed { margin: 6px 0 2px; color: var(--speaking); font-weight: 700; }
   /* The code inside the diamond is ~70% of this: still larger than the old square QR. */
   .qr { width: 220px; height: 220px; flex: none; }
   .code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.08em; color: var(--accent); }

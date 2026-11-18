@@ -103,7 +103,13 @@
     <div class="member">
       <span class="dot" class:on={store.online.has(u.id)}></span>
       <span class="nick">{u.nickname}{#if u.isAdmin}<span class="tag">admin</span>{/if}</span>
-      {#if codes[u.id]}<span class="tcode selectable">{codes[u.id].code} · <Countdown until={codes[u.id].expiresAt} /></span>{/if}
+      {#if codes[u.id]}
+        {#if store.transferClaimed?.expiresAt === codes[u.id].expiresAt}
+          <span class="tcode used">✓ Used on {store.transferClaimed.device}</span>
+        {:else}
+          <span class="tcode selectable">{codes[u.id].code} · <Countdown until={codes[u.id].expiresAt} /></span>
+        {/if}
+      {/if}
       {#if u.id !== store.me?.id}
         <button class="btn sm" onclick={() => transferFor(u.id)}>Transfer code</button>
         <button class="btn sm danger" onclick={() => kick(u.id, u.nickname)}>Remove</button>
@@ -154,4 +160,5 @@
   .sum { margin-left: auto; }
   pre { margin: 0; padding: 10px; max-height: 260px; overflow: auto; font-size: 11px; white-space: pre-wrap; }
   .err { color: var(--danger); }
+  .tcode.used { color: var(--speaking); font-weight: 650; }
 </style>

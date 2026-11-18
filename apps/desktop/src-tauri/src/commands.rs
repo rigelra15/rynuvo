@@ -101,6 +101,8 @@ impl Core {
             if let SessionEvent::Server(m) = &e {
                 music.on_server(m, crate::music::now_ms());
             }
+            // On Android, Firebase pushes do this (PushService), even with the app in the background.
+            #[cfg(not(target_os = "android"))]
             crate::notify::on_event(&app2, &e);
             let _ = app2.emit(EVENT, e);
         });
@@ -245,6 +247,35 @@ pub fn mark_read(core: State<'_, Core>, channel: Id, message: Id) {
 pub fn send_typing(core: State<'_, Core>, channel: Id) {
     if let Some(s) = core.session() {
         s.send_typing(channel);
+    }
+}
+
+/// What the phone needs to fetch its notifications when a push comes: where, and its push key.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushSetup {
+    pub server: String,
+    pub key: String,
+}
+
+/// Sign this phone up for push notifications with its Firebase token.
+#[tauri::command]
+pub async fn push_register(core: State<'_, Core>, token: String) -> CmdResult<PushSetup> {
+    let api = core.api()?;
+    let r = api.push_register(&token).await.map_err(err)?;
+    Ok(PushSetup { server: api.base(), key: r.key })
+}
+
+#[tauri::command]
+pub async fn push_unregister(core: State<'_, Core>) -> CmdResult<()> {
+    core.api()?.push_unregister().await.map_err(err)
+}
+
+/// The app went to the background (true) or came back (false).
+#[tauri::command]
+pub fn set_away(core: State<'_, Core>, away: bool) {
+    if let Some(s) = core.inner.lock().unwrap().session.as_ref() {
+        s.set_away(away);
     }
 }
 

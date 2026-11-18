@@ -9,3 +9,7 @@ disk_block_pct = 92
 max_upload_bytes = 5242880
 quota_gb = 400
 backups_keep = 7
+
+# Push notifications to Android phones with the app closed: a Firebase service account key (JSON) that
+# may send through Firebase Cloud Messaging. Leave out to turn pushes off.
+# fcm_service_account = "/etc/rynuvo/fcm.json"

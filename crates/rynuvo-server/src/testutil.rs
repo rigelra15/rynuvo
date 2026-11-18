@@ -34,6 +34,7 @@ impl TestApp {
             max_upload_bytes: 5_242_880,
             quota_gb: 400,
             backups_keep: 7,
+            fcm_service_account: None,
         };
         std::fs::create_dir_all(cfg.media_dir()).unwrap();
         let pool = db::open_pool("sqlite::memory:").await.unwrap();
@@ -48,6 +49,7 @@ impl TestApp {
             voice: voice.clone(),
             relay: relay.clone(),
             music: Default::default(),
+            push: crate::push::Push::recording(),
         };
         crate::stun::spawn_on(udp_sock, Some(relay));
         crate::music::wire::spawn(state.clone());

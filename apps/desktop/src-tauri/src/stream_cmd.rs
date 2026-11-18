@@ -49,10 +49,17 @@ pub async fn stream_self_check() -> Result<SelfCheck, String> {
 }
 
 #[tauri::command]
-pub async fn stream_go_live(core: State<'_, Core>, source_id: String, preset: String, cursor: Option<bool>) -> Result<(), String> {
+pub async fn stream_go_live(core: State<'_, Core>, source_id: String, preset: String, cursor: Option<bool>, audio: Option<bool>) -> Result<(), String> {
     let ctl = core.stream.clone();
     // Opening capture can wait on the OS (permission checks, ScreenCaptureKit setup).
-    tauri::async_runtime::spawn_blocking(move || ctl.go_live(&source_id, &preset, cursor.unwrap_or(true))).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || ctl.go_live_with(&source_id, &preset, cursor.unwrap_or(true), audio.unwrap_or(true))).await.map_err(|e| e.to_string())?
+}
+
+/// While live: switch what's shared, its quality, or its sound, without stopping.
+#[tauri::command]
+pub async fn stream_adjust(core: State<'_, Core>, source_id: Option<String>, preset: Option<String>, audio: Option<bool>, cursor: Option<bool>) -> Result<(), String> {
+    let ctl = core.stream.clone();
+    tauri::async_runtime::spawn_blocking(move || ctl.adjust(source_id.as_deref(), preset.as_deref(), audio, cursor.unwrap_or(true))).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -88,7 +95,7 @@ pub fn stream_unwatch(core: State<'_, Core>, user_id: Id) {
 
 #[tauri::command]
 pub fn stream_set_volume(core: State<'_, Core>, user_id: Id, volume: f32) {
-    core.stream.set_stream_volume(user_id, volume);
+    core.stream.set_stream_volume(user_id, volume.clamp(0.0, 1.0));
 }
 
 /// macOS: open System Settings at Screen Recording so the user can allow Rynuvo.

@@ -22,6 +22,7 @@ export type WsServerMsg =
   | { t: 'ready'; d: { me: User; users: User[]; channels: Channel[]; online: Id[]; mobile?: Id[]; lastSeen?: { userId: Id; at: number }[]; alerts: string[]; voice?: VoiceMember[]; streams?: StreamInfo[]; music?: MusicState[]; musicBot?: Id | null; reads?: ReadMark[] } }
   | { t: 'messageCreated'; d: Message }
   | { t: 'readUpdated'; d: { channelId: Id; lastRead: Id } }
+  | { t: 'transferClaimed'; d: { expiresAt: number; device: string } }
   | { t: 'messageUpdated'; d: Message }
   | { t: 'messageDeleted'; d: { id: Id; channelId: Id } }
   | { t: 'channelCreated'; d: Channel }
@@ -36,6 +37,7 @@ export type WsServerMsg =
   | { t: 'voiceMemberUpdated'; d: VoiceMember }
   | { t: 'voiceMemberLeft'; d: { userId: Id; channelId: Id } }
   | { t: 'voiceEnded'; d: { reason: string } }
+  | { t: 'voiceInvited'; d: { channelId: Id; from: Id } }
   | { t: 'streamStarted'; d: StreamInfo }
   | { t: 'streamStopped'; d: { userId: Id; channelId: Id } }
   | { t: 'streamViewer'; d: { streamer: Id; viewer: Id; codecs: string[]; key: string; joined: boolean } }

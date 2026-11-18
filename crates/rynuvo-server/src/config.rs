@@ -24,6 +24,9 @@ pub struct Config {
     /// Daily SQLite snapshots kept in `<data_dir>/backups`; 0 turns backups off.
     #[serde(default = "default_backups")]
     pub backups_keep: usize,
+    /// Firebase service account key (JSON) for push notifications to phones; unset = no pushes.
+    #[serde(default)]
+    pub fcm_service_account: Option<PathBuf>,
 }
 
 fn default_quota_gb() -> u64 {

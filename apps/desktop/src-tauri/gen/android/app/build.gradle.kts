@@ -48,6 +48,9 @@ android {
     }
     buildTypes {
         getByName("debug") {
+            // Same key as release when it's here, so a dev build installs over the real app
+            // (keeping the sign-in) instead of needing an uninstall first.
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true
@@ -99,6 +102,8 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
+    // Push notifications while the app is closed (see PushService).
+    implementation("com.google.firebase:firebase-messaging:26.0.2")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")

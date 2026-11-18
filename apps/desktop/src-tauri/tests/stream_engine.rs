@@ -174,6 +174,35 @@ async fn the_cursor_choice_reaches_the_capture() {
     assert_eq!(*seen.lock().unwrap(), vec![false, true]);
 }
 
+/// Switching window and quality while live: the capture restarts on the new source at the new size,
+/// the viewer stays connected and gets a key frame for the new picture.
+#[tokio::test(flavor = "multi_thread")]
+async fn switching_source_and_quality_while_live() {
+    let app = TestApp::spawn().await;
+    let u = app.user("Owner").await;
+    let ch = app.create_channel(&u.token, "voice", "Mabar").await.id;
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let (s2, inner) = (seen.clone(), synthetic());
+    let capture: StartCapture = Arc::new(move |src: &str, opts: CaptureOpts, v, a, e| {
+        s2.lock().unwrap().push((src.to_string(), opts.max_width));
+        inner(src, opts, v, a, e)
+    });
+    let a = peer_with(&app, "Dimas", ch, capture).await;
+    let b = peer(&app, "Ayu", ch).await;
+    a.stream.go_live("synthetic:0", "720p30", true).unwrap();
+    eventually("stream registered", 5, || app.state.voice.streams().iter().any(|s| s.user_id == a.user)).await;
+    let (aus, out) = collector();
+    b.stream.watch(a.user, vec!["h264".into()], out).unwrap();
+    eventually("frames", 10, || aus.lock().unwrap().len() >= 5).await;
+
+    a.stream.adjust(Some("synthetic:1"), Some("1080p60"), Some(false), true).unwrap();
+    let n = aus.lock().unwrap().len();
+    eventually("a key frame for the new picture", 10, || aus.lock().unwrap()[n..].iter().any(|au| is_key(au))).await;
+    assert_eq!(*seen.lock().unwrap(), vec![("synthetic:0".to_string(), 1280), ("synthetic:1".to_string(), 1920)]);
+    assert!(a.stream.is_live(), "still live: nobody had to start over");
+    a.stream.stop_live();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn viewer_join_gets_keyframe() {
     let app = TestApp::spawn().await;

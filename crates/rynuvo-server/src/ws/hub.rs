@@ -26,6 +26,10 @@ struct Conn {
     user_id: i64,
     is_admin: bool,
     mobile: bool,
+    /// The device signed in on this connection (0 until set).
+    device_id: i64,
+    /// The app is in the background: it may be frozen soon, so treat it as gone for notifications.
+    away: bool,
     tx: mpsc::Sender<Outgoing>,
     kill: watch::Sender<bool>,
 }
@@ -79,9 +83,27 @@ impl Hub {
         let before = status_of(&g.conns, user_id);
         g.next_id += 1;
         let id = g.next_id;
-        g.conns.push(Conn { id, user_id, is_admin, mobile, tx, kill: kill_tx });
+        g.conns.push(Conn { id, user_id, is_admin, mobile, device_id: 0, away: false, tx, kill: kill_tx });
         let after = status_of(&g.conns, user_id);
         Registered { id, rx, kill, before, after }
+    }
+
+    pub fn set_device(&self, conn_id: u64, device_id: i64) {
+        if let Some(c) = self.inner.lock().unwrap().conns.iter_mut().find(|c| c.id == conn_id) {
+            c.device_id = device_id;
+        }
+    }
+
+    pub fn set_away(&self, conn_id: u64, away: bool) {
+        if let Some(c) = self.inner.lock().unwrap().conns.iter_mut().find(|c| c.id == conn_id) {
+            c.away = away;
+        }
+    }
+
+    /// Devices with the app open (connected and not in the background): they see things in the app,
+    /// so they don't need a push.
+    pub fn active_devices(&self) -> Vec<i64> {
+        self.inner.lock().unwrap().conns.iter().filter(|c| !c.away && c.device_id != 0).map(|c| c.device_id).collect()
     }
 
     /// Remove a connection. Returns its user and that user's status before and after.
@@ -127,6 +149,11 @@ impl Hub {
 
     pub fn broadcast_except(&self, user_id: i64, msg: WsServerMsg) {
         self.send_where(Outgoing::Msg(msg), |c| c.user_id != user_id);
+    }
+
+    /// To every connection of `user_id`.
+    pub fn send_to_user(&self, user_id: i64, msg: WsServerMsg) {
+        self.send_where(Outgoing::Msg(msg), |c| c.user_id == user_id);
     }
 
     /// To my other connections (another device of mine), not the one that caused it.

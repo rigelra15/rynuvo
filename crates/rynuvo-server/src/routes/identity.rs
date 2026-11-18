@@ -175,20 +175,25 @@ async fn update_me(State(st): State<AppState>, au: AuthUser, Json(req): Json<Pro
 
 async fn claim_transfer(State(st): State<AppState>, Json(req): Json<ClaimTransferReq>) -> AppResult<Json<JoinResp>> {
     let h = auth::code_hash(&req.code);
-    let user_id: Option<i64> = sqlx::query_scalar(
-        "UPDATE transfer_codes SET used = 1 WHERE code_hash = ? AND used = 0 AND expires_at > ? RETURNING user_id",
+    let claimed: Option<(i64, i64)> = sqlx::query_as(
+        "UPDATE transfer_codes SET used = 1 WHERE code_hash = ? AND used = 0 AND expires_at > ? RETURNING user_id, expires_at",
     )
     .bind(&h[..])
     .bind(now_ms())
     .fetch_optional(&st.db)
     .await?;
     let invalid = || AppError::Coded(axum::http::StatusCode::FORBIDDEN, "invalid_code", "Transfer code is wrong or expired".into());
-    let user_id = user_id.ok_or_else(invalid)?;
+    let (user_id, code_expires_at) = claimed.ok_or_else(invalid)?;
     let user: Option<(i64, String, bool, Option<String>, Option<String>, Option<String>)> = sqlx::query_as("SELECT id, nickname, is_admin, avatar_icon, avatar_color, avatar_image FROM users WHERE id = ? AND removed_at IS NULL")
         .bind(user_id)
         .fetch_optional(&st.db)
         .await?;
     let (id, nickname, is_admin, avatar_icon, avatar_color, avatar_image) = user.ok_or_else(invalid)?;
     let token = issue_device(&st.db, id, &req.device_name).await?;
+    // The device showing the code closes it: "Signed in on Android".
+    let device: String = req.device_name.trim().chars().take(64).collect();
+    st.hub.send_to_user(id, WsServerMsg::TransferClaimed { expires_at: code_expires_at, device: device.clone() });
+    // An admin may have made the code for this user from the admin panel.
+    st.hub.send_to_admins(WsServerMsg::TransferClaimed { expires_at: code_expires_at, device });
     Ok(Json(JoinResp { token, user: User { id, nickname, is_admin, avatar_icon, avatar_color, avatar_image } }))
 }

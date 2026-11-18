@@ -68,6 +68,9 @@ struct Shared {
     recent: HashMap<Id, std::collections::VecDeque<Id>>,
     /// Where binary frames from the server go (the voice link's WebSocket downlink).
     binary_sink: Option<mpsc::UnboundedSender<Vec<u8>>>,
+    /// The app is in the background (phones): told again after every reconnect, so the server
+    /// keeps sending push notifications to this device meanwhile.
+    away: bool,
 }
 
 impl Shared {
@@ -138,6 +141,12 @@ impl SessionHandle {
     /// The UI loaded `channel` up to `last_id`; future gaps in it are caught up on reconnect.
     pub fn mark_loaded(&self, channel: Id, last_id: Id) {
         self.shared.lock().unwrap().track(channel, last_id);
+    }
+
+    /// The app went to the background, or came back.
+    pub fn set_away(&self, away: bool) {
+        self.shared.lock().unwrap().away = away;
+        let _ = self.out.send(WsClientMsg::Away { away });
     }
 
     /// Queue any client message (sent once the connection is ready).
@@ -334,6 +343,10 @@ async fn connect_once(
                             WsServerMsg::Ready { .. } => {
                                 ready_seen = true;
                                 *attempt = 0;
+                                let away = shared.lock().unwrap().away;
+                                if away && !send_in_time(&mut ws, WsMsg::text(serde_json::to_string(&WsClientMsg::Away { away }).unwrap())).await {
+                                    return Ok(End::Retry);
+                                }
                                 emit(SessionEvent::Server(m));
                                 emit(SessionEvent::Conn(ConnState::Online));
                                 catch_up(api, emit, shared).await;

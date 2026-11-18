@@ -204,7 +204,12 @@ struct ViewerConn {
 
 struct BInner {
     net: Net,
-    preset: Preset,
+    /// Can change while live (the streamer picks another quality).
+    preset: Mutex<Preset>,
+    /// Send the shared screen's sound (the streamer can switch it off while live).
+    audio_on: AtomicBool,
+    /// The capture runs at the relay cap (a viewer is on the server path).
+    capped: AtomicBool,
     viewers: Mutex<HashMap<Id, ViewerConn>>,
     force_key: AtomicBool,
     /// A key frame is due at this time (once the rotated stream key is in use).
@@ -216,6 +221,10 @@ struct BInner {
 }
 
 impl BInner {
+    fn preset(&self) -> Preset {
+        *self.preset.lock().unwrap()
+    }
+
     fn scope(&self) -> Scope {
         Scope::Stream(self.net.me)
     }
@@ -262,14 +271,24 @@ impl BInner {
 pub struct Broadcast {
     inner: Arc<BInner>,
     capture: Arc<Mutex<Option<Stopper>>>,
+    /// What to capture: swapped to share another window or screen without ending the stream.
+    source: Arc<Mutex<CaptureFn>>,
+    /// Stop the capture and start it again from `source` at the current preset.
+    restart: Arc<dyn Fn(bool) + Send + Sync>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Broadcast {
     pub fn start(start_capture: CaptureFn, preset: Preset, net: Net, events: EventSink) -> Result<Broadcast, String> {
+        Self::start_with(start_capture, preset, true, net, events)
+    }
+
+    pub fn start_with(start_capture: CaptureFn, preset: Preset, audio_on: bool, net: Net, events: EventSink) -> Result<Broadcast, String> {
         let inner = Arc::new(BInner {
             net,
-            preset,
+            preset: Mutex::new(preset),
+            audio_on: AtomicBool::new(audio_on),
+            capped: AtomicBool::new(false),
             viewers: Mutex::new(HashMap::new()),
             force_key: AtomicBool::new(true),
             key_at: Mutex::new(None),
@@ -296,7 +315,7 @@ impl Broadcast {
                 }
             }
         });
-        let opts = move |capped: bool| {
+        let opts = |preset: Preset, capped: bool| {
             let (w, h) = if capped { (preset.width.min(RELAY_MAX.0), preset.height.min(RELAY_MAX.1)) } else { (preset.width, preset.height) };
             CaptureOpts { max_width: w, max_height: h, fps: if capped { preset.fps.min(RELAY_FPS) } else { preset.fps }, cursor: true }
         };
@@ -304,27 +323,59 @@ impl Broadcast {
             // My stream key, made now so the first frame can be sealed; sent to each viewer on join.
             k.lock().unwrap().share_current(&inner.scope(), &[], Instant::now());
         }
-        let stopper = start_capture(opts(false), video.clone(), audio.clone(), ended.clone())?;
+        let stopper = start_capture(opts(preset, false), video.clone(), audio.clone(), ended.clone())?;
         let capture = Arc::new(Mutex::new(Some(stopper)));
-        let (i2, c2, i4) = (inner.clone(), capture.clone(), inner.clone());
+        let source = Arc::new(Mutex::new(start_capture));
+        let restart: Arc<dyn Fn(bool) + Send + Sync> = {
+            let (c2, src, weak) = (capture.clone(), source.clone(), Arc::downgrade(&inner));
+            Arc::new(move |capped: bool| {
+                if let Some(s) = c2.lock().unwrap().take() {
+                    s();
+                }
+                let Some(i) = weak.upgrade() else { return };
+                let start = src.lock().unwrap().clone();
+                match start(opts(i.preset(), capped), video.clone(), audio.clone(), ended.clone()) {
+                    // Stopped meanwhile: don't leave the new capture running.
+                    Ok(s) if i.stop.load(Ordering::Relaxed) => s(),
+                    Ok(s) => *c2.lock().unwrap() = Some(s),
+                    Err(e) => {
+                        tracing::warn!("stream: capture restart failed: {e}");
+                        (ended)(e); // ends the stream, reported once
+                    }
+                }
+                // Viewers need a fresh key frame for the new picture.
+                i.force_key.store(true, Ordering::Relaxed);
+            })
+        };
+        let (i2, r2) = (inner.clone(), restart.clone());
         let thread = std::thread::Builder::new()
             .name("rynuvo-encode".into())
-            .spawn(move || {
-                let restart = move |capped: bool| {
-                    if let Some(s) = c2.lock().unwrap().take() {
-                        s();
-                    }
-                    match start_capture(opts(capped), video.clone(), audio.clone(), ended.clone()) {
-                        // Stopped meanwhile: don't leave the new capture running.
-                        Ok(s) if i4.stop.load(Ordering::Relaxed) => s(),
-                        Ok(s) => *c2.lock().unwrap() = Some(s),
-                        Err(e) => tracing::warn!("stream: capture restart failed: {e}"),
-                    }
-                };
-                encode_loop(i2, frx, events, restart)
-            })
+            .spawn(move || encode_loop(i2, frx, events, move |c| r2(c)))
             .map_err(|e| e.to_string())?;
-        Ok(Broadcast { inner, capture, thread: Some(thread) })
+        Ok(Broadcast { inner, capture, source, restart, thread: Some(thread) })
+    }
+
+    /// Change what's shared, its quality, or its sound while live: viewers stay connected and get the
+    /// new picture after a moment. `None` keeps that part as it is.
+    pub fn reconfigure(&self, source: Option<CaptureFn>, preset: Option<Preset>, audio_on: Option<bool>) {
+        if let Some(a) = audio_on {
+            self.inner.audio_on.store(a, Ordering::Relaxed);
+        }
+        let mut again = false;
+        if let Some(p) = preset {
+            let mut cur = self.inner.preset.lock().unwrap();
+            if *cur != p {
+                *cur = p;
+                again = true;
+            }
+        }
+        if let Some(s) = source {
+            *self.source.lock().unwrap() = s;
+            again = true;
+        }
+        if again {
+            (self.restart)(self.inner.capped.load(Ordering::Relaxed));
+        }
     }
 
     /// The server paired a new viewer with me. Returns my stream key's envelopes for them (send in order).
@@ -453,7 +504,7 @@ fn audio_sink(inner: Arc<BInner>) -> AudioSink {
     drop(inner);
     Arc::new(move |pcm: &[f32]| {
         let Some(inner) = weak.upgrade() else { return };
-        if inner.viewers.lock().unwrap().is_empty() {
+        if !inner.audio_on.load(Ordering::Relaxed) || inner.viewers.lock().unwrap().is_empty() {
             return;
         }
         let mut st = state.lock().unwrap();
@@ -485,7 +536,8 @@ fn audio_sink(inner: Arc<BInner>) -> AudioSink {
 fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: EventSink, restart: impl Fn(bool)) {
     let mut enc: Option<Box<dyn VideoEncoder>> = None;
     let mut enc_size = (0, 0);
-    let mut rate = Controller::new(inner.preset.max_kbps);
+    let mut rate = Controller::new(inner.preset().max_kbps);
+    let mut enc_fps = 0;
     let mut kbps = 0;
     let mut frame_no: u32 = 0;
     let started = Instant::now();
@@ -540,13 +592,15 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
             relay_change = None;
         }
         let relay = relay_state;
-        let want_cap = relay && needs_restart_for_cap(inner.preset);
+        let preset = inner.preset();
+        let want_cap = relay && needs_restart_for_cap(preset);
         if want_cap != capped {
             capped = want_cap;
+            inner.capped.store(capped, Ordering::Relaxed);
             tracing::info!("stream: relay resolution cap {}", if capped { "on" } else { "off" });
             restart(capped);
         }
-        rate.set_max(if relay { inner.preset.max_kbps.min(RELAY_KBPS) } else { inner.preset.max_kbps });
+        rate.set_max(if relay { preset.max_kbps.min(RELAY_KBPS) } else { preset.max_kbps });
         if diag_at.elapsed() >= Duration::from_secs(1) {
             let secs = diag_at.elapsed().as_secs_f32();
             let captured = inner.captured.swap(0, Ordering::Relaxed);
@@ -581,7 +635,7 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
         if !fresh && !idle && !(force && last.is_some()) {
             continue;
         }
-        let max_fps = if relay { inner.preset.fps.min(RELAY_FPS) } else { inner.preset.fps };
+        let max_fps = if relay { preset.fps.min(RELAY_FPS) } else { preset.fps };
         if fresh && !force && too_soon(last_taken.map(|t| t.elapsed()), max_fps) {
             continue;
         }
@@ -590,11 +644,11 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
         let refs: Vec<&[Codec]> = codecs.iter().map(|c| c.as_slice()).collect();
         let codec = encode::negotiate(&encode::available(), &refs);
         let size = frame.size();
-        if enc.as_ref().is_none_or(|e| e.codec() != codec) || enc_size != size {
+        if enc.as_ref().is_none_or(|e| e.codec() != codec) || enc_size != size || enc_fps != preset.fps {
             kbps = rate.target_kbps();
-            enc = match encode::open(codec, size.0, size.1, inner.preset.fps, kbps).or_else(|e| {
+            enc = match encode::open(codec, size.0, size.1, preset.fps, kbps).or_else(|e| {
                 tracing::warn!("stream: {e}; using H.264");
-                encode::open(Codec::H264, size.0, size.1, inner.preset.fps, kbps)
+                encode::open(Codec::H264, size.0, size.1, preset.fps, kbps)
             }) {
                 Ok(e) => Some(e),
                 Err(e) => {
@@ -605,6 +659,7 @@ fn encode_loop(inner: Arc<BInner>, frames: smpsc::Receiver<Frame>, events: Event
                 }
             };
             enc_size = size;
+            enc_fps = preset.fps;
             inner.force_key.store(true, Ordering::Relaxed);
         }
         let e = enc.as_mut().unwrap();

@@ -21,6 +21,9 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.nnnoiseless]
 opt-level = 3
+# Captions: whisper.cpp built for debug (its CMake follows this) is far too slow to keep up.
+[profile.dev.package.whisper-rs-sys]
+opt-level = 3
 
 # macOS 27 beta's `strip` corrupts large proc-macro dylibs (sqlx-macros: "mis-aligned LINKEDIT
 # string pool"), and release builds strip debuginfo by default. Don't strip build-time artifacts.

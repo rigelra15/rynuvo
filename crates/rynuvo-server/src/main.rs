@@ -73,6 +73,13 @@ async fn serve(cfg: Config) -> anyhow::Result<()> {
         voice: voice.clone(),
         relay: relay.clone(),
         music: Default::default(),
+        push: match &cfg.fcm_service_account {
+            Some(f) => rynuvo_server::push::Push::fcm(f).inspect(|_| tracing::info!("push notifications on")).unwrap_or_else(|e| {
+                tracing::error!("push notifications off, the Firebase key didn't load: {e:#}");
+                Default::default()
+            }),
+            None => Default::default(),
+        },
     };
     relay.quota.set_limit(cfg.quota_gb.saturating_mul(1_000_000_000));
     rynuvo_server::quota::spawn(state.db.clone(), relay.quota.clone(), state.hub.clone()).await;

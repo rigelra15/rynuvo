@@ -12,7 +12,7 @@
   const channel = $derived(store.channels.find((c) => c.id === member?.channelId))
   const isMe = $derived(userId === store.me?.id)
   const canKick = $derived(!isMe && !!channel && store.canManage(channel))
-  let pct = $state(Math.round((store.volumes.get(userId) ?? 1) * 100))
+  let pct = $state(Math.min(100, Math.round((store.volumes.get(userId) ?? 1) * 100)))
 
   function change() {
     store.setVolume(userId, pct / 100)
@@ -43,7 +43,7 @@
   {#if !isMe}
     <label>
       <span>User volume <b>{pct}%</b></span>
-      <Slider bind:value={pct} max={200} step={1} label="User volume" oninput={change} />
+      <Slider bind:value={pct} max={100} step={1} label="User volume" oninput={change} />
     </label>
   {/if}
   {#if !isMe && store.inVoice(member?.channelId ?? -1)}<button onclick={verify}>Verify…</button>{/if}

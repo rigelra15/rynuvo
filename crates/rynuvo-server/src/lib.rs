@@ -6,6 +6,7 @@ pub mod db;
 pub mod disk;
 pub mod error;
 pub mod music;
+pub mod push;
 pub mod quota;
 pub mod routes;
 pub mod stun;

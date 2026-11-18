@@ -119,7 +119,7 @@ async fn muted_engine_sends_nothing() {
 async fn deafened_engine_outputs_silence() {
     let r = rig(0.5, false).await;
     r.engine.set_deafened(true);
-    r.engine.play_tone(Tone::Join);
+    // (The app's own chimes still play while deafened; that's the mixer's own test.)
     let mut got = 0usize;
     let mut peak = 0f32;
     let end = Instant::now() + Duration::from_millis(600);

@@ -13,6 +13,7 @@ pub struct AppState {
     pub voice: VoiceRooms,
     pub relay: Relay,
     pub music: crate::music::wire::MusicRooms,
+    pub push: crate::push::Push,
 }
 
 pub fn build_router(state: AppState) -> Router {

@@ -43,9 +43,11 @@ pub fn voice_set_deafened(core: State<'_, Core>, deafened: bool) -> MyVoice {
 
 #[tauri::command]
 pub fn voice_set_volume(core: State<'_, Core>, prefs: State<'_, PrefsStore>, user_id: Id, volume: f32) {
+    // 100% is the most: louder only distorted.
+    let volume = volume.clamp(0.0, 1.0);
     core.voice.set_volume(user_id, volume);
     prefs.update(|p| {
-        p.volumes.insert(user_id, volume.clamp(0.0, 2.0));
+        p.volumes.insert(user_id, volume);
     });
 }
 
@@ -114,6 +116,12 @@ pub async fn voice_mic_test(core: State<'_, Core>, on: bool) -> Result<(), Strin
 #[tauri::command]
 pub fn voice_kick(core: State<'_, Core>, user_id: Id) {
     core.voice.kick(user_id);
+}
+
+/// "Come hang out": ask these people to the room I'm in.
+#[tauri::command]
+pub fn voice_invite(core: State<'_, Core>, to: Vec<Id>) {
+    core.voice.invite(to);
 }
 
 /// Tauri event the UI listens to for "re-read the call's verification data".

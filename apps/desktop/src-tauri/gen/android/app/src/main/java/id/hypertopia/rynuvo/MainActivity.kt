@@ -16,7 +16,12 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import com.google.firebase.messaging.FirebaseMessaging
 import java.io.File
+import org.json.JSONObject
 
 class MainActivity : TauriActivity() {
   // Back closes the open chat/room (web history); on the list it sends Rynuvo to the background
@@ -38,6 +43,35 @@ class MainActivity : TauriActivity() {
     webView.addJavascriptInterface(Bridge(), "RynuvoAndroid")
     // Buttons on the call notification go to the page, which owns the call.
     CallService.onAction = { a -> webView.post { webView.evaluateJavascript("window.__rynuvoCall && window.__rynuvoCall('$a')", null) } }
+    // A new Firebase token: the page signs this phone up with it.
+    PushService.onToken = { t -> webView.post { webView.evaluateJavascript("window.__rynuvoPushToken && window.__rynuvoPushToken(${JSONObject.quote(t)})", null) } }
+  }
+
+  /** A chat or room a notification asked to open; the page takes it (now, or once it's up). */
+  @Volatile private var pendingOpen: Long = 0
+
+  private fun takeIntent(i: Intent?) {
+    val ch = i?.getLongExtra(PushService.EXTRA_CHANNEL, 0) ?: 0
+    if (ch == 0L) return
+    i?.removeExtra(PushService.EXTRA_CHANNEL)
+    pendingOpen = ch
+    web?.post { web?.evaluateJavascript("window.__rynuvoOpen && window.__rynuvoOpen($ch)", null) }
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    takeIntent(intent)
+  }
+
+  override fun onResume() {
+    super.onResume()
+    PushService.foreground = true
+    PushService.clearAll(this)
+  }
+
+  override fun onPause() {
+    PushService.foreground = false
+    super.onPause()
   }
 
   override fun onDestroy() {
@@ -54,9 +88,21 @@ class MainActivity : TauriActivity() {
     requestedOrientation = if (locked) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_FULL_USER
   }
 
+  /** A stream full screen: the status and navigation bars get out of the way (a swipe brings them back). */
+  private fun immersive(on: Boolean) {
+    val c = WindowCompat.getInsetsController(window, window.decorView)
+    if (on) {
+      c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+      c.hide(WindowInsetsCompat.Type.systemBars())
+    } else c.show(WindowInsetsCompat.Type.systemBars())
+  }
+
   inner class Bridge {
     @JavascriptInterface
-    fun setFreeRotation(free: Boolean) = runOnUiThread { lockUpright(!free) }
+    fun setFreeRotation(free: Boolean) = runOnUiThread {
+      lockUpright(!free)
+      immersive(free)
+    }
 
     /** In a call: show (or update) the call notification. */
     @JavascriptInterface
@@ -104,6 +150,36 @@ class MainActivity : TauriActivity() {
       }
     }
 
+    /** This phone's Firebase token ("" until Firebase has one; it then comes to window.__rynuvoPushToken). */
+    @JavascriptInterface
+    fun pushToken(): String {
+      val saved = PushService.prefs(this@MainActivity).getString("token", null)
+      if (saved != null) return saved
+      runCatching {
+        FirebaseMessaging.getInstance().token.addOnSuccessListener { t ->
+          PushService.prefs(this@MainActivity).edit().putString("token", t).apply()
+          PushService.onToken?.invoke(t)
+        }
+      }
+      return ""
+    }
+
+    /** Signed up: where notifications are fetched from, and the key for it. */
+    @JavascriptInterface
+    fun pushSetup(server: String, key: String) = PushService.setup(this@MainActivity, server, key)
+
+    /** Signed out: no more notifications on this phone. */
+    @JavascriptInterface
+    fun pushClear() = PushService.clearSetup(this@MainActivity)
+
+    /** The chat or room a tapped notification is for (0: none), once. */
+    @JavascriptInterface
+    fun takeOpen(): Long {
+      val ch = pendingOpen
+      pendingOpen = 0
+      return ch
+    }
+
     /** Open the system installer on a downloaded update (Android asks the user to confirm). */
     @JavascriptInterface
     fun installApk(path: String): Boolean {
@@ -124,6 +200,7 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     lockUpright(true)
+    takeIntent(intent)
     // Permissions are asked for once the splash has gone (the page calls requestPermissions), so the
     // system dialogs don't cover the opening.
   }

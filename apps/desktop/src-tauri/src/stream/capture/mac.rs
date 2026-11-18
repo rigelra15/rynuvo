@@ -152,7 +152,15 @@ pub fn start(source_id: &str, opts: CaptureOpts, video: VideoSink, audio: AudioS
         .with_channel_count(2);
     let on_error = screencapturekit::stream::ErrorHandler::new(move |e| {
         tracing::warn!("capture stopped: {e}");
-        ended(if is_window { "The shared window was closed".into() } else { format!("Screen capture stopped ({e})") });
+        let why = e.to_string();
+        ended(if is_window {
+            "The shared window was closed".into()
+        } else if why.contains("No capture source") || why.contains("displays or windows") {
+            // macOS lost the display: it slept or locked, or a monitor was unplugged or rearranged.
+            "Screen sharing stopped: the screen went to sleep, locked, or was disconnected. Share it again when it's back.".into()
+        } else {
+            format!("Screen capture stopped ({e})")
+        });
     });
     let mut stream = SCStream::new_with_delegate(&filter, &config, on_error).map_err(|e| format!("{e:?}"))?;
     let h1 = Handler { video: video.clone(), audio: audio.clone() };

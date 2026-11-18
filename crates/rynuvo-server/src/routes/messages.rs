@@ -88,6 +88,11 @@ fn clean_content(raw: &str) -> AppResult<String> {
 }
 
 async fn create(State(st): State<AppState>, au: AuthUser, Path(ch): Path<i64>, Json(req): Json<PostMessageReq>) -> AppResult<Json<Message>> {
+    post(&st, au.user.id, ch, req).await.map(Json)
+}
+
+/// Post `req` as `user` in text channel `ch` (also how a reply from a notification arrives).
+pub async fn post(st: &AppState, user: i64, ch: i64, req: PostMessageReq) -> AppResult<Message> {
     let channel = load_channel(&st.db, ch).await?.ok_or(AppError::NotFound)?;
     if channel.kind != ChannelKind::Text {
         return Err(AppError::BadRequest("Can't send messages to a voice channel".into()));
@@ -101,7 +106,7 @@ async fn create(State(st): State<AppState>, au: AuthUser, Path(ch): Path<i64>, J
     }
     let id: i64 = sqlx::query_scalar("INSERT INTO messages(channel_id, author_id, content, image_id, created_at) VALUES(?, ?, ?, ?, ?) RETURNING id")
         .bind(ch)
-        .bind(au.user.id)
+        .bind(user)
         .bind(&content)
         .bind(&req.image_id)
         .bind(now_ms())
@@ -109,9 +114,10 @@ async fn create(State(st): State<AppState>, au: AuthUser, Path(ch): Path<i64>, J
         .await?;
     let m = load_message(&st.db, id).await?.ok_or(AppError::NotFound)?;
     // What I write I've read: my own message never leaves a channel unread for me.
-    crate::ws::mark_read(&st, au.user.id, ch, id).await;
+    crate::ws::mark_read(st, user, ch, id).await;
     st.hub.broadcast(WsServerMsg::MessageCreated(m.clone()));
-    Ok(Json(m))
+    tokio::spawn(crate::push::message(st.clone(), m.clone()));
+    Ok(m)
 }
 
 async fn edit(State(st): State<AppState>, au: AuthUser, Path(id): Path<i64>, Json(req): Json<EditMessageReq>) -> AppResult<Json<Message>> {

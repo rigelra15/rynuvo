@@ -30,8 +30,13 @@ pub fn list() -> DeviceList {
                 return Vec::new();
             }
         };
-        let mut v: Vec<String> = it.map(|d| d.to_string()).collect();
-        v.dedup();
+        // Android can list the same part twice under one name (two built-in mics): once is enough.
+        let mut v: Vec<String> = Vec::new();
+        for n in it.map(|d| d.to_string()) {
+            if !v.contains(&n) {
+                v.push(n);
+            }
+        }
         v
     };
     DeviceList {

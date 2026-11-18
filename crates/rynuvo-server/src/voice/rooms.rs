@@ -87,6 +87,8 @@ pub struct Joined {
 #[derive(Clone, Default)]
 pub struct VoiceRooms {
     inner: Arc<Mutex<Vec<Member>>>,
+    /// When each (from, to) invite was last sent, so tapping Invite again can't spam someone.
+    invites: Arc<Mutex<std::collections::HashMap<(Id, Id), i64>>>,
 }
 
 fn new_session(taken: &[Member]) -> u32 {
@@ -161,6 +163,17 @@ impl VoiceRooms {
 
     pub fn members(&self) -> Vec<VoiceMember> {
         self.inner.lock().unwrap().iter().map(Member::public).collect()
+    }
+
+    /// Whether `from` may invite `to` now (at most once per `gap_ms`); records it when so.
+    pub fn may_invite(&self, from: Id, to: Id, now: i64, gap_ms: i64) -> bool {
+        let mut g = self.invites.lock().unwrap();
+        g.retain(|_, at| now - *at < gap_ms);
+        if g.contains_key(&(from, to)) {
+            return false;
+        }
+        g.insert((from, to), now);
+        true
     }
 
     pub fn member(&self, user_id: Id) -> Option<Member> {
