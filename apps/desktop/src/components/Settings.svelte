@@ -18,6 +18,8 @@
   import VoiceSettings from './VoiceSettings.svelte'
   import { updater } from '../lib/updater.svelte'
   import { isAndroid, isMobile } from '../lib/platform'
+  import { bubble } from '../lib/bubble.svelte'
+  import { overlayEnabled, setOverlayEnabled } from '../lib/overlay'
   import { updateStatus, type CheckResult } from '../lib/update'
 
   let { onClose }: { onClose: () => void } = $props()
@@ -338,6 +340,22 @@
               <button class="btn" onclick={() => void api.openCaptureSettings()}>Open Screen Recording settings</button>
             {/if}
           {/if}
+        </section>
+        {/if}
+
+        {#if !isMobile}
+        <section>
+          <h3>Call overlay</h3>
+          <label class="chk"><input type="checkbox" checked={overlayEnabled()} onchange={(e) => setOverlayEnabled(e.currentTarget.checked)} /> Show who's talking over games</label>
+          <p class="note">While you're in a room and playing, a small panel shows on top of the game (windowed or borderless; not exclusive full screen). Clicks pass through it; press {navigator.userAgent.includes('Mac') ? '⌘⇧O' : 'Ctrl+Shift+O'} to use its buttons or move it.</p>
+        </section>
+        {/if}
+
+        {#if bubble.status}
+        <section>
+          <h3>Call bubble</h3>
+          <label class="chk"><input type="checkbox" checked={bubble.status === 'on'} onchange={(e) => bubble.set(e.currentTarget.checked)} /> Float the call over other apps</label>
+          <p class="note">While you're in a room and switch to another app, a bubble shows who's talking, with mute and leave.{#if bubble.status === 'permission'} Android asks you to allow Rynuvo to display over other apps.{/if}</p>
         </section>
         {/if}
 

@@ -2,7 +2,7 @@
   import HomeView from './components/HomeView.svelte'
   import Welcome from './components/Welcome.svelte'
   import { markWelcomed, permissions, welcomed } from './lib/permissions.svelte'
-  import { isAndroid } from './lib/platform'
+  import { isAndroid, isMobile } from './lib/platform'
   import Splash from './components/Splash.svelte'
   import { onMount, untrack } from 'svelte'
   import ChannelMenu from './components/ChannelMenu.svelte'
@@ -23,6 +23,8 @@
   import { layout } from './lib/layout.svelte'
   import { pane } from './lib/pane.svelte'
   import { callNotice } from './lib/callNotice'
+  import { bubble } from './lib/bubble.svelte'
+  import { overlay } from './lib/overlay'
   import { startPush } from './lib/push'
   import { tick } from 'svelte'
   import type { Channel, ChannelKind, Id } from './lib/types'
@@ -191,9 +193,17 @@
 
   // Android: the call notification follows my call (room, mute, deafen) and keeps it alive in the background.
   const syncCall = callNotice(store)
+  bubble.init()
   $effect(() => {
+    // (It reads the room's people and who's talking too, so it reruns on those.)
     void [store.myVoice.channelId, store.myVoice.muted, store.myVoice.deafened, store.channels]
     syncCall?.()
+  })
+
+  // Desktop: the call overlay over other apps while Rynuvo is in the background.
+  const syncOverlay = isMobile ? null : overlay(store)
+  $effect(() => {
+    syncOverlay?.()
   })
 
   $effect(() => {

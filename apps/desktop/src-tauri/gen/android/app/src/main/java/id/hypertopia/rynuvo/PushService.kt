@@ -128,26 +128,7 @@ class PushService : FirebaseMessagingService() {
   }.getOrNull()
 
   /** A file from the server (with the push key), kept in the cache after the first time. */
-  private fun cached(dir: String, name: String, path: String, server: String, key: String): File? {
-    val d = File(cacheDir, dir).apply { mkdirs() }
-    val f = File(d, name.filter { it.isLetterOrDigit() })
-    if (f.exists()) return f
-    return runCatching {
-      val c = URL("$server/api/v1$path").openConnection() as HttpURLConnection
-      c.connectTimeout = 8000
-      c.readTimeout = 10000
-      c.setRequestProperty("x-push-key", key)
-      try {
-        if (c.responseCode != 200) return@runCatching null
-        val tmp = File(d, "${f.name}.part")
-        c.inputStream.use { inp -> tmp.outputStream().use { inp.copyTo(it) } }
-        tmp.renameTo(f)
-        f
-      } finally {
-        c.disconnect()
-      }
-    }.getOrNull()
-  }
+  private fun cached(dir: String, name: String, path: String, server: String, key: String): File? = Faces.cached(this, dir, name, path, server, key)
 
   /** A message's picture, shared with the notification shade (which shows it in the conversation). */
   private fun picture(n: JSONObject, server: String, key: String): android.net.Uri? {
@@ -161,16 +142,7 @@ class PushService : FirebaseMessagingService() {
   }
 
   /** One person's face (photo or initial), by their details in a note. */
-  private fun faceOf(p: JSONObject, server: String, key: String): Bitmap {
-    val photo = p.optString("avatar").takeIf { it.isNotEmpty() && it != "null" }
-    if (photo != null) {
-      val f = cached("faces", photo, "/push/avatar/${p.optLong("id")}", server, key)
-      val bmp = f?.let { runCatching { decodeSmall(it) }.getOrNull() }
-      if (bmp != null) return round(bmp)
-    }
-    val color = runCatching { Color.parseColor(p.optString("color")) }.getOrNull() ?: Color.parseColor("#8B7FD1")
-    return initial(p.optString("name"), color)
-  }
+  private fun faceOf(p: JSONObject, @Suppress("UNUSED_PARAMETER") server: String, @Suppress("UNUSED_PARAMETER") key: String): Bitmap = Faces.of(this, p)
 
   /** Faces side by side, each over the last, ringed in the lamp's amber; "+N" past four. */
   private fun pile(people: JSONArray, server: String, key: String): Bitmap {
@@ -338,28 +310,6 @@ class PushService : FirebaseMessagingService() {
     server, key,
   )
 
-  private fun decodeSmall(f: File): Bitmap? {
-    val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(f.path, o)
-    var s = 1
-    while (o.outWidth / (s * 2) >= 192 && o.outHeight / (s * 2) >= 192) s *= 2
-    return BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = s })
-  }
-
-  /** Centre-cropped into a circle. */
-  private fun round(src: Bitmap): Bitmap {
-    val size = minOf(src.width, src.height, 192)
-    val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val c = Canvas(out)
-    val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    c.drawOval(RectF(0f, 0f, size.toFloat(), size.toFloat()), p)
-    p.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-    val side = minOf(src.width, src.height)
-    val from = Rect((src.width - side) / 2, (src.height - side) / 2, (src.width + side) / 2, (src.height + side) / 2)
-    c.drawBitmap(src, from, Rect(0, 0, size, size), p)
-    return out
-  }
-
   /** A chat: the amber # on Rynuvo's dark, as in the app's list. */
   private fun chatIcon(): Bitmap {
     val size = 192
@@ -373,23 +323,6 @@ class PushService : FirebaseMessagingService() {
       textAlign = Paint.Align.CENTER
     }
     c.drawText("#", size / 2f, size / 2f - (t.descent() + t.ascent()) / 2, t)
-    return out
-  }
-
-  private fun initial(name: String, color: Int): Bitmap {
-    val size = 192
-    val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val c = Canvas(out)
-    c.drawOval(RectF(0f, 0f, size.toFloat(), size.toFloat()), Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color })
-    val letter = name.trim().take(1).uppercase()
-    val dark = (Color.red(color) * 299 + Color.green(color) * 587 + Color.blue(color) * 114) / 1000 > 150
-    val t = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      this.color = if (dark) Color.parseColor("#2A1A05") else Color.WHITE
-      textSize = size * 0.46f
-      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-      textAlign = Paint.Align.CENTER
-    }
-    c.drawText(letter, size / 2f, size / 2f - (t.descent() + t.ascent()) / 2, t)
     return out
   }
 

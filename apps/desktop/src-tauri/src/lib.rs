@@ -13,6 +13,29 @@ mod notify;
 pub mod prefs;
 pub mod stream;
 #[cfg(desktop)]
+mod game;
+#[cfg(desktop)]
+mod overlay;
+/// Phones have no overlay (Android has its own bubble).
+#[cfg(mobile)]
+mod overlay {
+    #[tauri::command]
+    pub fn overlay_show(show: bool) -> Result<(), String> {
+        let _ = show;
+        Ok(())
+    }
+    #[tauri::command]
+    pub fn overlay_fit(height: f64) {
+        let _ = height;
+    }
+    #[tauri::command]
+    pub fn overlay_lock() {}
+    #[tauri::command]
+    pub fn overlay_open() {}
+    #[tauri::command]
+    pub fn overlay_drag() {}
+}
+#[cfg(desktop)]
 mod tray;
 pub mod voice;
 mod voice_cmd;
@@ -45,9 +68,12 @@ pub fn run() {
                 .build(),
         )
         .manage(tray::Shortcuts::default())
+        .manage(overlay::Overlay::default())
         .on_window_event(|w, e| {
             // Closing the window keeps Rynuvo (and voice) running in the tray.
-            if let tauri::WindowEvent::CloseRequested { api, .. } = e {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = e
+                && w.label() == "main"
+            {
                 api.prevent_close();
                 let _ = w.hide();
             }
@@ -142,6 +168,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 tray::build(app.handle())?;
+                game::watch(app.handle().clone());
                 if let Err(e) = tray::register_shortcuts(app.handle(), &p) {
                     tracing::warn!("shortcuts: {e}");
                 }
@@ -224,6 +251,11 @@ pub fn run() {
             voice_cmd::e2ee_verify,
             voice_cmd::prefs_get,
             voice_cmd::prefs_set,
+            overlay::overlay_show,
+            overlay::overlay_fit,
+            overlay::overlay_lock,
+            overlay::overlay_open,
+            overlay::overlay_drag,
         ])
         .build(tauri::generate_context!())
         .expect("error while running Rynuvo")

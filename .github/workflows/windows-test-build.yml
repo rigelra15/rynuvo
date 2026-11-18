@@ -1,0 +1,67 @@
+# A Windows installer from a work branch, to try before a release: built on every push to
+# feat/mobile and kept as a run artifact (nothing is published).
+name: Windows test build
+
+on:
+  push:
+    branches: [feat/mobile]
+
+concurrency:
+  group: windows-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # Restores what main keeps warm (warm-cache.yml); a branch run never saves.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: desktop-x86_64-pc-windows-msvc
+          save-if: false
+
+      - name: Faster disk
+        shell: pwsh
+        continue-on-error: true
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
+      - name: Install frontend deps
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Tests (desktop crate, Windows parts)
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib game::
+
+      - name: Build
+        working-directory: apps/desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: pnpm tauri build --target x86_64-pc-windows-msvc --bundles nsis
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rynuvo-windows-test
+          path: target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 7

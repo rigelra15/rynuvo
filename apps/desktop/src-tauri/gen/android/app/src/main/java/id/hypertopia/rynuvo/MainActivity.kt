@@ -63,6 +63,17 @@ class MainActivity : TauriActivity() {
     takeIntent(intent)
   }
 
+  override fun onStart() {
+    super.onStart()
+    Bubble.appVisible(this, true)
+  }
+
+  override fun onStop() {
+    // Out of sight with a call on: the call floats over other apps.
+    Bubble.appVisible(this, false)
+    super.onStop()
+  }
+
   override fun onResume() {
     super.onResume()
     PushService.foreground = true
@@ -112,7 +123,29 @@ class MainActivity : TauriActivity() {
 
     /** Out of the call: the notification goes, and the app may be put to sleep again. */
     @JavascriptInterface
-    fun callHide() = runOnUiThread { CallService.hide(this@MainActivity) }
+    fun callHide() = runOnUiThread {
+      CallService.hide(this@MainActivity)
+      Bubble.end(this@MainActivity)
+    }
+
+    /** The call as the bubble shows it: room, my state, and who's in it (JSON). */
+    @JavascriptInterface
+    fun callBubble(json: String) = Bubble.update(this@MainActivity, json)
+
+    /** Who's talking right now: user ids, comma separated. */
+    @JavascriptInterface
+    fun callSpeaking(ids: String) = Bubble.speaking(ids)
+
+    /** The bubble: "on", "off", or "permission" (Android's "display over other apps" is off). */
+    @JavascriptInterface
+    fun bubbleStatus(): String = Bubble.status(this@MainActivity)
+
+    @JavascriptInterface
+    fun bubbleSet(on: Boolean) = runOnUiThread { Bubble.setEnabled(this@MainActivity, on) }
+
+    /** Android's "display over other apps" page for Rynuvo. */
+    @JavascriptInterface
+    fun bubbleAllow() = runOnUiThread { Bubble.askPermission(this@MainActivity) }
 
     /** The welcome screens: where one permission stands ("granted", "ask", or "blocked" when Android
      *  won't show its dialog again and only Settings can turn it on). `name` is "mic" or "notifications". */

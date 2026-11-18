@@ -17,7 +17,7 @@ pub struct TrayItems<R: Runtime> {
 
 /// The two registered shortcuts, to tell them apart in the handler.
 #[derive(Default)]
-pub struct Shortcuts(Mutex<Option<(Shortcut, Shortcut)>>);
+pub struct Shortcuts(Mutex<Option<(Shortcut, Shortcut, Option<Shortcut>)>>);
 
 pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     if let Some(w) = app.get_webview_window("main") {
@@ -90,12 +90,19 @@ pub fn register_shortcuts<R: Runtime>(app: &AppHandle<R>, p: &Prefs) -> Result<(
     if mute == deafen {
         return Err("Mute and deafen need different shortcuts".into());
     }
-    *app.state::<Shortcuts>().0.lock().unwrap() = Some((mute, deafen));
+    // The overlay's (fixed): if another app has it, the overlay just can't be clicked from the keyboard.
+    let overlay = crate::overlay::SHORTCUT.parse::<Shortcut>().ok().filter(|o| *o != mute && *o != deafen);
+    *app.state::<Shortcuts>().0.lock().unwrap() = Some((mute, deafen, overlay));
     for s in [mute, deafen] {
         if let Err(e) = gs.register(s) {
             tracing::warn!("register shortcut {s:?}: {e}");
             return Err(SHORTCUT_TAKEN.into());
         }
+    }
+    if let Some(o) = overlay
+        && let Err(e) = gs.register(o)
+    {
+        tracing::warn!("overlay shortcut: {e}");
     }
     Ok(())
 }
@@ -106,8 +113,9 @@ pub fn on_shortcut<R: Runtime>(app: &AppHandle<R>, s: &Shortcut, state: Shortcut
     }
     let pair = *app.state::<Shortcuts>().0.lock().unwrap();
     match pair {
-        Some((m, _)) if &m == s => toggle_mute(app),
-        Some((_, d)) if &d == s => toggle_deafen(app),
+        Some((m, _, _)) if &m == s => toggle_mute(app),
+        Some((_, d, _)) if &d == s => toggle_deafen(app),
+        Some((_, _, Some(o))) if &o == s => crate::overlay::toggle_interactive(app),
         _ => {}
     }
 }

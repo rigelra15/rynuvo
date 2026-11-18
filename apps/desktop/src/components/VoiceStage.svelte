@@ -18,6 +18,8 @@
   import AudioPicker from './AudioPicker.svelte'
   import CaptionsPicker from './CaptionsPicker.svelte'
   import CaptionsOverlay from './CaptionsOverlay.svelte'
+  import { bubble } from '../lib/bubble.svelte'
+  import { fly } from 'svelte/transition'
   import { captions } from '../lib/captions.svelte'
   import StreamView from './StreamView.svelte'
   import MusicPlayer from './MusicPlayer.svelte'
@@ -165,6 +167,14 @@
 
     <div class="dock-row">
       <CaptionsOverlay />
+      {#if joined && bubble.status === 'permission' && !bubble.hinted}
+        <!-- Android: once, the offer of the call bubble (it needs a permission only Settings gives). -->
+        <div class="hint" transition:fly={{ y: 8, duration: 180 }}>
+          <span>Keep the call at hand in other apps: a bubble with who's talking, mute and leave.</span>
+          <button class="hint-on" onclick={() => { bubble.set(true); bubble.hide() }}>Turn on</button>
+          <button class="hint-x" aria-label="Not now" onclick={() => bubble.hide()}><Icon name="close" size={14} /></button>
+        </div>
+      {/if}
       {#if store.voicePath === 'ws' || store.live}
         <p class="path">
           {#if store.live}You're live{#if store.live.viewers.length}<span class="eyes" title="{store.live.viewers.length} watching"><Icon name="eye" size={13} />{store.live.viewers.length}</span>{/if}{store.live.codec ? ` (${store.live.codec.toUpperCase()}${store.live.relay ? ', via server, 1080p30 cap' : ''})` : store.live.relay ? ' (via server, 1080p30 cap)' : ''}{/if}
@@ -275,6 +285,10 @@
 
   /* The call controls: one pill under the room, each button saying what it does. */
   .dock-row { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .hint { display: flex; align-items: center; gap: 10px; max-width: min(460px, calc(100vw - 32px)); padding: 8px 8px 8px 14px; border-radius: 16px; background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); font-size: 13px; color: var(--muted); }
+  .hint span { flex: 1; }
+  .hint-on { flex: none; padding: 7px 12px; border-radius: 999px; background: var(--accent); color: #2a1a05; font-weight: 700; font-size: 13px; }
+  .hint-x { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--muted); }
   .path { margin: 0; font-size: 12px; color: var(--faint); text-align: center; }
   .dock { display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 999px; background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line), 0 12px 30px rgba(0, 0, 0, 0.3); }
   .ctl {
