@@ -44,7 +44,8 @@
     ],
     "createUpdaterArtifacts": true,
     "macOS": {
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "minimumSystemVersion": "14.0"
     },
     "iOS": {
       "developmentTeam": "CM8AZJ6265"
